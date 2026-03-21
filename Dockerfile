@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 FROM php:8.3-apache
 
 # System deps
+=======
+>>>>>>> a03aafe901d1a7c9bf4323242c5e2b494f6d6f82
 RUN apt-get update && apt-get install -y \
     libmariadb-dev \
     libzip-dev \
@@ -21,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     gd \
     exif \
     && docker-php-ext-enable mysqli pdo_mysql \
+<<<<<<< HEAD
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Composer
@@ -49,3 +53,7 @@ ENV PORT 8080
 HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:$PORT/ || exit 1
 
 CMD ["./start-container.sh"]
+=======
+    && echo "extension=mysqli" > /usr/local/etc/php/conf.d/mysqli.ini \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+>>>>>>> a03aafe901d1a7c9bf4323242c5e2b494f6d6f82
