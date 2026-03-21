@@ -2,7 +2,31 @@
 // ─── Session + Cache + DB ─────────────────────────────────────────────────────
 require_once 'session_config.php';
 require_once 'cache_helper.php';
-include 'db_connection.php';
+
+// ── Safe DB include with error recovery ──────────────────────────────────────
+try {
+    include 'db_connection.php';
+} catch (Exception $e) {
+    error_log('DB Connection failed: ' . $e->getMessage());
+    http_response_code(503);
+?>
+    <!DOCTYPE html>
+    <html>
+
+    <head>
+        <title>Service Unavailable</title>
+    </head>
+
+    <body>
+        <h1>Service Temporarily Unavailable</h1>
+        <p>Database connection failed. Please check back soon.</p>
+        <p>Details: <?php echo htmlspecialchars($e->getMessage()); ?></p>
+    </body>
+
+    </html>
+<?php
+    exit;
+}
 
 require __DIR__ . '/vendor/autoload.php';
 

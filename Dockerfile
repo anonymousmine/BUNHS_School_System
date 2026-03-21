@@ -28,4 +28,8 @@ COPY . /app
 RUN composer install --optimize-autoloader --no-interaction
 
 EXPOSE 8080
+
+# Make start script executable
+RUN chmod +x start-container.sh
+
 CMD ["./start-container.sh"]
