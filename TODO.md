@@ -1,16 +1,15 @@
-# Settings Implementation Plan
+# Railway Deployment Fix - TODO
 
-## Overview
+task_progress Items:
 
-Make settings.php fully functional with persistence in JSON config.
+- [x] Step 1: Create .env.example and railway.json ✓
+- [x] Step 2: Update nixpacks.toml ✓
+- [x] Step 3: Update db_connection.php with mysqli check + safe wrapper ✓
+- [x] Step 4: Fix Dockerfile + create start-container.sh ✓
+- [x] Step 5: Add error handling in index.php ✓
+- [ ] Step 6: Local Docker test
+- [ ] Step 7: Railway deploy + verify
 
-## Steps
+## Next: Step 5
 
-1. ✅ Create `admin_account/config/settings.json` with defaults
-2. ✅ Create `admin_account/settings_api.php` (load/save/reset API)
-3. ✅ Update `admin_account/settings.php`:
-   - PHP: Load settings, output as data attr/JSON
-   - JS: AJAX to API, populate forms, save on change
-4. Integrate global settings (theme CSS vars)
-5. Test save/load across tabs
-6. Dynamic data (logs, stats from DB)
+index.php error handling wrapper.

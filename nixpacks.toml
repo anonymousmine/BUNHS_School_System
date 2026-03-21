@@ -19,10 +19,11 @@ cmds = [
 
 [phases.build]
 cmds = [
-  "php82 -m | grep mysqli",
-  "php82 -m | grep pdo_mysql"
+  "composer install --no-dev --optimize-autoloader --no-interaction",
+  "php82 -m | grep mysqli || (echo 'ERROR: mysqli extension missing!' && exit 1)",
+  "php82 -m | grep pdo_mysql || (echo 'ERROR: pdo_mysql extension missing!' && exit 1)",
+  "echo 'PHP extensions verified. Ready for deployment.'"
 ]
 
 [start]
-# If your files are in root, serve from root
-cmd = "php82 -S 0.0.0.0:$PORT -t ."
+cmd = "exec php82 -S 0.0.0.0:${PORT:-8080} -t ."
