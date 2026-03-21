@@ -15,5 +15,9 @@ fi
 php -m | grep -q mysqli || { echo "FATAL: mysqli extension not loaded!"; exit 1; }
 echo "✅ mysqli extension loaded"
 
-# Start FrankenPHP dev server on Railway PORT
-exec php-server -H 0.0.0.0 -p "${PORT:-8080}" -d variables_order=EGPCS .
+# Ensure PORT exists
+PORT=${PORT:-8080}
+echo "Starting server on port $PORT..."
+
+# Start FrankenPHP properly
+exec frankenphp run --address 0.0.0.0:${PORT}
