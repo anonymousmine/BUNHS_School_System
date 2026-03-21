@@ -2,7 +2,7 @@
 nixPkgs = [
   "php82",
   "php82Extensions.mysqlnd",      # native driver required for mysqli/pdo_mysql
-  "php82Extensions.mysqli",       # mysqli extension
+  "php82Extensions.mysqli",       # mysqli extension → CRITICAL for deployment
   "php82Extensions.pdo",          # PDO core
   "php82Extensions.pdo_mysql",    # PDO MySQL driver
   "php82Extensions.mbstring",     # multibyte string functions
