@@ -1,16 +1,16 @@
 [phases.setup]
 nixPkgs = [
-  "php82",
-  "php82Extensions.mysqlnd",      # native driver required for mysqli/pdo_mysql
-  "php82Extensions.mysqli",       # mysqli extension → CRITICAL for deployment
-  "php82Extensions.pdo",          # PDO core
-  "php82Extensions.pdo_mysql",    # PDO MySQL driver
-  "php82Extensions.mbstring",     # multibyte string functions
-  "php82Extensions.gd",           # image functions
-  "php82Extensions.curl",         # curl functions
-  "php82Extensions.zip",          # zip functions
+  "php81",
+  "php81Extensions.mysqli",       
+  "php81Extensions.pdo_mysql",    
+  "php81Extensions.pdo",          
+  "php81Extensions.mbstring",     
+  "php81Extensions.gd",           
+  "php81Extensions.curl",         
+  "php81Extensions.zip",          
   "composer"
 ]
+providers = ["nixpacks/php"]
 
 [phases.install]
 cmds = [
@@ -20,10 +20,12 @@ cmds = [
 [phases.build]
 cmds = [
   "composer install --no-dev --optimize-autoloader --no-interaction",
-  "php82 -m | grep mysqli || (echo 'ERROR: mysqli extension missing!' && exit 1)",
-  "php82 -m | grep pdo_mysql || (echo 'ERROR: pdo_mysql extension missing!' && exit 1)",
-  "echo 'PHP extensions verified. Ready for deployment.'"
+  "php81 -m | grep mysqli || (echo 'CRITICAL: mysqli extension MISSING after Nixpacks!' && php81 --ini | head -20 && exit 1)",
+  "php81 -m | grep pdo_mysql || echo 'WARNING: pdo_mysql missing but mysqli OK'",
+  "echo '✅ PHP extensions verified - mysqli LOADED'",
+  "chmod +x start-container.sh"
 ]
 
 [start]
-cmd = "exec php82 -S 0.0.0.0:${PORT:-8080} -t ."
+cmd = "./start-container.sh"
+

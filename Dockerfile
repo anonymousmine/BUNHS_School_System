@@ -1,5 +1,3 @@
-FROM dunglas/frankenphp:php8.4.19-bookworm
-
 RUN apt-get update && apt-get install -y \
     libmariadb-dev \
     libzip-dev \
@@ -18,18 +16,5 @@ RUN apt-get update && apt-get install -y \
     zip \
     gd \
     && docker-php-ext-enable mysqli pdo_mysql \
+    && echo "extension=mysqli" > /usr/local/etc/php/conf.d/mysqli.ini \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
-WORKDIR /app
-COPY . /app
-
-RUN composer install --optimize-autoloader --no-interaction
-
-EXPOSE 8080
-
-# Make start script executable
-RUN chmod +x start-container.sh
-
-CMD ["./start-container.sh"]

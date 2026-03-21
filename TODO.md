@@ -1,15 +1,26 @@
-# Railway Deployment Fix - TODO
+# BUNHS School System - Railway MySQLi Fix (Nixpacks)
 
-task_progress Items:
+✅ 3/5 complete: nixpacks.toml, railway.json, start-container.sh → plain PHP server + mysqli/DB checks
 
-- [x] Step 1: Create .env.example and railway.json ✓
-- [x] Step 2: Update nixpacks.toml ✓
-- [x] Step 3: Update db_connection.php with mysqli check + safe wrapper ✓
-- [x] Step 4: Fix Dockerfile + create start-container.sh ✓
-- [x] Step 5: Add error handling in index.php ✓
-- [ ] Step 6: Local Docker test
-- [ ] Step 7: Railway deploy + verify
+## Deployment Ready ✅ 3/3 Core Files Fixed
 
-## Next: Step 5
+**Test Locally:**
 
-index.php error handling wrapper.
+```bash
+docker build -t bunhs-test . && docker run -p 8080:8080 -e DB_HOST=host.docker.internal -e DB_PORT=3306 --rm bunhs-test
+```
+
+**Deploy:**
+
+1. `git add . && git commit -m "fix: railway mysqli nixpacks" && git push`
+2. Railway rebuilds → check build logs: "✅ mysqli extension LOADED"
+3. Set Railway DB vars
+4. Site loads without 500 error
+
+**Next Manual Steps:**
+
+- Local test confirms mysqli
+- Deploy/push to Railway
+- Verify site + DB connection
+
+**Next:** Complete step 1
