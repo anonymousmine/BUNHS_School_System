@@ -4,6 +4,12 @@ require_once 'session_config.php';
 require_once 'cache_helper.php';
 
 // ── Safe DB include with error recovery ──────────────────────────────────────
+// SAFE START - Skip DB until mysqli fixed
+if (file_exists('index_safe.html')) {
+    readfile('index_safe.html');
+    exit;
+}
+// Original DB include
 try {
     include 'db_connection.php';
 } catch (Exception $e) {

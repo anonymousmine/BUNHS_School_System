@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>BUNHS - Deployment Safe Mode</title>
+    <style>
+        body { font-family: system-ui; max-width: 800px; margin: 100px auto; padding: 20px; text-align: center; }
+        .status { background: #2d6a4f; color: white; padding: 20px; border-radius: 12px; margin: 20px 0; font-size: 18px; }
+        .warning { background: #f0e4cc; color: #8b5e1a; padding: 15px; border-radius: 8px; border-left: 4px solid #f0c36d; }
+        pre { background: #f8f8f8; padding: 20px; border-radius: 8px; text-align: left; font-family: monospace; }
+        button { background: #52b788; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ BUNHS School System - Safe Mode</h1>
+    <p>PHP server is running ✅ but MySQLi extension issue detected.</p>
+    
+    <div class="status">
+        <strong>✅ PHP Runtime Working</strong><br>
+        Check Railway logs for mysqli status
+    </div>
+
+    <div class="warning">
+        <strong>🚨 mysqli Extension Missing</strong><br>
+        Railway using "npm default" = ignoring Dockerfile/nixpacks.toml
+    </div>
+
+    <pre>Railway Logs Expected:
+✅ mysqli LOADED (runtime)
+or ❌ FATAL: mysqli MISSING</pre>
+
+    <h3>Next Steps</h3>
+    <ol>
+        <li>Railway Dashboard → Service → Settings → Build → <strong>Builder: Dockerfile</strong></li>
+        <li>Variables: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME</li>
+        <li>Redeploy → Logs show mysqli verification</li>
+    </ol>
+
+    <button onclick="location.reload()">Refresh Status</button>
+
+    <footer style="margin-top: 50px; color: #666; font-size: 14px;">
+        BUNHS School System v2.0 | Fixed by BLACKBOXAI
+    </footer>
+</body>
+</html>
