@@ -1,10 +1,7 @@
-<<<<<<< HEAD
 FROM php:8.3-apache
 
-# System deps
-=======
->>>>>>> a03aafe901d1a7c9bf4323242c5e2b494f6d6f82
-RUN apt-get update && apt-get install -y \
+# Install system dependencies and PHP extensions
+RUN apt-get update &amp;&amp; apt-get install -y \
     libmariadb-dev \
     libzip-dev \
     libpng-dev \
@@ -15,45 +12,39 @@ RUN apt-get update && apt-get install -y \
     git \
     curl \
     netcat-openbsd \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install \
+    &amp;&amp; docker-php-ext-configure gd --with-freetype --with-jpeg \
+    &amp;&amp; docker-php-ext-install \
     mysqli \
     pdo_mysql \
     mbstring \
     zip \
     gd \
     exif \
-    && docker-php-ext-enable mysqli pdo_mysql \
-<<<<<<< HEAD
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    &amp;&amp; docker-php-ext-enable mysqli pdo_mysql \
+    &amp;&amp; apt-get clean &amp;&amp; rm -rf /var/lib/apt/lists/*
 
 # Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# App FIRST (composer needs it)
+# App setup
 WORKDIR /app
 COPY composer.* ./
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
-# Full app copy
 COPY . .
 
-# Apache
+# Apache configuration for /app
 RUN a2enmod rewrite headers \
-    && sed -i 's!/var/www/html!/app!g' /etc/apache2/sites-available/*.conf \
-    && echo '<Directory /app>\n    AllowOverride All\n    Require all granted\n</Directory>' >> /etc/apache2/sites-available/000-default.conf \
-    && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+    &amp;&amp; sed -i 's!/var/www/html!/app!g' /etc/apache2/sites-available/*.conf \
+    &amp;&amp; echo '<Directory /app>\n    AllowOverride All\n    Require all granted\n</Directory>' >> /etc/apache2/sites-available/000-default.conf \
+    &amp;&amp; mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
-# VERIFY mysqli
-RUN echo "PHP Modules:" && php -m | grep -E "(mysqli|pdo_mysql)" || (echo "❌ mysqli MISSING" && exit 1)
+# CRITICAL: Verify mysqli extension is loaded
+RUN echo "PHP Modules:" &amp;&amp; php -m | grep -E "(mysqli|pdo_mysql)" || (echo "❌ mysqli MISSING" &amp;&amp; exit 1)
 
-# Railway PORT/health
+# Railway PORT and healthcheck
 EXPOSE 8080
 ENV PORT 8080
 HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:$PORT/ || exit 1
 
 CMD ["./start-container.sh"]
-=======
-    && echo "extension=mysqli" > /usr/local/etc/php/conf.d/mysqli.ini \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
->>>>>>> a03aafe901d1a7c9bf4323242c5e2b494f6d6f82

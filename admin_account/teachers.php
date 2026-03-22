@@ -2407,25 +2407,6 @@ $educMap = [
                 grid-template-columns: 1fr;
             }
         }
-
-        /* Hide all header columns except Actions */
-        .r-h1 td:nth-child(-n+22),
-        .r-h2 td:nth-child(-n+22) {
-            display: none !important;
-        }
-
-        /* Keep Actions header visible with proper styling */
-        .r-h1 td.no-print,
-        .r-h2 td.no-print {
-            display: table-cell !important;
-            border: 1px solid #cbd5e1;
-            background: #f1f5f9;
-            padding: 12px 16px;
-            font-weight: 700;
-            text-align: center;
-            color: #1f2937;
-            font-size: 13px;
-        }
     </style>
 </head>
 
@@ -2685,331 +2666,332 @@ $educMap = [
                 </div><!-- /.t1wrap -->
             </div>
 
-            <!-- ══ TABLE 2 — SF7 Personnel Assignment (exact layout) ══ -->
+            <!-- ══ TABLE 2 — SF7 Personnel Assignment List ══ -->
             <div class="sscroll" style="padding-top:8px;padding-bottom:20px;">
                 <table class="sf7t">
                     <colgroup>
-                        <col style="width:6.5%"> <!-- EmpNo -->
-                        <col style="width:9.5%"> <!-- Name -->
-                        <col style="width:3.5%"> <!-- Sex -->
-                        <col style="width:4%"> <!-- Fund -->
-                        <col style="width:8%"> <!-- Position -->
-                        <col style="width:6%"> <!-- ApptStatus -->
-                        <col style="width:5%"> <!-- Educ -->
-                        <col style="width:6.5%"> <!-- Major -->
-                        <col style="width:4.5%"> <!-- Advisory -->
-                        <col style="width:7%"> <!-- Subject -->
-                        <col style="width:3%"> <!-- Gr -->
-                        <col style="width:4.5%"> <!-- Section -->
-                        <col style="width:2.5%"> <!-- M -->
-                        <col style="width:2.5%"> <!-- T -->
-                        <col style="width:2.5%"> <!-- W -->
-                        <col style="width:2.5%"> <!-- TH -->
-                        <col style="width:2.5%"> <!-- F -->
-                        <col style="width:2.5%"> <!-- SAT -->
-                        <col style="width:2.5%"> <!-- SUN -->
-                        <col style="width:5%"> <!-- TimeStart -->
-                        <col style="width:5%"> <!-- TimeEnd -->
-                        <col style="width:4.5%"> <!-- Mins -->
-                        <col class="no-print" style="width:5%"> <!-- Actions -->
+                        <!-- Identity (9 cols) -->
+                        <col style="width:6.5%"> <!-- 1  EmpNo -->
+                        <col style="width:9.5%"> <!-- 2  Name -->
+                        <col style="width:3.5%"> <!-- 3  Sex -->
+                        <col style="width:4%"> <!-- 4  Fund -->
+                        <col style="width:8%"> <!-- 5  Position -->
+                        <col style="width:6%"> <!-- 6  Appt -->
+                        <col style="width:5%"> <!-- 7  Educ -->
+                        <col style="width:6.5%"> <!-- 8  Major -->
+                        <col style="width:4.5%"> <!-- 9  Advisory -->
+                        <!-- Schedule (12 cols) -->
+                        <col style="width:7%"> <!-- 10 Subject -->
+                        <col style="width:3%"> <!-- 11 Gr -->
+                        <col style="width:4.5%"> <!-- 12 Section -->
+                        <col style="width:2.5%"> <!-- 13 M -->
+                        <col style="width:2.5%"> <!-- 14 T -->
+                        <col style="width:2.5%"> <!-- 15 W -->
+                        <col style="width:2.5%"> <!-- 16 TH -->
+                        <col style="width:2.5%"> <!-- 17 F -->
+                        <col style="width:5%"> <!-- 18 TimeStart -->
+                        <col style="width:5%"> <!-- 19 TimeEnd -->
+                        <col style="width:4.5%"> <!-- 20 Mins -->
+                        <col style="width:3.5%"> <!-- 21 ClassCount -->
+                        <!-- Actions (1 col, screen only) -->
+                        <col class="no-print" style="width:5%"> <!-- 22 -->
                     </colgroup>
 
-                    <!-- ═ Header row 1 ═ -->
-                    <tr class="r-h1">
-                        <td rowspan="2">Employee<br>Number</td>
-                        <td rowspan="2">Name<br><span style="font-size:6.5px;font-weight:400;">(Last, First, Middle)</span></td>
-                        <td rowspan="2">Sex</td>
-                        <td rowspan="2">Funding<br>Source</td>
-                        <td rowspan="2">Title of<br>Plantilla Position</td>
-                        <td rowspan="2">Appointment<br>Status</td>
-                        <td rowspan="2">Highest<br>Educational<br>Qualification</td>
-                        <td rowspan="2">Major /<br>Specialization</td>
-                        <td rowspan="2">Advisory<br>Class</td>
-                        <td colspan="13">Daily Program</td>
-                        <td class="no-print" rowspan="2"></td>
-                    </tr>
-                    <!-- ═ Header row 2 ═ -->
-                    <tr class="r-h2">
-                        <td>Subject</td>
-                        <td>Gr</td>
-                        <td>Section</td>
-                        <td>M</td>
-                        <td>T</td>
-                        <td>W</td>
-                        <td>TH</td>
-                        <td>F</td>
-                        <td>SAT</td>
-                        <td>SUN</td>
-                        <td>Time<br>Start</td>
-                        <td>Time<br>End</td>
-                        <td>No. of<br>Mins</td>
-                    </tr>
+                    <!-- ═══ HEADER ═══
+                         Row 1 : 9 identity (rowspan=2) + "Daily Program" (colspan=12) + Actions (rowspan=2)
+                         Row 2 : 12 schedule sub-headers
+                         Total visible = 9 + 12 + 1 = 22 cols
+                    ═══ -->
+
+                    <?php
+                    // ═══════════════════════════════════════════════════════════
+                    //  SHARED HELPERS
+                    //  All three rendering paths (principal, teaching, non-teaching)
+                    //  call the same functions so column counts never drift.
+                    // ═══════════════════════════════════════════════════════════
+
+                    /**
+                     * schedCells() — outputs exactly 12 <td> for one schedule row.
+                     * Cols: subject, grade, section, M, T, W, TH, F,
+                     *       timeStart, timeEnd, minutes, classCount(empty per row).
+                     */
+                    function schedCells(array $s): string
+                    {
+                        $day = function (string $k, string $lbl) use ($s): string {
+                            return '<td class="c-day">'
+                                . (!empty($s[$k]) ? '<strong>' . $lbl . '</strong>' : '')
+                                . '</td>';
+                        };
+                        return
+                            '<td class="c-sb">'  . h($s['subject'] ?? '')  . '</td>'
+                            . '<td class="c-gr">'  . h($s['grade']   ?? '')  . '</td>'
+                            . '<td class="c-sec">' . h($s['section'] ?? '')  . '</td>'
+                            . $day('day_mon', 'M') . $day('day_tue', 'T') . $day('day_wed', 'W')
+                            . $day('day_thu', 'TH') . $day('day_fri', 'F')
+                            . '<td class="c-tm">' . fmtTime($s['time_start'] ?? '') . '</td>'
+                            . '<td class="c-tm">' . fmtTime($s['time_end']   ?? '') . '</td>'
+                            . '<td class="c-mn">' . ($s['minutes'] ? (int)$s['minutes'] : '') . '</td>'
+                            . '<td class="c-mn"></td>';  // class-count blank per row; total in ptot
+                    }
+
+                    /** emptySchedCells() — 12 empty <td> when teacher has no schedules yet. */
+                    function emptySchedCells(): string
+                    {
+                        return
+                            '<td class="c-sb"></td><td class="c-gr"></td><td class="c-sec"></td>'
+                            . '<td class="c-day"></td><td class="c-day"></td><td class="c-day"></td>'
+                            . '<td class="c-day"></td><td class="c-day"></td>'
+                            . '<td class="c-tm"></td><td class="c-tm"></td>'
+                            . '<td class="c-mn"></td><td class="c-mn"></td>';
+                    }
+
+                    /**
+                     * totalsRow() — exactly 22 <td>.
+                     * Layout:
+                     *   cols 1-9  : empty (identity covered by rowspan above)
+                     *   cols 10-17: empty (subject→F)
+                     *   col  18   : empty (timeStart)
+                     *   col  19   : "Total" label (timeEnd position, matches DOCX col 20)
+                     *   col  20   : total minutes
+                     *   col  21   : class count = minutes ÷ 5  (DOCX: 1590→318, 1400→280)
+                     *   col  22   : no-print actions placeholder
+                     */
+                    function totalsRow(int $mins): string
+                    {
+                        $cc = $mins ? (int)round($mins / 5) : '';
+                        return
+                            '<tr class="ptot">'
+                            // 9 identity cols (empty)
+                            . '<td class="c-id"></td><td class="c-nm"></td><td class="c-sx"></td>'
+                            . '<td class="c-fd"></td><td class="c-pos"></td><td class="c-ap"></td>'
+                            . '<td class="c-ed"></td><td class="c-mj"></td><td class="c-adv"></td>'
+                            // subject, grade, section, M-F (8 empty)
+                            . '<td class="c-sb"></td><td class="c-gr"></td><td class="c-sec"></td>'
+                            . '<td class="c-day"></td><td class="c-day"></td><td class="c-day"></td>'
+                            . '<td class="c-day"></td><td class="c-day"></td>'
+                            // timeStart (empty)
+                            . '<td class="c-tm"></td>'
+                            // timeEnd → "Total" label
+                            . '<td class="c-tm" style="text-align:right;font-weight:800;font-size:7px;padding-right:3px;">Total</td>'
+                            // minutes + class count
+                            . '<td class="c-mn" style="font-weight:800;">' . ($mins ?: '') . '</td>'
+                            . '<td class="c-mn" style="font-weight:800;">' . $cc . '</td>'
+                            // actions placeholder
+                            . '<td class="no-print"></td>'
+                            . '</tr>';
+                    }
+
+                    /**
+                     * personBlock() — renders all <tr> rows for one person.
+                     *
+                     * @param string $idCells  9 identity <td rowspan="$cnt"> cells as HTML
+                     * @param string $actCell  actions <td rowspan="$cnt"> as HTML
+                     * @param array  $scheds   schedule rows from teacher_schedules
+                     * @return string          complete HTML for this person's block
+                     */
+                    function personBlock(string $idCells, string $actCell, array $scheds): string
+                    {
+                        $cnt  = max(1, count($scheds));
+                        $mins = (int)array_sum(array_column($scheds, 'minutes'));
+                        $html = '';
+
+                        // ── First row: identity (rowspan) + first schedule + actions (rowspan) ──
+                        $html .= '<tr class="pfirst">';
+                        $html .= $idCells;
+                        $html .= !empty($scheds) ? schedCells($scheds[0]) : emptySchedCells();
+                        $html .= $actCell;
+                        $html .= '</tr>';
+
+                        // ── Remaining schedule rows ──
+                        for ($i = 1; $i < count($scheds); $i++) {
+                            $html .= '<tr>' . schedCells($scheds[$i]) . '</tr>';
+                        }
+
+                        // ── Totals row ──
+                        $html .= totalsRow($mins);
+
+                        // ── Thin separator ──
+                        $html .= '<tr style="height:3px;"><td colspan="22" style="border:none;background:#e5e7eb;padding:0;"></td></tr>';
+
+                        return $html;
+                    }
+                    ?>
 
                     <?php
                     // ════ PRINCIPAL ════
                     if ($principal):
-                        $p = $principal;
-                        // Build name: LAST, FIRST MIDDLE
-                        if ($p['last_name']) {
-                            $pn = strtoupper($p['last_name']) . ', ' . strtoupper($p['first_name']);
-                            if ($p['middle_name']) $pn .= ' ' . strtoupper($p['middle_name']);
-                        } else {
-                            $pn = strtoupper($p['teacher_name']);
-                        }
+                        $p  = $principal;
+                        $pn = $p['last_name']
+                            ? strtoupper($p['last_name']) . ', ' . strtoupper($p['first_name'])
+                            . ($p['middle_name'] ? ', ' . strtoupper($p['middle_name']) : '')
+                            : strtoupper($p['teacher_name']);
                         $pEduc = $educMap[$p['teacher_qualification'] ?? ''] ?? strtoupper($p['teacher_qualification'] ?? '');
                         $pAppt = strtoupper($p['employment_status'] ?: 'REGULAR PERMANENT');
-                        $pPos  = strtoupper($p['career_level'] ?: 'SCHOOL PRINCIPAL I');
+                        $pPos  = strtoupper($p['career_level']      ?: 'SCHOOL PRINCIPAL I');
                         $pMaj  = strtoupper($p['major'] ?: '');
                         $pAdv  = $p['advisory_class'] ?: 'N/A';
-
                         $pSch  = getScheds($conn, $p['teacher_id'], 'principal');
-                        // If no schedules yet, show one empty schedule row
-                        if (empty($pSch)) $pSch = [['subject' => '', 'grade' => '', 'section' => '', 'day_mon' => 0, 'day_tue' => 0, 'day_wed' => 0, 'day_thu' => 0, 'day_fri' => 0, 'day_sat' => 0, 'day_sun' => 0, 'time_start' => '', 'time_end' => '', 'minutes' => '']];
-                        $pCnt  = count($pSch);
-                        $pMins = array_sum(array_column($pSch, 'minutes'));
+                        $pCnt  = max(1, count($pSch));
+
+                        $pId =
+                            '<td class="c-id"  rowspan="' . $pCnt . '">' . h($p['teacher_id']) . '</td>'
+                            . '<td class="c-nm"  rowspan="' . $pCnt . '">' . h($pn)              . '</td>'
+                            . '<td class="c-sx"  rowspan="' . $pCnt . '">' . h($p['gender'])     . '</td>'
+                            . '<td class="c-fd"  rowspan="' . $pCnt . '">NATIONAL</td>'
+                            . '<td class="c-pos" rowspan="' . $pCnt . '">' . h($pPos)            . '</td>'
+                            . '<td class="c-ap"  rowspan="' . $pCnt . '">' . h($pAppt)           . '</td>'
+                            . '<td class="c-ed"  rowspan="' . $pCnt . '">' . h($pEduc)           . '</td>'
+                            . '<td class="c-mj"  rowspan="' . $pCnt . '">' . h($pMaj)            . '</td>'
+                            . '<td class="c-adv" rowspan="' . $pCnt . '">' . h($pAdv)            . '</td>';
+
+                        $pAct =
+                            '<td class="c-act no-print" rowspan="' . $pCnt . '">'
+                            . '<a href="#" class="ab e"'
+                            . ' data-type="principal" data-rid="' . $p['id'] . '"'
+                            . ' data-id="' . h($p['teacher_id']) . '"'
+                            . ' data-lastname="' . h($p['last_name']) . '" data-firstname="' . h($p['first_name']) . '"'
+                            . ' data-middlename="' . h($p['middle_name']) . '" data-gender="' . h($p['gender']) . '"'
+                            . ' data-careerlevel="' . h($p['career_level']) . '" data-employment="' . h($p['employment_status']) . '"'
+                            . ' data-qual="' . h($p['teacher_qualification']) . '" data-major="' . h($p['major']) . '"'
+                            . ' data-email="' . h($p['teacher_email']) . '" data-contact="' . h($p['teacher_contact']) . '"'
+                            . ' data-advisory="' . h($p['advisory_class']) . '"'
+                            . ' data-tip="Edit Principal"><i class="fas fa-pen"></i></a>'
+                            . '<a href="#" class="ab d"'
+                            . ' data-type="principal" data-rid="' . $p['id'] . '"'
+                            . ' data-tip="Remove"><i class="fas fa-trash"></i></a>'
+                            . '</td>';
+
+                        echo personBlock($pId, $pAct, $pSch);
+                    endif;
                     ?>
-                        <?php foreach ($pSch as $si => $ps): $first = ($si === 0); ?>
-                            <tr class="<?= $first ? 'pfirst' : '' ?>">
-                                <?php if ($first): ?>
-                                    <td class="c-id" rowspan="<?= $pCnt ?>"><?= h($p['teacher_id']) ?></td>
-                                    <td class="c-nm" rowspan="<?= $pCnt ?>"><?= h($pn) ?></td>
-                                    <td class="c-sx" rowspan="<?= $pCnt ?>"><?= h($p['gender']) ?></td>
-                                    <td class="c-fd" rowspan="<?= $pCnt ?>">NATIONAL</td>
-                                    <td class="c-pos" rowspan="<?= $pCnt ?>"><?= h($pPos) ?></td>
-                                    <td class="c-ap" rowspan="<?= $pCnt ?>"><?= h($pAppt) ?></td>
-                                    <td class="c-ed" rowspan="<?= $pCnt ?>"><?= h($pEduc) ?></td>
-                                    <td class="c-mj" rowspan="<?= $pCnt ?>"><?= h($pMaj) ?></td>
-                                    <td class="c-adv" rowspan="<?= $pCnt ?>"><?= h($pAdv) ?></td>
-                                <?php endif; ?>
-                                <td class="c-sb"><?= h($ps['subject']) ?></td>
-                                <td class="c-gr"><?= h($ps['grade']) ?></td>
-                                <td class="c-sec"><?= h($ps['section']) ?></td>
-                                <td class="c-day"><?= $ps['day_mon'] ? 'M' : '' ?></td>
-                                <td class="c-day"><?= $ps['day_tue'] ? 'T' : '' ?></td>
-                                <td class="c-day"><?= $ps['day_wed'] ? 'W' : '' ?></td>
-                                <td class="c-day"><?= $ps['day_thu'] ? 'TH' : '' ?></td>
-                                <td class="c-day"><?= $ps['day_fri'] ? 'F' : '' ?></td>
-                                <td class="c-day"><?= ($ps['day_sat'] ?? 0) ? 'S' : '' ?></td>
-                                <td class="c-day"><?= ($ps['day_sun'] ?? 0) ? 'SU' : '' ?></td>
-                                <td class="c-tm"><?= fmtTime($ps['time_start']) ?></td>
-                                <td class="c-tm"><?= fmtTime($ps['time_end']) ?></td>
-                                <td class="c-mn"><?= $ps['minutes'] ?: '' ?></td>
-                                <?php if ($first): ?>
-                                    <td class="c-act no-print" rowspan="<?= $pCnt ?>">
-                                        <a href="#" class="ab e"
-                                            data-type="principal" data-rid="<?= $p['id'] ?>"
-                                            data-id="<?= h($p['teacher_id']) ?>"
-                                            data-lastname="<?= h($p['last_name']) ?>" data-firstname="<?= h($p['first_name']) ?>"
-                                            data-middlename="<?= h($p['middle_name']) ?>" data-gender="<?= h($p['gender']) ?>"
-                                            data-careerlevel="<?= h($p['career_level']) ?>" data-employment="<?= h($p['employment_status']) ?>"
-                                            data-qual="<?= h($p['teacher_qualification']) ?>" data-major="<?= h($p['major']) ?>"
-                                            data-email="<?= h($p['teacher_email']) ?>" data-contact="<?= h($p['teacher_contact']) ?>"
-                                            data-advisory="<?= h($p['advisory_class']) ?>"
-                                            data-tip="Edit Principal"><i class="fas fa-pen"></i></a>
-                                        <a href="#" class="ab d"
-                                            data-type="principal" data-rid="<?= $p['id'] ?>"
-                                            data-tip="Remove"><i class="fas fa-trash"></i></a>
-                                    </td>
-                                <?php else: ?>
-                                    <!-- no actions cell for non-first rows (covered by rowspan) -->
-                                <?php endif; ?>
-                            </tr>
-                        <?php endforeach; ?>
-                        <!-- Total row for principal -->
-                        <tr class="ptot">
-                            <td colspan="22" style="text-align:right;padding-right:8px;">Total</td>
-                            <td class="c-mn"><?= $pMins ?: 0 ?></td>
-                            <td class="no-print"></td>
-                        </tr>
-                    <?php endif; ?>
 
                     <?php
                     // ════ TEACHING TEACHERS ════
                     foreach ($teaching as $t):
-                        if ($t['last_name']) {
-                            $tn = strtoupper($t['last_name']) . ', ' . strtoupper($t['first_name']);
-                            if ($t['middle_name']) $tn .= ' ' . strtoupper($t['middle_name']);
-                        } else {
-                            $tn = strtoupper($t['teacher_name']);
-                        }
+                        $tn = $t['last_name']
+                            ? strtoupper($t['last_name']) . ', ' . strtoupper($t['first_name'])
+                            . ($t['middle_name'] ? ', ' . strtoupper($t['middle_name']) : '')
+                            : strtoupper($t['teacher_name']);
                         $tEduc = $educMap[$t['teacher_qualification'] ?? ''] ?? strtoupper($t['teacher_qualification'] ?? '');
                         $tAppt = strtoupper($t['employment_status'] ?: 'REGULAR PERMANENT');
-                        $tPos  = strtoupper($t['career_level'] ?: 'TEACHER I');
+                        $tPos  = strtoupper($t['career_level']      ?: 'TEACHER I');
                         $tMaj  = strtoupper($t['major'] ?: $t['teacher_subjects'] ?: '');
                         $tAdv  = $t['advisory_class'] ?: 'N/A';
                         $tFund = strtoupper($t['funding_source'] ?: 'NATIONAL');
-
                         $tSch  = getScheds($conn, $t['teacher_id'], 'teacher');
-                        // Show one blank row when no schedule entries exist yet
-                        if (empty($tSch)) {
-                            $tSch = [['subject' => '', 'grade' => '', 'section' => '', 'day_mon' => 0, 'day_tue' => 0, 'day_wed' => 0, 'day_thu' => 0, 'day_fri' => 0, 'day_sat' => 0, 'day_sun' => 0, 'time_start' => '', 'time_end' => '', 'minutes' => 0]];
-                        }
-                        $tCnt  = count($tSch);
-                        $tMins = array_sum(array_column($tSch, 'minutes'));
+                        $tCnt  = max(1, count($tSch));
+
+                        $tId =
+                            '<td class="c-id"  rowspan="' . $tCnt . '">' . h($t['teacher_id']) . '</td>'
+                            . '<td class="c-nm"  rowspan="' . $tCnt . '">' . h($tn)              . '</td>'
+                            . '<td class="c-sx"  rowspan="' . $tCnt . '">' . h($t['gender'])     . '</td>'
+                            . '<td class="c-fd"  rowspan="' . $tCnt . '">' . h($tFund)           . '</td>'
+                            . '<td class="c-pos" rowspan="' . $tCnt . '">' . h($tPos)            . '</td>'
+                            . '<td class="c-ap"  rowspan="' . $tCnt . '">' . h($tAppt)           . '</td>'
+                            . '<td class="c-ed"  rowspan="' . $tCnt . '">' . h($tEduc)           . '</td>'
+                            . '<td class="c-mj"  rowspan="' . $tCnt . '">' . h($tMaj)            . '</td>'
+                            . '<td class="c-adv" rowspan="' . $tCnt . '">' . h($tAdv)            . '</td>';
+
+                        $tAct =
+                            '<td class="c-act no-print" rowspan="' . $tCnt . '">'
+                            . '<a href="#" class="ab e"'
+                            . ' data-type="teacher" data-rid="' . $t['id'] . '"'
+                            . ' data-id="' . h($t['teacher_id']) . '"'
+                            . ' data-lastname="' . h($t['last_name']) . '" data-firstname="' . h($t['first_name']) . '"'
+                            . ' data-middlename="' . h($t['middle_name']) . '" data-gender="' . h($t['gender']) . '"'
+                            . ' data-careerlevel="' . h($t['career_level']) . '" data-employment="' . h($t['employment_status']) . '"'
+                            . ' data-qual="' . h($t['teacher_qualification']) . '" data-major="' . h($t['major']) . '"'
+                            . ' data-subj="' . h($t['subject_assigned']) . '" data-gradesec="' . h($t['grade_section']) . '"'
+                            . ' data-room="' . h($t['room_assignment']) . '"'
+                            . ' data-club="' . h($t['club_role']) . '" data-advisory="' . h($t['advisory_class']) . '"'
+                            . ' data-ntpos="' . h($t['nt_position']) . '" data-ntappt="' . h($t['nt_appt_type']) . '"'
+                            . ' data-ntfund="' . h($t['nt_fund_source']) . '" data-category="' . h($t['category']) . '"'
+                            . ' data-funding="' . h($t['funding_source']) . '"'
+                            . ' data-email="' . h($t['teacher_email']) . '" data-contact="' . h($t['teacher_contact']) . '"'
+                            . ' data-tip="Edit"><i class="fas fa-pen"></i></a>'
+                            . '<a href="#" class="ab d"'
+                            . ' data-type="teacher" data-rid="' . $t['id'] . '"'
+                            . ' data-tip="Delete"><i class="fas fa-trash"></i></a>'
+                            . '</td>';
+
+                        echo personBlock($tId, $tAct, $tSch);
+                    endforeach;
                     ?>
-                        <?php foreach ($tSch as $si => $ts): $first = ($si === 0); ?>
-                            <tr class="<?= $first ? 'pfirst' : '' ?>">
-                                <?php if ($first): ?>
-                                    <td class="c-id" rowspan="<?= $tCnt ?>"><?= h($t['teacher_id']) ?></td>
-                                    <td class="c-nm" rowspan="<?= $tCnt ?>"><?= h($tn) ?></td>
-                                    <td class="c-sx" rowspan="<?= $tCnt ?>"><?= h($t['gender']) ?></td>
-                                    <td class="c-fd" rowspan="<?= $tCnt ?>"><?= h($tFund) ?></td>
-                                    <td class="c-pos" rowspan="<?= $tCnt ?>"><?= h($tPos) ?></td>
-                                    <td class="c-ap" rowspan="<?= $tCnt ?>"><?= h($tAppt) ?></td>
-                                    <td class="c-ed" rowspan="<?= $tCnt ?>"><?= h($tEduc) ?></td>
-                                    <td class="c-mj" rowspan="<?= $tCnt ?>"><?= h($tMaj) ?></td>
-                                    <td class="c-adv" rowspan="<?= $tCnt ?>"><?= h($tAdv) ?></td>
-                                <?php endif; ?>
-                                <td class="c-sb"><?= h($ts['subject']) ?></td>
-                                <td class="c-gr"><?= h($ts['grade']) ?></td>
-                                <td class="c-sec"><?= h($ts['section']) ?></td>
-                                <td class="c-day"><?= $ts['day_mon'] ? 'M' : '' ?></td>
-                                <td class="c-day"><?= $ts['day_tue'] ? 'T' : '' ?></td>
-                                <td class="c-day"><?= $ts['day_wed'] ? 'W' : '' ?></td>
-                                <td class="c-day"><?= $ts['day_thu'] ? 'TH' : '' ?></td>
-                                <td class="c-day"><?= $ts['day_fri'] ? 'F' : '' ?></td>
-                                <td class="c-day"><?= ($ts['day_sat'] ?? 0) ? 'S' : '' ?></td>
-                                <td class="c-day"><?= ($ts['day_sun'] ?? 0) ? 'SU' : '' ?></td>
-                                <td class="c-tm"><?= fmtTime($ts['time_start']) ?></td>
-                                <td class="c-tm"><?= fmtTime($ts['time_end']) ?></td>
-                                <td class="c-mn"><?= $ts['minutes'] ?: '' ?></td>
-                                <?php if ($first): ?>
-                                    <td class="c-act no-print" rowspan="<?= $tCnt ?>">
-                                        <a href="#" class="ab e"
-                                            data-type="teacher" data-rid="<?= $t['id'] ?>"
-                                            data-id="<?= h($t['teacher_id']) ?>"
-                                            data-lastname="<?= h($t['last_name']) ?>" data-firstname="<?= h($t['first_name']) ?>"
-                                            data-middlename="<?= h($t['middle_name']) ?>" data-gender="<?= h($t['gender']) ?>"
-                                            data-careerlevel="<?= h($t['career_level']) ?>" data-employment="<?= h($t['employment_status']) ?>"
-                                            data-qual="<?= h($t['teacher_qualification']) ?>" data-major="<?= h($t['major']) ?>"
-                                            data-subj="<?= h($t['subject_assigned']) ?>" data-gradesec="<?= h($t['grade_section']) ?>"
-                                            data-room="<?= h($t['room_assignment']) ?>"
-                                            data-club="<?= h($t['club_role']) ?>" data-advisory="<?= h($t['advisory_class']) ?>"
-                                            data-ntpos="<?= h($t['nt_position']) ?>" data-ntappt="<?= h($t['nt_appt_type']) ?>"
-                                            data-ntfund="<?= h($t['nt_fund_source']) ?>" data-category="<?= h($t['category']) ?>"
-                                            data-funding="<?= h($t['funding_source']) ?>"
-                                            data-email="<?= h($t['teacher_email']) ?>" data-contact="<?= h($t['teacher_contact']) ?>"
-                                            data-tip="Edit"><i class="fas fa-pen"></i></a>
-                                        <a href="#" class="ab d"
-                                            data-type="teacher" data-rid="<?= $t['id'] ?>"
-                                            data-tip="Delete"><i class="fas fa-trash"></i></a>
-                                    </td>
-                                <?php else: ?>
-                                    <!-- no actions cell for non-first rows (covered by rowspan) -->
-                                <?php endif; ?>
-                            </tr>
-                        <?php endforeach; ?>
-                        <!-- Total row per teacher -->
-                        <tr class="ptot">
-                            <td colspan="22" style="text-align:right;padding-right:8px;">Total</td>
-                            <td class="c-mn"><?= $tMins ?: '' ?></td>
-                            <td class="no-print"></td>
-                        </tr>
-                    <?php endforeach; ?>
 
                     <?php if (!empty($nonTeaching)): ?>
-                </table>
-            </div>
-            <!-- ════ NON-TEACHING TABLE (Separate) ════ -->
-            <div class="sscroll" style="padding-top:8px;padding-bottom:20px;">
-                <table class="sf7t">
-                    <colgroup>
-                        <col style="width:45px"> <!-- EmpNo -->
-                        <col style="width:85px"> <!-- Name -->
-                        <col style="width:28px"> <!-- Sex -->
-                        <col style="width:40px"> <!-- Fund -->
-                        <col style="width:85px"> <!-- Position -->
-                        <col style="width:60px"> <!-- ApptStatus -->
-                        <col style="width:70px"> <!-- Subject -->
-                        <col style="width:20px"> <!-- Gr -->
-                        <col style="width:50px"> <!-- Section -->
-                        <col style="width:14px"> <!-- M -->
-                        <col style="width:14px"> <!-- T -->
-                        <col style="width:14px"> <!-- W -->
-                        <col style="width:16px"> <!-- TH -->
-                        <col style="width:14px"> <!-- F -->
-                        <col style="width:16px"> <!-- SAT -->
-                        <col style="width:16px"> <!-- SUN -->
-                        <col style="width:45px"> <!-- TimeStart -->
-                        <col style="width:45px"> <!-- TimeEnd -->
-                        <col style="width:28px"> <!-- Mins -->
-                        <col class="no-print" style="width:45px"> <!-- Actions -->
-                    </colgroup>
-                    <tr class="nt-hdr">
-                        <td colspan="20">JOB ORDER / CONTRACT OF SERVICE PERSONNEL</td>
-                    </tr>
-                    <tr class="nt-ch">
-                        <td>ID</td>
-                        <td>Name</td>
-                        <td>Sex</td>
-                        <td>Fund Source</td>
-                        <td>Position / Role</td>
-                        <td>Appt Type</td>
-                        <td>Subject</td>
-                        <td>Gr</td>
-                        <td>Section</td>
-                        <td>M</td>
-                        <td>T</td>
-                        <td>W</td>
-                        <td>TH</td>
-                        <td>F</td>
-                        <td>SAT</td>
-                        <td>SUN</td>
-                        <td>Time<br>Start</td>
-                        <td>Time<br>End</td>
-                        <td>Mins</td>
-                        <td class="no-print"></td>
-                    </tr>
-                    <?php foreach ($nonTeaching as $nt): ?>
-                        <tr class="nt-r pfirst">
-                            <td class="c-id"><?= h($nt['teacher_id']) ?></td>
-                            <td class="c-nm">
-                                <?php
-                                if ($nt['last_name']) echo strtoupper($nt['last_name']) . ', ' . strtoupper($nt['first_name']) . ' ' . strtoupper($nt['middle_name']);
-                                else echo strtoupper($nt['teacher_name']);
-                                ?>
-                            </td>
-                            <td class="c-sx"><?= h($nt['gender']) ?></td>
-                            <td class="c-fd"><?= h($nt['nt_fund_source'] ?: $nt['funding_source']) ?></td>
-                            <td class="c-pos"><?= h($nt['nt_position'] ?: $nt['career_level']) ?></td>
-                            <td class="c-ap"><?= h($nt['nt_appt_type'] ?: $nt['employment_status']) ?></td>
-                            <td colspan="14" style="font-size:7.5px;"><?= h($nt['subject_assigned'] ?: $nt['club_role'] ?: 'General Duty — M T W TH F') ?></td>
-                            <td class="c-act no-print">
-                                <a href="#" class="ab e"
-                                    data-type="teacher" data-rid="<?= $nt['id'] ?>"
-                                    data-id="<?= h($nt['teacher_id']) ?>"
-                                    data-lastname="<?= h($nt['last_name']) ?>" data-firstname="<?= h($nt['first_name']) ?>"
-                                    data-middlename="<?= h($nt['middle_name']) ?>" data-gender="<?= h($nt['gender']) ?>"
-                                    data-careerlevel="<?= h($nt['career_level']) ?>" data-employment="<?= h($nt['employment_status']) ?>"
-                                    data-qual="<?= h($nt['teacher_qualification']) ?>" data-major="<?= h($nt['major']) ?>"
-                                    data-ntpos="<?= h($nt['nt_position']) ?>" data-ntappt="<?= h($nt['nt_appt_type']) ?>"
-                                    data-ntfund="<?= h($nt['nt_fund_source']) ?>" data-category="Non-Teaching"
-                                    data-funding="<?= h($nt['funding_source']) ?>"
-                                    data-tip="Edit"><i class="fas fa-pen"></i></a>
-                                <a href="#" class="ab d"
-                                    data-type="teacher" data-rid="<?= $nt['id'] ?>"
-                                    data-tip="Delete"><i class="fas fa-trash"></i></a>
+                        <!-- ════ NON-TEACHING: ADMIN TASK ════ -->
+                        <tr class="nt-hdr">
+                            <td colspan="22" style="text-align:left;padding:3px 8px;font-size:7px;font-weight:800;text-transform:uppercase;background:#b8c5d6;border:0.75px solid #333;">
+                                JOB ORDER / CONTRACT OF SERVICE PERSONNEL — ADMIN TASK
                             </td>
                         </tr>
-                    <?php endforeach; ?>
-                </table>
-            </div>
-            <div class="sf7w">
-                <div class="sscroll">
-                    <table class="sf7t">
+                        <?php foreach ($nonTeaching as $nt):
+                            $ntName = $nt['last_name']
+                                ? strtoupper($nt['last_name']) . ', ' . strtoupper($nt['first_name'])
+                                . ($nt['middle_name'] ? ', ' . strtoupper($nt['middle_name']) : '')
+                                : strtoupper($nt['teacher_name']);
+                            $ntSch = getScheds($conn, $nt['teacher_id'], 'teacher');
+                            if (empty($ntSch)) {
+                                $ntSch = [[
+                                    'subject' => 'ADMIN TASK — General',
+                                    'grade' => '',
+                                    'section' => '',
+                                    'day_mon' => 1,
+                                    'day_tue' => 1,
+                                    'day_wed' => 1,
+                                    'day_thu' => 1,
+                                    'day_fri' => 1,
+                                    'time_start' => '',
+                                    'time_end' => '',
+                                    'minutes' => 0
+                                ]];
+                            }
+                            $ntCnt = max(1, count($ntSch));
+
+                            $ntId =
+                                '<td class="c-id"  rowspan="' . $ntCnt . '">' . h($nt['teacher_id']) . '</td>'
+                                . '<td class="c-nm"  rowspan="' . $ntCnt . '">' . h($ntName)           . '</td>'
+                                . '<td class="c-sx"  rowspan="' . $ntCnt . '">' . h($nt['gender'])     . '</td>'
+                                . '<td class="c-fd"  rowspan="' . $ntCnt . '">' . h($nt['nt_fund_source'] ?: $nt['funding_source']) . '</td>'
+                                . '<td class="c-pos" rowspan="' . $ntCnt . '">' . h($nt['nt_position'] ?: $nt['career_level'])     . '</td>'
+                                . '<td class="c-ap"  rowspan="' . $ntCnt . '">' . h($nt['nt_appt_type'] ?: $nt['employment_status']) . '</td>'
+                                . '<td class="c-ed"  rowspan="' . $ntCnt . '">N/A</td>'
+                                . '<td class="c-mj"  rowspan="' . $ntCnt . '">N/A</td>'
+                                . '<td class="c-adv" rowspan="' . $ntCnt . '">N/A</td>';
+
+                            $ntAct =
+                                '<td class="c-act no-print" rowspan="' . $ntCnt . '">'
+                                . '<a href="#" class="ab e"'
+                                . ' data-type="teacher" data-rid="' . $nt['id'] . '"'
+                                . ' data-id="' . h($nt['teacher_id']) . '"'
+                                . ' data-lastname="' . h($nt['last_name']) . '" data-firstname="' . h($nt['first_name']) . '"'
+                                . ' data-middlename="' . h($nt['middle_name']) . '" data-gender="' . h($nt['gender']) . '"'
+                                . ' data-careerlevel="' . h($nt['career_level']) . '" data-employment="' . h($nt['employment_status']) . '"'
+                                . ' data-qual="' . h($nt['teacher_qualification']) . '" data-major="' . h($nt['major']) . '"'
+                                . ' data-ntpos="' . h($nt['nt_position']) . '" data-ntappt="' . h($nt['nt_appt_type']) . '"'
+                                . ' data-ntfund="' . h($nt['nt_fund_source']) . '" data-category="Non-Teaching"'
+                                . ' data-funding="' . h($nt['funding_source']) . '"'
+                                . ' data-tip="Edit"><i class="fas fa-pen"></i></a>'
+                                . '<a href="#" class="ab d"'
+                                . ' data-type="teacher" data-rid="' . $nt['id'] . '"'
+                                . ' data-tip="Delete"><i class="fas fa-trash"></i></a>'
+                                . '</td>';
+
+                            echo personBlock($ntId, $ntAct, $ntSch);
+                        endforeach; ?>
                     <?php endif; ?>
 
-                    <!-- Guidelines & Signature -->
+                    <!-- ════ GUIDELINES & SIGNATURE ════ -->
                     <tr>
-                        <td colspan="12" style="border:1px solid #555;vertical-align:top;padding:6px 8px;font-size:7.5px;color:#444;line-height:1.5;">
+                        <td colspan="14" style="border:1px solid #555;vertical-align:top;padding:6px 8px;font-size:7.5px;color:#444;line-height:1.6;">
                             <strong>GUIDELINES:</strong><br>
-                            1. This form shall be accomplished at the beginning of the school year by the school head.<br>
-                            2. All school personnel shall be listed from highest to lowest rank.<br>
-                            3. Reflect subjects, advisory assignments, and other administrative duties.<br>
+                            1. This form shall be accomplished at the beginning of the school year by the school head. In case of movement of teachers and other personnel during the school year, an updated School Form 7 must be submitted to the Division Office.<br>
+                            2. All school personnel, regardless of position/nature of appointment should be included in this form and should be listed from the highest rank down to the lowest.<br>
+                            3. Please reflect subjects being taught and if teacher handling advisory class or Ancillary Assignment. Other administrative duties must also be reported.<br>
                             4. Daily Program Column is for teaching personnel only.<br>
                             <br><em>Updated as of: <?= date('m/d/Y') ?></em>
                         </td>
-                        <td colspan="10" style="border:1px solid #555;text-align:center;vertical-align:bottom;padding:6px;">
+                        <td colspan="7" style="border:1px solid #555;text-align:center;vertical-align:bottom;padding:6px;">
                             <div style="border-top:1px solid #333;width:80%;margin:40px auto 0;padding-top:4px;font-weight:800;font-size:8.5px;">
                                 <?php
                                 if ($principal) {
@@ -3017,765 +2999,769 @@ $educMap = [
                                         ? strtoupper($principal['first_name']) . ' ' . strtoupper($principal['last_name'])
                                         : strtoupper($principal['teacher_name']);
                                     echo h($sn);
-                                } else echo 'SCHOOL PRINCIPAL';
+                                } else {
+                                    echo 'SCHOOL PRINCIPAL';
+                                }
                                 ?><br>
                                 <span style="font-weight:400;font-size:7.5px;">(Signature of School Head over Printed Name)</span>
                             </div>
                         </td>
                         <td class="no-print" style="border:1px solid #555;"></td>
                     </tr>
-                    </table>
-                </div>
-            </div><!-- /.sf7w -->
 
-            <!-- ══ PRINCIPAL HISTORY ══ -->
-            <?php if (!empty($principalHistory)): ?>
-                <div style="font-size:14px;font-weight:700;color:#92400e;display:flex;align-items:center;gap:8px;margin-bottom:8px;"><i class="fas fa-history"></i> Principal Tenure History</div>
-                <?php foreach ($principalHistory as $ph): ?>
-                    <div class="hw">
-                        <div class="hh" onclick="this.nextElementSibling.classList.toggle('open')">
-                            <i class="fas fa-crown" style="color:#d97706;"></i>
-                            <h4><?= h($ph['teacher_name']) ?> — <?= h($ph['career_level'] ?: 'Principal') ?></h4>
-                            <span style="font-size:12px;color:#b45309;margin-right:10px;"><?= $ph['assigned_date'] ? 'Served: ' . date('M Y', strtotime($ph['assigned_date'])) . ' – ' . date('M Y', strtotime($ph['replaced_date'])) : '' ?></span>
-                            <i class="fas fa-chevron-down" style="color:#d97706;"></i>
-                        </div>
-                        <div class="hb">
-                            <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">
-                                <b>ID:</b> <?= h($ph['teacher_id']) ?> &nbsp;|&nbsp; <b>Gender:</b> <?= h($ph['gender']) ?> &nbsp;|&nbsp; <b>Replaced:</b> <?= $ph['replaced_date'] ? date('F j, Y', strtotime($ph['replaced_date'])) : '—' ?>
-                            </div>
-                            <?php
-                            $th = $conn->query("SELECT * FROM teacher_history WHERE principal_hist_id=" . (int)$ph['id'] . " ORDER BY id ASC");
-                            $thr = [];
-                            while ($r = $th->fetch_assoc()) {
-                                decRow($r);
-                                $thr[] = $r;
-                            }
-                            if (!empty($thr)):
-                            ?>
-                                <div style="overflow-x:auto;">
-                                    <table class="htbl">
-                                        <thead>
-                                            <tr>
-                                                <th>#</th>
-                                                <th>ID</th>
-                                                <th>Name</th>
-                                                <th>Gender</th>
-                                                <th>Position</th>
-                                                <th>Qualification</th>
-                                                <th>Major</th>
-                                                <th>Subject</th>
-                                                <th>Grade/Sec</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <?php foreach ($thr as $i => $row): ?>
-                                                <tr>
-                                                    <td><?= $i + 1 ?></td>
-                                                    <td><?= h($row['teacher_id']) ?></td>
-                                                    <td><b><?= h($row['teacher_name']) ?></b></td>
-                                                    <td><?= h($row['gender']) ?></td>
-                                                    <td><?= h($row['career_level']) ?></td>
-                                                    <td><?= h($row['teacher_qualification']) ?></td>
-                                                    <td><?= h($row['major']) ?></td>
-                                                    <td><?= h($row['subject_assigned']) ?></td>
-                                                    <td><?= h($row['grade_section']) ?></td>
-                                                </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            <?php else: ?>
-                                <p style="font-size:12px;color:#9ca3af;font-style:italic;">No teacher records for this tenure.</p>
-                            <?php endif; ?>
-                        </div>
+                </table>
+            </div>
+        </div><!-- /.sf7w -->
+
+
+        <!-- ══ PRINCIPAL HISTORY ══ -->
+        <?php if (!empty($principalHistory)): ?>
+            <div style="font-size:14px;font-weight:700;color:#92400e;display:flex;align-items:center;gap:8px;margin-bottom:8px;"><i class="fas fa-history"></i> Principal Tenure History</div>
+            <?php foreach ($principalHistory as $ph): ?>
+                <div class="hw">
+                    <div class="hh" onclick="this.nextElementSibling.classList.toggle('open')">
+                        <i class="fas fa-crown" style="color:#d97706;"></i>
+                        <h4><?= h($ph['teacher_name']) ?> — <?= h($ph['career_level'] ?: 'Principal') ?></h4>
+                        <span style="font-size:12px;color:#b45309;margin-right:10px;"><?= $ph['assigned_date'] ? 'Served: ' . date('M Y', strtotime($ph['assigned_date'])) . ' – ' . date('M Y', strtotime($ph['replaced_date'])) : '' ?></span>
+                        <i class="fas fa-chevron-down" style="color:#d97706;"></i>
                     </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
+                    <div class="hb">
+                        <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">
+                            <b>ID:</b> <?= h($ph['teacher_id']) ?> &nbsp;|&nbsp; <b>Gender:</b> <?= h($ph['gender']) ?> &nbsp;|&nbsp; <b>Replaced:</b> <?= $ph['replaced_date'] ? date('F j, Y', strtotime($ph['replaced_date'])) : '—' ?>
+                        </div>
+                        <?php
+                        $th = $conn->query("SELECT * FROM teacher_history WHERE principal_hist_id=" . (int)$ph['id'] . " ORDER BY id ASC");
+                        $thr = [];
+                        while ($r = $th->fetch_assoc()) {
+                            decRow($r);
+                            $thr[] = $r;
+                        }
+                        if (!empty($thr)):
+                        ?>
+                            <div style="overflow-x:auto;">
+                                <table class="htbl">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>ID</th>
+                                            <th>Name</th>
+                                            <th>Gender</th>
+                                            <th>Position</th>
+                                            <th>Qualification</th>
+                                            <th>Major</th>
+                                            <th>Subject</th>
+                                            <th>Grade/Sec</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($thr as $i => $row): ?>
+                                            <tr>
+                                                <td><?= $i + 1 ?></td>
+                                                <td><?= h($row['teacher_id']) ?></td>
+                                                <td><b><?= h($row['teacher_name']) ?></b></td>
+                                                <td><?= h($row['gender']) ?></td>
+                                                <td><?= h($row['career_level']) ?></td>
+                                                <td><?= h($row['teacher_qualification']) ?></td>
+                                                <td><?= h($row['major']) ?></td>
+                                                <td><?= h($row['subject_assigned']) ?></td>
+                                                <td><?= h($row['grade_section']) ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php else: ?>
+                            <p style="font-size:12px;color:#9ca3af;font-style:italic;">No teacher records for this tenure.</p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
 
-        </div><!-- /.page-content -->
+    </div><!-- /.page-content -->
 
-        <!-- Delete form -->
-        <form id="delf" method="POST">
-            <input type="hidden" name="action" value="delete">
-            <input type="hidden" id="drid" name="delete_record_id">
-            <input type="hidden" id="dtype" name="delete_type" value="teacher">
-        </form>
+    <!-- Delete form -->
+    <form id="delf" method="POST">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" id="drid" name="delete_record_id">
+        <input type="hidden" id="dtype" name="delete_type" value="teacher">
+    </form>
 
-        <!-- ══════════════════════════════════════════════════════════
+    <!-- ══════════════════════════════════════════════════════════
      MODAL — Redesigned Step Wizard
      ══════════════════════════════════════════════════════════ -->
-        <div id="pmod" class="modal">
-            <div class="mc">
-                <!-- Header -->
-                <div class="mhd grn" id="mhd">
-                    <div class="mhd-top">
-                        <div class="mhd-title-wrap">
-                            <div class="mhd-icon"><i id="mhd-ico" class="fas fa-user-plus"></i></div>
-                            <div>
-                                <h3 id="mtit">Add Personnel</h3>
-                                <p id="msubt">All fields are optional — fill in only what is available</p>
-                            </div>
-                        </div>
-                        <button class="xbtn" id="xbtn">&times;</button>
-                    </div>
-                    <!-- Step Progress -->
-                    <div class="step-bar">
-                        <div class="step-item active" data-step="1" onclick="goStep(1)">
-                            <div class="step-dot">1</div>
-                            <span class="step-label">Personal</span>
-                        </div>
-                        <div class="step-item" data-step="2" onclick="goStep(2)">
-                            <div class="step-dot">2</div>
-                            <span class="step-label">Position</span>
-                        </div>
-                        <div class="step-item" data-step="3" onclick="goStep(3)">
-                            <div class="step-dot">3</div>
-                            <span class="step-label">Schedule</span>
-                        </div>
-                        <div class="step-item" data-step="4" onclick="goStep(4)">
-                            <div class="step-dot">4</div>
-                            <span class="step-label">Review</span>
+    <div id="pmod" class="modal">
+        <div class="mc">
+            <!-- Header -->
+            <div class="mhd grn" id="mhd">
+                <div class="mhd-top">
+                    <div class="mhd-title-wrap">
+                        <div class="mhd-icon"><i id="mhd-ico" class="fas fa-user-plus"></i></div>
+                        <div>
+                            <h3 id="mtit">Add Personnel</h3>
+                            <p id="msubt">All fields are optional — fill in only what is available</p>
                         </div>
                     </div>
+                    <button class="xbtn" id="xbtn">&times;</button>
                 </div>
-
-                <!-- Scrollable Body -->
-                <div class="msc">
-                    <form id="pform" class="mb" method="POST" enctype="multipart/form-data">
-                        <input type="hidden" name="action" id="fact" value="add">
-                        <input type="hidden" name="edit_record_id" id="frid">
-                        <input type="hidden" name="edit_type" id="frtype" value="teacher">
-                        <input type="hidden" name="teacher_name" id="ffull">
-
-                        <!-- Encryption notice -->
-                        <div style="display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #86efac;border-radius:10px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:#15803d;">
-                            <i class="fas fa-lock" style="font-size:14px;flex-shrink:0;"></i>
-                            <span><strong>End-to-end encrypted.</strong> Personal identifiers (name, ID, email, contact) are encrypted with AES-256-CBC before being stored in the database. All fields are optional.</span>
-                        </div>
-
-                        <!-- ── STEP 1: Personal Information ── -->
-                        <div class="step-panel active" id="sp1">
-
-                            <!-- Principal Toggle -->
-                            <div id="ptw" class="ptog" style="display:none;">
-                                <label class="tg"><input type="checkbox" id="fisp" name="is_principal"><span class="tgsl"></span></label>
-                                <div>
-                                    <div style="font-size:13px;font-weight:700;color:#92400e;"><i class="fas fa-crown" style="color:#d97706;margin-right:5px;"></i>Designate as School Principal</div>
-                                    <div style="font-size:11px;color:#b45309;margin-top:2px;">This will archive the current principal and snapshot all teachers.</div>
-                                </div>
-                            </div>
-
-                            <div class="fsec">
-                                <div class="fst"><i class="fas fa-user-circle"></i> Full Name</div>
-                                <div class="fr c3">
-                                    <div class="fg">
-                                        <label><i class="fas fa-font"></i> Last Name</label>
-                                        <input type="text" id="fln" name="last_name" placeholder="DELA CRUZ">
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-font"></i> First Name</label>
-                                        <input type="text" id="ffn" name="first_name" placeholder="JUAN">
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-font"></i> Middle Name</label>
-                                        <input type="text" id="fmn" name="middle_name" placeholder="SANTOS">
-                                    </div>
-                                </div>
-                                <div class="fr">
-                                    <div class="fg">
-                                        <label><i class="fas fa-id-badge"></i> Employee Number</label>
-                                        <input type="text" id="feid" name="teacher_id" placeholder="e.g. 306332001">
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-venus-mars"></i> Sex / Gender</label>
-                                        <select id="fgnd" name="gender">
-                                            <option value="">— Select Gender —</option>
-                                            <option value="MALE">MALE</option>
-                                            <option value="FEMALE">FEMALE</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="fsec">
-                                <div class="fst"><i class="fas fa-address-book"></i> Contact Information</div>
-                                <div class="fr">
-                                    <div class="fg">
-                                        <label><i class="fas fa-envelope"></i> Email Address</label>
-                                        <input type="email" id="femail" name="teacher_email" placeholder="teacher@deped.gov.ph">
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-phone"></i> Contact Number</label>
-                                        <input type="tel" id="fcon" name="teacher_contact" placeholder="+63 9XX XXX XXXX">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="fsec">
-                                <div class="fst"><i class="fas fa-camera"></i> Profile Photo</div>
-                                <div class="photo-zone" onclick="this.querySelector('input').click()">
-                                    <input type="file" name="teacher_image" accept="image/*" style="display:none;" onchange="updatePhotoLabel(this)">
-                                    <i class="fas fa-cloud-upload-alt"></i>
-                                    <p id="photo-lbl">Click or drag to upload a photo</p>
-                                    <span>JPG, PNG up to 5MB</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ── STEP 2: Position Details ── -->
-                        <div class="step-panel" id="sp2">
-                            <div class="fsec">
-                                <div class="fst"><i class="fas fa-briefcase"></i> Plantilla Position</div>
-                                <div class="fr">
-                                    <div class="fg">
-                                        <label><i class="fas fa-medal"></i> Title of Plantilla Position</label>
-                                        <select id="fcl" name="career_level">
-                                            <option value="">— Select Position —</option>
-                                            <optgroup label="School Head">
-                                                <option value="School Principal I">School Principal I</option>
-                                                <option value="School Principal II">School Principal II</option>
-                                                <option value="School Principal III">School Principal III</option>
-                                            </optgroup>
-                                            <optgroup label="Master Teacher">
-                                                <option value="Master Teacher IV">Master Teacher IV</option>
-                                                <option value="Master Teacher III">Master Teacher III</option>
-                                                <option value="Master Teacher II">Master Teacher II</option>
-                                                <option value="Master Teacher I">Master Teacher I</option>
-                                            </optgroup>
-                                            <optgroup label="Head Teacher">
-                                                <option value="Head Teacher III">Head Teacher III</option>
-                                                <option value="Head Teacher II">Head Teacher II</option>
-                                                <option value="Head Teacher I">Head Teacher I</option>
-                                            </optgroup>
-                                            <optgroup label="Teacher">
-                                                <option value="Teacher III">Teacher III</option>
-                                                <option value="Teacher II">Teacher II</option>
-                                                <option value="Teacher I">Teacher I</option>
-                                            </optgroup>
-                                            <optgroup label="Non-Teaching">
-                                                <option value="Watchman">Watchman</option>
-                                                <option value="Utility Worker">Utility Worker</option>
-                                                <option value="Driver">Driver</option>
-                                                <option value="Clerk">Clerk</option>
-                                                <option value="Security Guard">Security Guard</option>
-                                                <option value="Other">Other Non-Teaching</option>
-                                            </optgroup>
-                                        </select>
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-file-contract"></i> Appointment Status</label>
-                                        <select id="fappt" name="employment_status">
-                                            <option value="">— Select Status —</option>
-                                            <option value="REGULAR PERMANENT">REGULAR PERMANENT</option>
-                                            <option value="Contractual">Contractual</option>
-                                            <option value="Substitute">Substitute</option>
-                                            <option value="Volunteer">Volunteer</option>
-                                            <option value="Job Order/Contract of Service">Job Order / Contract of Service</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="fr">
-                                    <div class="fg">
-                                        <label><i class="fas fa-graduation-cap"></i> Highest Educational Qualification</label>
-                                        <select id="fqual" name="teacher_qualification">
-                                            <option value="">— Select Qualification —</option>
-                                            <option value="bachelor">Bachelor's Degree</option>
-                                            <option value="bachelors-units">Bachelor's w/ Post-Grad Units</option>
-                                            <option value="post-graduate">Master's (Unit)</option>
-                                            <option value="masteral">Master's Degree</option>
-                                            <option value="doctoral">Doctoral Degree</option>
-                                            <option value="lac">LAC</option>
-                                            <option value="k12">K-12</option>
-                                            <option value="others">Others</option>
-                                        </select>
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-book-open"></i> Major / Specialization</label>
-                                        <input type="text" id="fmaj" name="major" placeholder="e.g. ENGLISH, MATH, TLE">
-                                    </div>
-                                </div>
-                                <div class="fr">
-                                    <div class="fg">
-                                        <label><i class="fas fa-wallet"></i> Funding Source</label>
-                                        <select id="ffund" name="funding_source">
-                                            <option value="NATIONAL">NATIONAL</option>
-                                            <option value="SEF">SEF</option>
-                                            <option value="PTA">PTA</option>
-                                            <option value="MOOE">MOOE</option>
-                                            <option value="NGO">NGO</option>
-                                        </select>
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-tag"></i> Category</label>
-                                        <select id="fcat" name="category">
-                                            <option value="Teaching">Teaching</option>
-                                            <option value="Non-Teaching">Non-Teaching</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Ancillary — Teaching only -->
-                            <div class="fsec" id="ts">
-                                <div class="fst"><i class="fas fa-star"></i> Ancillary / Additional Role</div>
-                                <div class="fr">
-                                    <div class="fg">
-                                        <label><i class="fas fa-users"></i> Club / Coordinator Role</label>
-                                        <input type="text" id="fclub" name="club_role" placeholder="e.g. SSG Adviser, Math Club Coordinator">
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-chalkboard-teacher"></i> Advisory Class</label>
-                                        <input type="text" id="fadv" name="advisory_class" placeholder="e.g. Grade 8-Rosal">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Non-Teaching extra -->
-                            <div class="fsec" id="nts" style="display:none;">
-                                <div class="fst"><i class="fas fa-hard-hat"></i> Non-Teaching Appointment</div>
-                                <div class="fr c3">
-                                    <div class="fg">
-                                        <label><i class="fas fa-id-card"></i> Position / Role</label>
-                                        <input type="text" id="fntpos" name="nt_position" placeholder="e.g. Watchman, Utility Worker">
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-file-alt"></i> Appointment Type</label>
-                                        <select id="fntappt" name="nt_appt_type">
-                                            <option value="">— Select —</option>
-                                            <option value="Job Order/Contract of Service">Job Order / Contract of Service</option>
-                                            <option value="Contractual">Contractual</option>
-                                            <option value="Volunteer">Volunteer</option>
-                                        </select>
-                                    </div>
-                                    <div class="fg">
-                                        <label><i class="fas fa-coins"></i> Fund Source</label>
-                                        <select id="fntfund" name="nt_fund_source">
-                                            <option value="">— Select —</option>
-                                            <option value="SEF">SEF</option>
-                                            <option value="PTA">PTA</option>
-                                            <option value="MOOE">MOOE</option>
-                                            <option value="SEF, MOOE">SEF, MOOE</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ── STEP 3: Schedule ── -->
-                        <div class="step-panel" id="sp3">
-                            <div class="fsec" id="ss">
-                                <div class="fst"><i class="fas fa-calendar-week"></i> Daily Program / Schedule</div>
-                                <p style="font-size:12px;color:#64748b;margin:0 0 12px;line-height:1.6;">Add one row per subject or assignment. Each row will appear as a separate line in the SF7 table. Leave empty if not applicable.</p>
-                                <div style="overflow-x:auto;">
-                                    <table class="stbl" id="stbl">
-                                        <colgroup>
-                                            <col style="width:130px"> <!-- Subject -->
-                                            <col style="width:38px"> <!-- Gr -->
-                                            <col style="width:90px"> <!-- Section -->
-                                            <col style="width:28px"> <!-- M -->
-                                            <col style="width:28px"> <!-- T -->
-                                            <col style="width:28px"> <!-- W -->
-                                            <col style="width:30px"> <!-- TH -->
-                                            <col style="width:28px"> <!-- F -->
-                                            <col style="width:32px"> <!-- SAT -->
-                                            <col style="width:32px"> <!-- SUN -->
-                                            <col style="width:100px"> <!-- Time Start -->
-                                            <col style="width:100px"> <!-- Time End -->
-                                            <col style="width:56px"> <!-- Mins -->
-                                            <col style="width:36px"> <!-- Del -->
-                                        </colgroup>
-                                        <thead>
-                                            <tr>
-                                                <th style="text-align:left;padding-left:8px;">Subject / Role</th>
-                                                <th>Gr</th>
-                                                <th>Section</th>
-                                                <th>M</th>
-                                                <th>T</th>
-                                                <th>W</th>
-                                                <th>TH</th>
-                                                <th>F</th>
-                                                <th>SAT</th>
-                                                <th>SUN</th>
-                                                <th>Time Start</th>
-                                                <th>Time End</th>
-                                                <th>Mins</th>
-                                                <th></th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="srows"></tbody>
-                                    </table>
-                                </div>
-                                <button type="button" class="sadd" id="sadd"><i class="fas fa-plus"></i> Add Row</button>
-                            </div>
-                            <div class="fsec" id="nts-sched" style="display:none;">
-                                <div style="text-align:center;padding:24px;color:#94a3b8;">
-                                    <i class="fas fa-info-circle" style="font-size:28px;display:block;margin-bottom:8px;"></i>
-                                    <p style="margin:0;font-size:13px;">Schedule builder is for <strong>Teaching</strong> personnel only.</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ── STEP 4: Review ── -->
-                        <div class="step-panel" id="sp4">
-                            <div class="fsec" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#bbf7d0;">
-                                <div class="fst" style="color:#16a34a;border-color:#bbf7d0;"><i class="fas fa-check-circle"></i> Ready to Submit</div>
-                                <p style="font-size:13px;color:#15803d;margin:0 0 14px;">Please review the summary below before saving. You can go back to any step to make changes.</p>
-                                <div id="review-box" style="background:#fff;border-radius:10px;border:1px solid #bbf7d0;padding:16px;font-size:13px;line-height:1.9;color:#374151;">
-                                    <div id="rv-name" style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:8px;"></div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;" id="rv-fields"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                    </form>
-                </div>
-
-                <!-- Footer -->
-                <div class="mft">
-                    <div class="mft-left">
-                        <button type="button" class="cbtn" id="cbtn">Cancel</button>
+                <!-- Step Progress -->
+                <div class="step-bar">
+                    <div class="step-item active" data-step="1" onclick="goStep(1)">
+                        <div class="step-dot">1</div>
+                        <span class="step-label">Personal</span>
                     </div>
-                    <div class="mft-right">
-                        <span class="step-indicator" id="step-ind">Step 1 of 4</span>
-                        <button type="button" class="nbtn" id="prevbtn" style="display:none;" onclick="prevStep()">
-                            <i class="fas fa-arrow-left"></i> Back
-                        </button>
-                        <button type="button" class="nbtn" id="nextbtn" onclick="nextStep()">
-                            Next <i class="fas fa-arrow-right"></i>
-                        </button>
-                        <button type="button" class="sbtn grn" id="sbtn" style="display:none;" onclick="document.getElementById('pform').submit()">
-                            <i class="fas fa-save"></i> <span id="slbl">Save Personnel</span>
-                        </button>
+                    <div class="step-item" data-step="2" onclick="goStep(2)">
+                        <div class="step-dot">2</div>
+                        <span class="step-label">Position</span>
+                    </div>
+                    <div class="step-item" data-step="3" onclick="goStep(3)">
+                        <div class="step-dot">3</div>
+                        <span class="step-label">Schedule</span>
+                    </div>
+                    <div class="step-item" data-step="4" onclick="goStep(4)">
+                        <div class="step-dot">4</div>
+                        <span class="step-label">Review</span>
                     </div>
                 </div>
             </div>
+
+            <!-- Scrollable Body -->
+            <div class="msc">
+                <form id="pform" class="mb" method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="action" id="fact" value="add">
+                    <input type="hidden" name="edit_record_id" id="frid">
+                    <input type="hidden" name="edit_type" id="frtype" value="teacher">
+                    <input type="hidden" name="teacher_name" id="ffull">
+
+                    <!-- Encryption notice -->
+                    <div style="display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #86efac;border-radius:10px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:#15803d;">
+                        <i class="fas fa-lock" style="font-size:14px;flex-shrink:0;"></i>
+                        <span><strong>End-to-end encrypted.</strong> Personal identifiers (name, ID, email, contact) are encrypted with AES-256-CBC before being stored in the database. All fields are optional.</span>
+                    </div>
+
+                    <!-- ── STEP 1: Personal Information ── -->
+                    <div class="step-panel active" id="sp1">
+
+                        <!-- Principal Toggle -->
+                        <div id="ptw" class="ptog" style="display:none;">
+                            <label class="tg"><input type="checkbox" id="fisp" name="is_principal"><span class="tgsl"></span></label>
+                            <div>
+                                <div style="font-size:13px;font-weight:700;color:#92400e;"><i class="fas fa-crown" style="color:#d97706;margin-right:5px;"></i>Designate as School Principal</div>
+                                <div style="font-size:11px;color:#b45309;margin-top:2px;">This will archive the current principal and snapshot all teachers.</div>
+                            </div>
+                        </div>
+
+                        <div class="fsec">
+                            <div class="fst"><i class="fas fa-user-circle"></i> Full Name</div>
+                            <div class="fr c3">
+                                <div class="fg">
+                                    <label><i class="fas fa-font"></i> Last Name</label>
+                                    <input type="text" id="fln" name="last_name" placeholder="DELA CRUZ">
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-font"></i> First Name</label>
+                                    <input type="text" id="ffn" name="first_name" placeholder="JUAN">
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-font"></i> Middle Name</label>
+                                    <input type="text" id="fmn" name="middle_name" placeholder="SANTOS">
+                                </div>
+                            </div>
+                            <div class="fr">
+                                <div class="fg">
+                                    <label><i class="fas fa-id-badge"></i> Employee Number</label>
+                                    <input type="text" id="feid" name="teacher_id" placeholder="e.g. 306332001">
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-venus-mars"></i> Sex / Gender</label>
+                                    <select id="fgnd" name="gender">
+                                        <option value="">— Select Gender —</option>
+                                        <option value="MALE">MALE</option>
+                                        <option value="FEMALE">FEMALE</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="fsec">
+                            <div class="fst"><i class="fas fa-address-book"></i> Contact Information</div>
+                            <div class="fr">
+                                <div class="fg">
+                                    <label><i class="fas fa-envelope"></i> Email Address</label>
+                                    <input type="email" id="femail" name="teacher_email" placeholder="teacher@deped.gov.ph">
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-phone"></i> Contact Number</label>
+                                    <input type="tel" id="fcon" name="teacher_contact" placeholder="+63 9XX XXX XXXX">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="fsec">
+                            <div class="fst"><i class="fas fa-camera"></i> Profile Photo</div>
+                            <div class="photo-zone" onclick="this.querySelector('input').click()">
+                                <input type="file" name="teacher_image" accept="image/*" style="display:none;" onchange="updatePhotoLabel(this)">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <p id="photo-lbl">Click or drag to upload a photo</p>
+                                <span>JPG, PNG up to 5MB</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── STEP 2: Position Details ── -->
+                    <div class="step-panel" id="sp2">
+                        <div class="fsec">
+                            <div class="fst"><i class="fas fa-briefcase"></i> Plantilla Position</div>
+                            <div class="fr">
+                                <div class="fg">
+                                    <label><i class="fas fa-medal"></i> Title of Plantilla Position</label>
+                                    <select id="fcl" name="career_level">
+                                        <option value="">— Select Position —</option>
+                                        <optgroup label="School Head">
+                                            <option value="School Principal I">School Principal I</option>
+                                            <option value="School Principal II">School Principal II</option>
+                                            <option value="School Principal III">School Principal III</option>
+                                        </optgroup>
+                                        <optgroup label="Master Teacher">
+                                            <option value="Master Teacher IV">Master Teacher IV</option>
+                                            <option value="Master Teacher III">Master Teacher III</option>
+                                            <option value="Master Teacher II">Master Teacher II</option>
+                                            <option value="Master Teacher I">Master Teacher I</option>
+                                        </optgroup>
+                                        <optgroup label="Head Teacher">
+                                            <option value="Head Teacher III">Head Teacher III</option>
+                                            <option value="Head Teacher II">Head Teacher II</option>
+                                            <option value="Head Teacher I">Head Teacher I</option>
+                                        </optgroup>
+                                        <optgroup label="Teacher">
+                                            <option value="Teacher III">Teacher III</option>
+                                            <option value="Teacher II">Teacher II</option>
+                                            <option value="Teacher I">Teacher I</option>
+                                        </optgroup>
+                                        <optgroup label="Non-Teaching">
+                                            <option value="Watchman">Watchman</option>
+                                            <option value="Utility Worker">Utility Worker</option>
+                                            <option value="Driver">Driver</option>
+                                            <option value="Clerk">Clerk</option>
+                                            <option value="Security Guard">Security Guard</option>
+                                            <option value="Other">Other Non-Teaching</option>
+                                        </optgroup>
+                                    </select>
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-file-contract"></i> Appointment Status</label>
+                                    <select id="fappt" name="employment_status">
+                                        <option value="">— Select Status —</option>
+                                        <option value="REGULAR PERMANENT">REGULAR PERMANENT</option>
+                                        <option value="Contractual">Contractual</option>
+                                        <option value="Substitute">Substitute</option>
+                                        <option value="Volunteer">Volunteer</option>
+                                        <option value="Job Order/Contract of Service">Job Order / Contract of Service</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="fr">
+                                <div class="fg">
+                                    <label><i class="fas fa-graduation-cap"></i> Highest Educational Qualification</label>
+                                    <select id="fqual" name="teacher_qualification">
+                                        <option value="">— Select Qualification —</option>
+                                        <option value="bachelor">Bachelor's Degree</option>
+                                        <option value="bachelors-units">Bachelor's w/ Post-Grad Units</option>
+                                        <option value="post-graduate">Master's (Unit)</option>
+                                        <option value="masteral">Master's Degree</option>
+                                        <option value="doctoral">Doctoral Degree</option>
+                                        <option value="lac">LAC</option>
+                                        <option value="k12">K-12</option>
+                                        <option value="others">Others</option>
+                                    </select>
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-book-open"></i> Major / Specialization</label>
+                                    <input type="text" id="fmaj" name="major" placeholder="e.g. ENGLISH, MATH, TLE">
+                                </div>
+                            </div>
+                            <div class="fr">
+                                <div class="fg">
+                                    <label><i class="fas fa-wallet"></i> Funding Source</label>
+                                    <select id="ffund" name="funding_source">
+                                        <option value="NATIONAL">NATIONAL</option>
+                                        <option value="SEF">SEF</option>
+                                        <option value="PTA">PTA</option>
+                                        <option value="MOOE">MOOE</option>
+                                        <option value="NGO">NGO</option>
+                                    </select>
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-tag"></i> Category</label>
+                                    <select id="fcat" name="category">
+                                        <option value="Teaching">Teaching</option>
+                                        <option value="Non-Teaching">Non-Teaching</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Ancillary — Teaching only -->
+                        <div class="fsec" id="ts">
+                            <div class="fst"><i class="fas fa-star"></i> Ancillary / Additional Role</div>
+                            <div class="fr">
+                                <div class="fg">
+                                    <label><i class="fas fa-users"></i> Club / Coordinator Role</label>
+                                    <input type="text" id="fclub" name="club_role" placeholder="e.g. SSG Adviser, Math Club Coordinator">
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-chalkboard-teacher"></i> Advisory Class</label>
+                                    <input type="text" id="fadv" name="advisory_class" placeholder="e.g. Grade 8-Rosal">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Non-Teaching extra -->
+                        <div class="fsec" id="nts" style="display:none;">
+                            <div class="fst"><i class="fas fa-hard-hat"></i> Non-Teaching Appointment</div>
+                            <div class="fr c3">
+                                <div class="fg">
+                                    <label><i class="fas fa-id-card"></i> Position / Role</label>
+                                    <input type="text" id="fntpos" name="nt_position" placeholder="e.g. Watchman, Utility Worker">
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-file-alt"></i> Appointment Type</label>
+                                    <select id="fntappt" name="nt_appt_type">
+                                        <option value="">— Select —</option>
+                                        <option value="Job Order/Contract of Service">Job Order / Contract of Service</option>
+                                        <option value="Contractual">Contractual</option>
+                                        <option value="Volunteer">Volunteer</option>
+                                    </select>
+                                </div>
+                                <div class="fg">
+                                    <label><i class="fas fa-coins"></i> Fund Source</label>
+                                    <select id="fntfund" name="nt_fund_source">
+                                        <option value="">— Select —</option>
+                                        <option value="SEF">SEF</option>
+                                        <option value="PTA">PTA</option>
+                                        <option value="MOOE">MOOE</option>
+                                        <option value="SEF, MOOE">SEF, MOOE</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── STEP 3: Schedule ── -->
+                    <div class="step-panel" id="sp3">
+                        <div class="fsec" id="ss">
+                            <div class="fst"><i class="fas fa-calendar-week"></i> Daily Program / Schedule</div>
+                            <p style="font-size:12px;color:#64748b;margin:0 0 12px;line-height:1.6;">Add one row per subject or assignment. Each row will appear as a separate line in the SF7 table. Leave empty if not applicable.</p>
+                            <div style="overflow-x:auto;">
+                                <table class="stbl" id="stbl">
+                                    <colgroup>
+                                        <col style="width:130px"> <!-- Subject -->
+                                        <col style="width:38px"> <!-- Gr -->
+                                        <col style="width:90px"> <!-- Section -->
+                                        <col style="width:28px"> <!-- M -->
+                                        <col style="width:28px"> <!-- T -->
+                                        <col style="width:28px"> <!-- W -->
+                                        <col style="width:30px"> <!-- TH -->
+                                        <col style="width:28px"> <!-- F -->
+                                        <col style="width:32px"> <!-- SAT -->
+                                        <col style="width:32px"> <!-- SUN -->
+                                        <col style="width:100px"> <!-- Time Start -->
+                                        <col style="width:100px"> <!-- Time End -->
+                                        <col style="width:56px"> <!-- Mins -->
+                                        <col style="width:36px"> <!-- Del -->
+                                    </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <th style="text-align:left;padding-left:8px;">Subject / Role</th>
+                                            <th>Gr</th>
+                                            <th>Section</th>
+                                            <th>M</th>
+                                            <th>T</th>
+                                            <th>W</th>
+                                            <th>TH</th>
+                                            <th>F</th>
+                                            <th>SAT</th>
+                                            <th>SUN</th>
+                                            <th>Time Start</th>
+                                            <th>Time End</th>
+                                            <th>Mins</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="srows"></tbody>
+                                </table>
+                            </div>
+                            <button type="button" class="sadd" id="sadd"><i class="fas fa-plus"></i> Add Row</button>
+                        </div>
+                        <div class="fsec" id="nts-sched" style="display:none;">
+                            <div style="text-align:center;padding:24px;color:#94a3b8;">
+                                <i class="fas fa-info-circle" style="font-size:28px;display:block;margin-bottom:8px;"></i>
+                                <p style="margin:0;font-size:13px;">Schedule builder is for <strong>Teaching</strong> personnel only.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── STEP 4: Review ── -->
+                    <div class="step-panel" id="sp4">
+                        <div class="fsec" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#bbf7d0;">
+                            <div class="fst" style="color:#16a34a;border-color:#bbf7d0;"><i class="fas fa-check-circle"></i> Ready to Submit</div>
+                            <p style="font-size:13px;color:#15803d;margin:0 0 14px;">Please review the summary below before saving. You can go back to any step to make changes.</p>
+                            <div id="review-box" style="background:#fff;border-radius:10px;border:1px solid #bbf7d0;padding:16px;font-size:13px;line-height:1.9;color:#374151;">
+                                <div id="rv-name" style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:8px;"></div>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;" id="rv-fields"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                </form>
+            </div>
+
+            <!-- Footer -->
+            <div class="mft">
+                <div class="mft-left">
+                    <button type="button" class="cbtn" id="cbtn">Cancel</button>
+                </div>
+                <div class="mft-right">
+                    <span class="step-indicator" id="step-ind">Step 1 of 4</span>
+                    <button type="button" class="nbtn" id="prevbtn" style="display:none;" onclick="prevStep()">
+                        <i class="fas fa-arrow-left"></i> Back
+                    </button>
+                    <button type="button" class="nbtn" id="nextbtn" onclick="nextStep()">
+                        Next <i class="fas fa-arrow-right"></i>
+                    </button>
+                    <button type="button" class="sbtn grn" id="sbtn" style="display:none;" onclick="document.getElementById('pform').submit()">
+                        <i class="fas fa-save"></i> <span id="slbl">Save Personnel</span>
+                    </button>
+                </div>
+            </div>
         </div>
+    </div>
 
-        <script>
-            // ══ Schedule builder ══════════════════════════════════════════════════
-            var sidx = 0;
+    <script>
+        // ══ Schedule builder ══════════════════════════════════════════════════
+        var sidx = 0;
 
-            // ── Auto-calculate minutes from time inputs ──────────────────────────
-            function calcRowMins(timeInput) {
-                var row = timeInput.closest('tr');
-                if (!row) return;
-                var tsEl = row.querySelector('input[name="sched_tstart[]"]');
-                var teEl = row.querySelector('input[name="sched_tend[]"]');
-                var mnEl = row.querySelector('input[name="sched_mins[]"]');
-                if (!tsEl || !teEl || !mnEl) return;
-                var ts = tsEl.value,
-                    te = teEl.value;
-                if (ts && te) {
-                    var sp = ts.split(':').map(Number);
-                    var ep = te.split(':').map(Number);
-                    var diff = (ep[0] * 60 + ep[1]) - (sp[0] * 60 + sp[1]);
-                    mnEl.value = diff > 0 ? diff : 0;
-                } else {
-                    mnEl.value = '';
-                }
+        // ── Auto-calculate minutes from time inputs ──────────────────────────
+        function calcRowMins(timeInput) {
+            var row = timeInput.closest('tr');
+            if (!row) return;
+            var tsEl = row.querySelector('input[name="sched_tstart[]"]');
+            var teEl = row.querySelector('input[name="sched_tend[]"]');
+            var mnEl = row.querySelector('input[name="sched_mins[]"]');
+            if (!tsEl || !teEl || !mnEl) return;
+            var ts = tsEl.value,
+                te = teEl.value;
+            if (ts && te) {
+                var sp = ts.split(':').map(Number);
+                var ep = te.split(':').map(Number);
+                var diff = (ep[0] * 60 + ep[1]) - (sp[0] * 60 + sp[1]);
+                mnEl.value = diff > 0 ? diff : 0;
+            } else {
+                mnEl.value = '';
             }
+        }
 
-            function mkRow(d) {
-                d = d || {};
-                var i = sidx++;
-                var c = function(v) {
-                    return v ? 'checked' : ''
-                };
-                return '<tr>' +
-                    '<td style="padding-left:6px;"><input type="text" name="sched_subject[]" value="' + hq(d.subject || '') + '" placeholder="e.g. ENGLISH"></td>' +
-                    '<td><input type="text" name="sched_grade[]" value="' + hq(d.grade || '') + '" style="text-align:center;" placeholder="9"></td>' +
-                    '<td><input type="text" name="sched_section[]" value="' + hq(d.section || '') + '" placeholder="e.g. Mendel"></td>' +
-                    '<td style="text-align:center;"><input type="checkbox" name="sched_mon[]" value="1" ' + c(d.day_mon) + '></td>' +
-                    '<td style="text-align:center;"><input type="checkbox" name="sched_tue[]" value="1" ' + c(d.day_tue) + '></td>' +
-                    '<td style="text-align:center;"><input type="checkbox" name="sched_wed[]" value="1" ' + c(d.day_wed) + '></td>' +
-                    '<td style="text-align:center;"><input type="checkbox" name="sched_thu[]" value="1" ' + c(d.day_thu) + '></td>' +
-                    '<td style="text-align:center;"><input type="checkbox" name="sched_fri[]" value="1" ' + c(d.day_fri) + '></td>' +
-                    '<td style="text-align:center;"><input type="checkbox" name="sched_sat[]" value="1" ' + c(d.day_sat) + '></td>' +
-                    '<td style="text-align:center;"><input type="checkbox" name="sched_sun[]" value="1" ' + c(d.day_sun) + '></td>' +
-                    '<td><input type="time" name="sched_tstart[]" value="' + hq(t24(d.time_start || '')) + '" style="display:block;width:100%;" oninput="calcRowMins(this)" onchange="calcRowMins(this)"></td>' +
-                    '<td><input type="time" name="sched_tend[]"   value="' + hq(t24(d.time_end || '')) + '" style="display:block;width:100%;" oninput="calcRowMins(this)" onchange="calcRowMins(this)"></td>' +
-                    '<td><input type="number" name="sched_mins[]" value="' + hq(d.minutes || '') + '" min="0" readonly style="text-align:center;background:#f1f5f9;cursor:not-allowed;color:#475569;"></td>' +
-                    '<td style="text-align:center;"><button type="button" class="sdel" onclick="this.closest(\'tr\').remove()"><i class="fas fa-times"></i></button></td>' +
-                    '</tr>';
+        function mkRow(d) {
+            d = d || {};
+            var i = sidx++;
+            var c = function(v) {
+                return v ? 'checked' : ''
+            };
+            return '<tr>' +
+                '<td style="padding-left:6px;"><input type="text" name="sched_subject[]" value="' + hq(d.subject || '') + '" placeholder="e.g. ENGLISH"></td>' +
+                '<td><input type="text" name="sched_grade[]" value="' + hq(d.grade || '') + '" style="text-align:center;" placeholder="9"></td>' +
+                '<td><input type="text" name="sched_section[]" value="' + hq(d.section || '') + '" placeholder="e.g. Mendel"></td>' +
+                '<td style="text-align:center;"><input type="checkbox" name="sched_mon[]" value="1" ' + c(d.day_mon) + '></td>' +
+                '<td style="text-align:center;"><input type="checkbox" name="sched_tue[]" value="1" ' + c(d.day_tue) + '></td>' +
+                '<td style="text-align:center;"><input type="checkbox" name="sched_wed[]" value="1" ' + c(d.day_wed) + '></td>' +
+                '<td style="text-align:center;"><input type="checkbox" name="sched_thu[]" value="1" ' + c(d.day_thu) + '></td>' +
+                '<td style="text-align:center;"><input type="checkbox" name="sched_fri[]" value="1" ' + c(d.day_fri) + '></td>' +
+                '<td style="text-align:center;"><input type="checkbox" name="sched_sat[]" value="1" ' + c(d.day_sat) + '></td>' +
+                '<td style="text-align:center;"><input type="checkbox" name="sched_sun[]" value="1" ' + c(d.day_sun) + '></td>' +
+                '<td><input type="time" name="sched_tstart[]" value="' + hq(t24(d.time_start || '')) + '" style="display:block;width:100%;" oninput="calcRowMins(this)" onchange="calcRowMins(this)"></td>' +
+                '<td><input type="time" name="sched_tend[]"   value="' + hq(t24(d.time_end || '')) + '" style="display:block;width:100%;" oninput="calcRowMins(this)" onchange="calcRowMins(this)"></td>' +
+                '<td><input type="number" name="sched_mins[]" value="' + hq(d.minutes || '') + '" min="0" readonly style="text-align:center;background:#f1f5f9;cursor:not-allowed;color:#475569;"></td>' +
+                '<td style="text-align:center;"><button type="button" class="sdel" onclick="this.closest(\'tr\').remove()"><i class="fas fa-times"></i></button></td>' +
+                '</tr>';
+        }
+
+        function hq(v) {
+            return String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        }
+
+        function t24(t) {
+            if (!t) return '';
+            if (/^\d{1,2}:\d{2}$/.test(t)) return t;
+            var m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+            if (!m) return '';
+            var h = parseInt(m[1]),
+                mn = m[2],
+                ap = m[3].toUpperCase();
+            if (ap === 'PM' && h !== 12) h += 12;
+            if (ap === 'AM' && h === 12) h = 0;
+            return String(h).padStart(2, '0') + ':' + mn;
+        }
+
+        document.getElementById('sadd').addEventListener('click', function() {
+            document.getElementById('srows').insertAdjacentHTML('beforeend', mkRow());
+        });
+
+        // ══ Photo label update ════════════════════════════════════════════════
+        function updatePhotoLabel(input) {
+            var lbl = document.getElementById('photo-lbl');
+            if (input.files && input.files[0]) {
+                lbl.textContent = '✓ ' + input.files[0].name;
+                lbl.style.color = '#16a34a';
             }
+        }
 
-            function hq(v) {
-                return String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-            }
+        // ══ Step Wizard ═══════════════════════════════════════════════════════
+        var currentStep = 1;
+        var totalSteps = 4;
 
-            function t24(t) {
-                if (!t) return '';
-                if (/^\d{1,2}:\d{2}$/.test(t)) return t;
-                var m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
-                if (!m) return '';
-                var h = parseInt(m[1]),
-                    mn = m[2],
-                    ap = m[3].toUpperCase();
-                if (ap === 'PM' && h !== 12) h += 12;
-                if (ap === 'AM' && h === 12) h = 0;
-                return String(h).padStart(2, '0') + ':' + mn;
-            }
-
-            document.getElementById('sadd').addEventListener('click', function() {
-                document.getElementById('srows').insertAdjacentHTML('beforeend', mkRow());
+        function goStep(n) {
+            if (n < 1 || n > totalSteps) return;
+            // Update panels
+            document.querySelectorAll('.step-panel').forEach(function(p) {
+                p.classList.remove('active');
             });
+            document.getElementById('sp' + n).classList.add('active');
+            // Update step bar
+            document.querySelectorAll('.step-item').forEach(function(item) {
+                var s = parseInt(item.dataset.step);
+                item.classList.remove('active', 'done');
+                if (s < n) item.classList.add('done');
+                else if (s === n) item.classList.add('active');
+            });
+            // Update footer
+            document.getElementById('step-ind').textContent = 'Step ' + n + ' of ' + totalSteps;
+            document.getElementById('prevbtn').style.display = n > 1 ? 'flex' : 'none';
+            document.getElementById('nextbtn').style.display = n < totalSteps ? 'flex' : 'none';
+            document.getElementById('sbtn').style.display = n === totalSteps ? 'flex' : 'none';
+            // Scroll to top
+            document.querySelector('.msc').scrollTop = 0;
+            // Build review on step 4
+            if (n === 4) buildReview();
+            currentStep = n;
+        }
 
-            // ══ Photo label update ════════════════════════════════════════════════
-            function updatePhotoLabel(input) {
-                var lbl = document.getElementById('photo-lbl');
-                if (input.files && input.files[0]) {
-                    lbl.textContent = '✓ ' + input.files[0].name;
-                    lbl.style.color = '#16a34a';
-                }
+        function nextStep() {
+            goStep(currentStep + 1);
+        }
+
+        function prevStep() {
+            goStep(currentStep - 1);
+        }
+
+        function buildReview() {
+            var ln = document.getElementById('fln').value || '—';
+            var fn = document.getElementById('ffn').value || '—';
+            var mn = document.getElementById('fmn').value || '';
+            var fullName = ln.toUpperCase() + ', ' + fn.toUpperCase() + (mn ? ' ' + mn.toUpperCase() : '');
+            document.getElementById('rv-name').textContent = fullName;
+
+            var fields = [
+                ['Employee No.', document.getElementById('feid').value],
+                ['Gender', document.getElementById('fgnd').value],
+                ['Email', document.getElementById('femail').value],
+                ['Contact', document.getElementById('fcon').value],
+                ['Position', document.getElementById('fcl').value],
+                ['Appointment', document.getElementById('fappt').value],
+                ['Qualification', document.getElementById('fqual').options[document.getElementById('fqual').selectedIndex]?.text || ''],
+                ['Major', document.getElementById('fmaj').value],
+                ['Funding', document.getElementById('ffund').value],
+                ['Category', document.getElementById('fcat').value],
+                ['Advisory Class', document.getElementById('fadv').value],
+                ['Club Role', document.getElementById('fclub').value],
+            ];
+
+            var html = '';
+            fields.forEach(function(f) {
+                if (f[1]) html += '<div><span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.3px;">' + f[0] + ':</span><br><span style="font-weight:600;color:#0f172a;">' + (f[1] || '—') + '</span></div>';
+            });
+            document.getElementById('rv-fields').innerHTML = html || '<div style="color:#94a3b8;font-style:italic;">No data entered.</div>';
+        }
+
+        // ══ Modal ══════════════════════════════════════════════════════════════
+        var modal = document.getElementById('pmod'),
+            mhd = document.getElementById('mhd'),
+            mtit = document.getElementById('mtit'),
+            msubt = document.getElementById('msubt'),
+            mhdi = document.getElementById('mhd-ico'),
+            mform = document.getElementById('pform'),
+            sbtn = document.getElementById('sbtn'),
+            slbl = document.getElementById('slbl');
+
+        function openModal() {
+            modal.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+            goStep(1);
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+            document.body.style.overflow = '';
+        }
+
+        function syncCat() {
+            var isNT = document.getElementById('fcat').value === 'Non-Teaching';
+            document.getElementById('nts').style.display = isNT ? 'block' : 'none';
+            document.getElementById('ts').style.display = isNT ? 'none' : 'block';
+            document.getElementById('ss').style.display = isNT ? 'none' : 'block';
+            if (document.getElementById('nts-sched')) {
+                document.getElementById('nts-sched').style.display = isNT ? 'block' : 'none';
             }
+        }
+        document.getElementById('fcat').addEventListener('change', syncCat);
+        syncCat();
 
-            // ══ Step Wizard ═══════════════════════════════════════════════════════
-            var currentStep = 1;
-            var totalSteps = 4;
-
-            function goStep(n) {
-                if (n < 1 || n > totalSteps) return;
-                // Update panels
-                document.querySelectorAll('.step-panel').forEach(function(p) {
-                    p.classList.remove('active');
-                });
-                document.getElementById('sp' + n).classList.add('active');
-                // Update step bar
-                document.querySelectorAll('.step-item').forEach(function(item) {
-                    var s = parseInt(item.dataset.step);
-                    item.classList.remove('active', 'done');
-                    if (s < n) item.classList.add('done');
-                    else if (s === n) item.classList.add('active');
-                });
-                // Update footer
-                document.getElementById('step-ind').textContent = 'Step ' + n + ' of ' + totalSteps;
-                document.getElementById('prevbtn').style.display = n > 1 ? 'flex' : 'none';
-                document.getElementById('nextbtn').style.display = n < totalSteps ? 'flex' : 'none';
-                document.getElementById('sbtn').style.display = n === totalSteps ? 'flex' : 'none';
-                // Scroll to top
-                document.querySelector('.msc').scrollTop = 0;
-                // Build review on step 4
-                if (n === 4) buildReview();
-                currentStep = n;
-            }
-
-            function nextStep() {
-                goStep(currentStep + 1);
-            }
-
-            function prevStep() {
-                goStep(currentStep - 1);
-            }
-
-            function buildReview() {
-                var ln = document.getElementById('fln').value || '—';
-                var fn = document.getElementById('ffn').value || '—';
-                var mn = document.getElementById('fmn').value || '';
-                var fullName = ln.toUpperCase() + ', ' + fn.toUpperCase() + (mn ? ' ' + mn.toUpperCase() : '');
-                document.getElementById('rv-name').textContent = fullName;
-
-                var fields = [
-                    ['Employee No.', document.getElementById('feid').value],
-                    ['Gender', document.getElementById('fgnd').value],
-                    ['Email', document.getElementById('femail').value],
-                    ['Contact', document.getElementById('fcon').value],
-                    ['Position', document.getElementById('fcl').value],
-                    ['Appointment', document.getElementById('fappt').value],
-                    ['Qualification', document.getElementById('fqual').options[document.getElementById('fqual').selectedIndex]?.text || ''],
-                    ['Major', document.getElementById('fmaj').value],
-                    ['Funding', document.getElementById('ffund').value],
-                    ['Category', document.getElementById('fcat').value],
-                    ['Advisory Class', document.getElementById('fadv').value],
-                    ['Club Role', document.getElementById('fclub').value],
-                ];
-
-                var html = '';
-                fields.forEach(function(f) {
-                    if (f[1]) html += '<div><span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.3px;">' + f[0] + ':</span><br><span style="font-weight:600;color:#0f172a;">' + (f[1] || '—') + '</span></div>';
-                });
-                document.getElementById('rv-fields').innerHTML = html || '<div style="color:#94a3b8;font-style:italic;">No data entered.</div>';
-            }
-
-            // ══ Modal ══════════════════════════════════════════════════════════════
-            var modal = document.getElementById('pmod'),
-                mhd = document.getElementById('mhd'),
-                mtit = document.getElementById('mtit'),
-                msubt = document.getElementById('msubt'),
-                mhdi = document.getElementById('mhd-ico'),
-                mform = document.getElementById('pform'),
-                sbtn = document.getElementById('sbtn'),
-                slbl = document.getElementById('slbl');
-
-            function openModal() {
-                modal.style.display = 'block';
-                document.body.style.overflow = 'hidden';
-                goStep(1);
-            }
-
-            function closeModal() {
-                modal.style.display = 'none';
-                document.body.style.overflow = '';
-            }
-
-            function syncCat() {
-                var isNT = document.getElementById('fcat').value === 'Non-Teaching';
-                document.getElementById('nts').style.display = isNT ? 'block' : 'none';
-                document.getElementById('ts').style.display = isNT ? 'none' : 'block';
-                document.getElementById('ss').style.display = isNT ? 'none' : 'block';
-                if (document.getElementById('nts-sched')) {
-                    document.getElementById('nts-sched').style.display = isNT ? 'block' : 'none';
-                }
-            }
-            document.getElementById('fcat').addEventListener('change', syncCat);
+        function resetForm() {
+            mform.reset();
+            document.getElementById('frid').value = '';
+            document.getElementById('frtype').value = 'teacher';
+            document.getElementById('srows').innerHTML = '';
+            sidx = 0;
             syncCat();
+            document.getElementById('photo-lbl').textContent = 'Click or drag to upload a photo';
+            document.getElementById('photo-lbl').style.color = '';
+        }
 
-            function resetForm() {
-                mform.reset();
-                document.getElementById('frid').value = '';
-                document.getElementById('frtype').value = 'teacher';
-                document.getElementById('srows').innerHTML = '';
-                sidx = 0;
-                syncCat();
-                document.getElementById('photo-lbl').textContent = 'Click or drag to upload a photo';
-                document.getElementById('photo-lbl').style.color = '';
-            }
+        document.getElementById('xbtn').addEventListener('click', closeModal);
+        document.getElementById('cbtn').addEventListener('click', closeModal);
+        window.addEventListener('click', function(e) {
+            if (e.target === modal) closeModal();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeModal();
+        });
 
-            document.getElementById('xbtn').addEventListener('click', closeModal);
-            document.getElementById('cbtn').addEventListener('click', closeModal);
-            window.addEventListener('click', function(e) {
-                if (e.target === modal) closeModal();
-            });
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') closeModal();
-            });
+        // Build full name before submit
+        mform.addEventListener('submit', function() {
+            var ln = (document.getElementById('fln').value || '').trim().toUpperCase();
+            var fn = (document.getElementById('ffn').value || '').trim().toUpperCase();
+            var mn = (document.getElementById('fmn').value || '').trim().toUpperCase();
+            document.getElementById('ffull').value = ln + (fn ? ', ' + fn : '') + (mn ? ' ' + mn : '');
+        });
 
-            // Build full name before submit
-            mform.addEventListener('submit', function() {
-                var ln = (document.getElementById('fln').value || '').trim().toUpperCase();
-                var fn = (document.getElementById('ffn').value || '').trim().toUpperCase();
-                var mn = (document.getElementById('fmn').value || '').trim().toUpperCase();
-                document.getElementById('ffull').value = ln + (fn ? ', ' + fn : '') + (mn ? ' ' + mn : '');
-            });
+        // Add Teacher
+        document.getElementById('btn-teacher').addEventListener('click', function() {
+            resetForm();
+            document.getElementById('fact').value = 'add';
+            document.getElementById('ptw').style.display = 'flex';
+            document.getElementById('fisp').checked = false;
+            mhd.className = 'mhd grn';
+            mhdi.className = 'fas fa-user-plus';
+            mtit.textContent = 'Add Personnel';
+            msubt.textContent = 'All fields are optional — fill in only what is available';
+            sbtn.className = 'sbtn grn';
+            slbl.textContent = 'Save Personnel';
+            openModal();
+        });
 
-            // Add Teacher
-            document.getElementById('btn-teacher').addEventListener('click', function() {
+        // Add Principal
+        document.getElementById('btn-principal').addEventListener('click', function() {
+            resetForm();
+            document.getElementById('fact').value = 'add';
+            document.getElementById('ptw').style.display = 'flex';
+            document.getElementById('fisp').checked = true;
+            document.getElementById('fcl').value = 'School Principal I';
+            document.getElementById('fappt').value = 'REGULAR PERMANENT';
+            document.getElementById('fcat').value = 'Teaching';
+            syncCat();
+            mhd.className = 'mhd gld';
+            mhdi.className = 'fas fa-crown';
+            mtit.textContent = 'Add School Principal';
+            msubt.textContent = 'Appointing a new principal will archive the current one';
+            sbtn.className = 'sbtn gld';
+            slbl.textContent = 'Appoint Principal';
+            openModal();
+        });
+
+        // Edit
+        document.querySelectorAll('.ab.e').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
                 resetForm();
-                document.getElementById('fact').value = 'add';
-                document.getElementById('ptw').style.display = 'flex';
-                document.getElementById('fisp').checked = false;
-                mhd.className = 'mhd grn';
-                mhdi.className = 'fas fa-user-plus';
-                mtit.textContent = 'Add Personnel';
-                msubt.textContent = 'All fields are optional — fill in only what is available';
-                sbtn.className = 'sbtn grn';
-                slbl.textContent = 'Save Personnel';
-                openModal();
-            });
+                var d = this.dataset;
+                document.getElementById('fact').value = 'edit';
+                document.getElementById('frid').value = d.rid;
+                document.getElementById('frtype').value = d.type;
+                document.getElementById('ptw').style.display = 'none';
 
-            // Add Principal
-            document.getElementById('btn-principal').addEventListener('click', function() {
-                resetForm();
-                document.getElementById('fact').value = 'add';
-                document.getElementById('ptw').style.display = 'flex';
-                document.getElementById('fisp').checked = true;
-                document.getElementById('fcl').value = 'School Principal I';
-                document.getElementById('fappt').value = 'REGULAR PERMANENT';
-                document.getElementById('fcat').value = 'Teaching';
+                document.getElementById('feid').value = d.id || '';
+                document.getElementById('fln').value = d.lastname || '';
+                document.getElementById('ffn').value = d.firstname || '';
+                document.getElementById('fmn').value = d.middlename || '';
+                document.getElementById('fgnd').value = d.gender || '';
+                document.getElementById('fcl').value = d.careerlevel || '';
+                document.getElementById('fappt').value = d.employment || '';
+                document.getElementById('fqual').value = d.qual || '';
+                document.getElementById('fmaj').value = d.major || '';
+                document.getElementById('femail').value = d.email || '';
+                document.getElementById('fcon').value = d.contact || '';
+                document.getElementById('fadv').value = d.advisory || '';
+                document.getElementById('fclub').value = d.club || '';
+                document.getElementById('fntpos').value = d.ntpos || '';
+                document.getElementById('fntappt').value = d.ntappt || '';
+                document.getElementById('fntfund').value = d.ntfund || '';
+                document.getElementById('fcat').value = d.category || 'Teaching';
+                document.getElementById('ffund').value = d.funding || 'NATIONAL';
                 syncCat();
-                mhd.className = 'mhd gld';
-                mhdi.className = 'fas fa-crown';
-                mtit.textContent = 'Add School Principal';
-                msubt.textContent = 'Appointing a new principal will archive the current one';
-                sbtn.className = 'sbtn gld';
-                slbl.textContent = 'Appoint Principal';
-                openModal();
-            });
 
-            // Edit
-            document.querySelectorAll('.ab.e').forEach(function(btn) {
-                btn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    resetForm();
-                    var d = this.dataset;
-                    document.getElementById('fact').value = 'edit';
-                    document.getElementById('frid').value = d.rid;
-                    document.getElementById('frtype').value = d.type;
-                    document.getElementById('ptw').style.display = 'none';
-
-                    document.getElementById('feid').value = d.id || '';
-                    document.getElementById('fln').value = d.lastname || '';
-                    document.getElementById('ffn').value = d.firstname || '';
-                    document.getElementById('fmn').value = d.middlename || '';
-                    document.getElementById('fgnd').value = d.gender || '';
-                    document.getElementById('fcl').value = d.careerlevel || '';
-                    document.getElementById('fappt').value = d.employment || '';
-                    document.getElementById('fqual').value = d.qual || '';
-                    document.getElementById('fmaj').value = d.major || '';
-                    document.getElementById('femail').value = d.email || '';
-                    document.getElementById('fcon').value = d.contact || '';
-                    document.getElementById('fadv').value = d.advisory || '';
-                    document.getElementById('fclub').value = d.club || '';
-                    document.getElementById('fntpos').value = d.ntpos || '';
-                    document.getElementById('fntappt').value = d.ntappt || '';
-                    document.getElementById('fntfund').value = d.ntfund || '';
-                    document.getElementById('fcat').value = d.category || 'Teaching';
-                    document.getElementById('ffund').value = d.funding || 'NATIONAL';
-                    syncCat();
-
-                    // Load schedules via AJAX
-                    fetch('teachers.php?get_schedules=1&tid=' + encodeURIComponent(d.id) + '&ttype=' + encodeURIComponent(d.type))
-                        .then(function(r) {
-                            return r.json();
-                        })
-                        .then(function(rows) {
-                            document.getElementById('srows').innerHTML = '';
-                            sidx = 0;
-                            if (rows && rows.length) {
-                                rows.forEach(function(r) {
-                                    document.getElementById('srows').insertAdjacentHTML('beforeend', mkRow(r));
-                                });
-                            } else {
-                                document.getElementById('srows').insertAdjacentHTML('beforeend', mkRow());
-                            }
-                        }).catch(function() {
+                // Load schedules via AJAX
+                fetch('teachers.php?get_schedules=1&tid=' + encodeURIComponent(d.id) + '&ttype=' + encodeURIComponent(d.type))
+                    .then(function(r) {
+                        return r.json();
+                    })
+                    .then(function(rows) {
+                        document.getElementById('srows').innerHTML = '';
+                        sidx = 0;
+                        if (rows && rows.length) {
+                            rows.forEach(function(r) {
+                                document.getElementById('srows').insertAdjacentHTML('beforeend', mkRow(r));
+                            });
+                        } else {
                             document.getElementById('srows').insertAdjacentHTML('beforeend', mkRow());
-                        });
+                        }
+                    }).catch(function() {
+                        document.getElementById('srows').insertAdjacentHTML('beforeend', mkRow());
+                    });
 
-                    var isp = (d.type === 'principal');
-                    mhd.className = isp ? 'mhd gld' : 'mhd grn';
-                    mhdi.className = isp ? 'fas fa-crown' : 'fas fa-user-edit';
-                    mtit.textContent = isp ? 'Edit Principal' : 'Edit Personnel';
-                    msubt.textContent = 'Update the personnel record below';
-                    sbtn.className = isp ? 'sbtn gld' : 'sbtn grn';
-                    slbl.textContent = 'Save Changes';
-                    openModal();
-                });
+                var isp = (d.type === 'principal');
+                mhd.className = isp ? 'mhd gld' : 'mhd grn';
+                mhdi.className = isp ? 'fas fa-crown' : 'fas fa-user-edit';
+                mtit.textContent = isp ? 'Edit Principal' : 'Edit Personnel';
+                msubt.textContent = 'Update the personnel record below';
+                sbtn.className = isp ? 'sbtn gld' : 'sbtn grn';
+                slbl.textContent = 'Save Changes';
+                openModal();
             });
+        });
 
-            // Delete
-            document.querySelectorAll('.ab.d').forEach(function(btn) {
-                btn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    var lbl = this.dataset.type === 'principal' ? 'principal' : 'personnel';
-                    if (confirm('Delete this ' + lbl + '? This action cannot be undone.')) {
-                        document.getElementById('drid').value = this.dataset.rid;
-                        document.getElementById('dtype').value = this.dataset.type;
-                        document.getElementById('delf').submit();
-                    }
-                });
+        // Delete
+        document.querySelectorAll('.ab.d').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                var lbl = this.dataset.type === 'principal' ? 'principal' : 'personnel';
+                if (confirm('Delete this ' + lbl + '? This action cannot be undone.')) {
+                    document.getElementById('drid').value = this.dataset.rid;
+                    document.getElementById('dtype').value = this.dataset.type;
+                    document.getElementById('delf').submit();
+                }
             });
+        });
 
-            // Auto-dismiss alerts
-            setTimeout(function() {
-                document.querySelectorAll('.alert').forEach(function(a) {
-                    a.style.transition = 'opacity .4s';
-                    a.style.opacity = '0';
-                    setTimeout(function() {
-                        a.closest('.alert-c') && a.closest('.alert-c').remove();
-                    }, 400);
-                });
-            }, 4000);
-        </script>
+        // Auto-dismiss alerts
+        setTimeout(function() {
+            document.querySelectorAll('.alert').forEach(function(a) {
+                a.style.transition = 'opacity .4s';
+                a.style.opacity = '0';
+                setTimeout(function() {
+                    a.closest('.alert-c') && a.closest('.alert-c').remove();
+                }, 400);
+            });
+        }, 4000);
+    </script>
 </body>
 
 </html>

@@ -32,8 +32,10 @@ header('Content-Type: application/json');
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 // ── DB: walk up the tree to find db_connection.php ───────────
+// Start from dirname(__DIR__) (one level up = project root) so we
+// skip any stub/empty db_connection.php inside user_account/ itself.
 $_db = null;
-$_s = __DIR__;
+$_s = dirname(__DIR__);
 for ($_i = 0; $_i < 6; $_i++) {
     if (file_exists($_s . '/db_connection.php')) {
         $_db = $_s . '/db_connection.php';
@@ -83,6 +85,42 @@ function sc_table_columns(mysqli $conn): array
 function sc_has_col(mysqli $conn, string $col): bool
 {
     return in_array($col, sc_table_columns($conn), true);
+}
+
+/**
+ * Generate a unique student_id in the format S-YYYY-NNNN.
+ * Finds the highest existing number for the current year and increments it.
+ * Falls back to a random suffix if the query fails.
+ */
+function sc_generate_student_id(mysqli $conn): string
+{
+    $year = date('Y');
+    $prefix = "S-{$year}-";
+
+    // Find the highest sequence number used this year
+    $stmt = $conn->prepare(
+        "SELECT student_id FROM students WHERE student_id LIKE ? ORDER BY student_id DESC LIMIT 1"
+    );
+    if ($stmt) {
+        $like = $prefix . '%';
+        $stmt->bind_param('s', $like);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row) {
+            // Extract numeric suffix and increment
+            $last_num = (int) substr($row['student_id'], strlen($prefix));
+            $next_num = $last_num + 1;
+        } else {
+            $next_num = 1;
+        }
+    } else {
+        // Query failed — use a random number to avoid collision
+        $next_num = random_int(1000, 9999);
+    }
+
+    return $prefix . str_pad($next_num, 4, '0', STR_PAD_LEFT);
 }
 
 function sc_send_email(string $to, string $otp): bool
@@ -358,6 +396,13 @@ if ($action === 'sc_verify_otp') {
         }
     }
 
+    // ── student_id — generate a unique S-YYYY-NNNN value ──────
+    if (sc_has_col($conn, 'student_id')) {
+        $insert_cols[] = 'student_id';
+        $insert_vals[] = sc_generate_student_id($conn);
+        $insert_types .= 's';
+    }
+
     // ── Password ────────────────────────────────────────────────
     if (sc_has_col($conn, 'password')) {
         $insert_cols[] = 'password';
@@ -442,10 +487,18 @@ if ($action === 'sc_verify_otp') {
     $new_id = (int)$conn->insert_id;
     $stmt->close();
 
+    // Retrieve the generated student_id string for the session
+    $generated_student_id = null;
+    $sid_row = $conn->query("SELECT student_id FROM students WHERE id = {$new_id} LIMIT 1");
+    if ($sid_row) {
+        $sid_data = $sid_row->fetch_assoc();
+        $generated_student_id = $sid_data['student_id'] ?? null;
+    }
+
     // ── Set session so Dashboard/Profile auth passes immediately ──
     session_regenerate_id(true);
     $_SESSION['user_id']       = $new_id;
-    $_SESSION['student_id']    = $new_id;  // For backward compatibility
+    $_SESSION['student_id']    = $generated_student_id ?? $new_id;  // prefer S-YYYY-NNNN string
     $_SESSION['user_type']     = $p['user_type'];
     $_SESSION['student_name']  = trim($p['first_name'] . ' ' . $p['last_name']);
     $_SESSION['login_method']  = $p['method'];

@@ -1,504 +1,560 @@
 <?php
-// Start session for CSRF token
+// ═══════════════════════════════════════════════════════════════════════════
+//  finance.php  —  Cash Disbursement Register  (CDR)
+//  Buyoan National High School — DepEd Division of Legazpi City
+//  Fund Cluster: 101101
+//  Upgraded: monthly grouping, carry-forward balances, per-UACS cards,
+//            full CDR column parity with the xlsx file.
+// ═══════════════════════════════════════════════════════════════════════════
 session_start();
 include '../db_connection.php';
 assert($conn instanceof mysqli);
 
-// Generate CSRF token if not exists
 if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-// Pagination and filtering variables
-$records_per_page = 10;
-$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
-$search = isset($_GET['search']) ? trim($_GET['search']) : '';
-$category_filter = isset($_GET['category']) ? trim($_GET['category']) : '';
-$offset = ($page - 1) * $records_per_page;
+// ── Month ordering & labels (matching xlsx sheet order) ──────────────────
+$MONTH_ORDER = [
+    'MAY' => 1,
+    'JUNE' => 2,
+    'JULY' => 3,
+    'AUGUST' => 4,
+    'SEPTEMBER' => 5,
+    'OCTOBER' => 6,
+    'NOVEMBER' => 7,
+    'DECEMBER' => 8,
+    'JANUARY 2026' => 9,
+    'FEBRUARY 2026' => 10,
+    'SARP' => 11,
+    'TEENHUB' => 12,
+    'SNED' => 13,
+    'WINS' => 14,
+];
 
-// Build WHERE clause for filtering
-$where_conditions = [];
-$params = [];
-$param_types = "";
+// ── AJAX / POST handlers ─────────────────────────────────────────────────
+if (
+    isset($_SERVER['HTTP_X_REQUESTED_WITH']) &&
+    strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest'
+) {
 
-if (!empty($search)) {
-    $where_conditions[] = "(fund_title LIKE ? OR description LIKE ?)";
-    $search_param = "%$search%";
-    $params[] = &$search_param;
-    $params[] = &$search_param;
-    $param_types .= "ss";
-}
-
-if (!empty($category_filter)) {
-    $where_conditions[] = "category = ?";
-    $params[] = &$category_filter;
-    $param_types .= "s";
-}
-
-$where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
-
-// Handle AJAX requests
-if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
     header('Content-Type: application/json');
-
-    // Verify CSRF token
     $csrf_token = $_POST['csrf_token'] ?? '';
     if (!hash_equals($_SESSION['csrf_token'], $csrf_token)) {
         echo json_encode(['status' => 'error', 'message' => 'Invalid security token.']);
         exit;
     }
 
-    if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
 
-        // Delete finance record
-        if ($action == 'delete') {
+        // ── DELETE ────────────────────────────────────────────────────────
+        if ($action === 'delete') {
             $id = intval($_POST['id']);
-
-            // Get the proof image first to delete file
-            $stmt = $conn->prepare("SELECT proof_image FROM finance_records WHERE id = ?");
-            if (!$stmt) {
-                echo json_encode(['status' => 'error', 'message' => 'Database error.']);
-                exit;
-            }
-            $stmt->bind_param("i", $id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $record = $result->fetch_assoc();
-            $stmt->close();
-
-            if (!$record) {
+            $st = $conn->prepare("SELECT proof_image FROM finance_records WHERE id = ?");
+            $st->bind_param("i", $id);
+            $st->execute();
+            $row = $st->get_result()->fetch_assoc();
+            $st->close();
+            if (!$row) {
                 echo json_encode(['status' => 'error', 'message' => 'Record not found.']);
                 exit;
             }
-
-            // Delete from database
-            $stmt = $conn->prepare("DELETE FROM finance_records WHERE id = ?");
-            if (!$stmt) {
-                echo json_encode(['status' => 'error', 'message' => 'Database error.']);
-                exit;
+            $st = $conn->prepare("DELETE FROM finance_records WHERE id = ?");
+            $st->bind_param("i", $id);
+            $ok = $st->execute();
+            $st->close();
+            if ($ok && $row['proof_image']) {
+                $f = "admin_assets/finance_proofs/" . $row['proof_image'];
+                if (file_exists($f)) unlink($f);
             }
-            $stmt->bind_param("i", $id);
-            $success = $stmt->execute();
-            $stmt->close();
-
-            // Delete proof image file if exists
-            if ($success && $record && $record['proof_image']) {
-                $file_path = "admin_assets/finance_proofs/" . $record['proof_image'];
-                if (file_exists($file_path)) {
-                    unlink($file_path);
-                }
-            }
-
-            if ($success) {
-                echo json_encode(['status' => 'success', 'message' => 'Record deleted successfully!']);
-            } else {
-                echo json_encode(['status' => 'error', 'message' => 'Error deleting record.']);
-            }
+            echo json_encode($ok
+                ? ['status' => 'success', 'message' => 'Record deleted successfully!']
+                : ['status' => 'error', 'message' => 'Error deleting record.']);
             exit;
         }
 
-        // Edit finance record
-        if ($action == 'edit') {
+        // ── EDIT ─────────────────────────────────────────────────────────
+        if ($action === 'edit') {
             $id = intval($_POST['id']);
-            $fund_title       = trim($_POST['fund_title']       ?? '');
-            $description      = trim($_POST['description']      ?? '');
-            $transaction_date = $_POST['transaction_date']       ?? '';
-            $category         = trim($_POST['category']         ?? '');
-            $dv_check_no      = trim($_POST['dv_check_no']      ?? '');
-            $cash_advance     = floatval($_POST['cash_advance']  ?? 0);
-            $payments         = floatval($_POST['payments']      ?? 0);
-            $tax_withheld     = floatval($_POST['tax_withheld']  ?? 0);
-            $balance          = floatval($_POST['balance']       ?? 0);
-            $mooe_col         = trim($_POST['mooe_col']          ?? '');
-            $electricity      = floatval($_POST['electricity']   ?? 0);
-            $semi_expendable  = floatval($_POST['semi_expendable'] ?? 0);
-            $other_general    = floatval($_POST['other_general'] ?? 0);
-            $training         = floatval($_POST['training']      ?? 0);
-            $water            = floatval($_POST['water']         ?? 0);
-            $other_supplies   = floatval($_POST['other_supplies'] ?? 0);
-            $internet         = floatval($_POST['internet']      ?? 0);
-            $due_to_bir           = floatval($_POST['due_to_bir']          ?? 0);
-            $amount_other         = floatval($_POST['amount_other']        ?? 0);
-            $account_description  = trim($_POST['account_description']     ?? '');
-            $uacs_code            = trim($_POST['uacs_code']               ?? '');
-            $amount = $payments; // amount stored in DB = payments value
+            [
+                $fund_title,
+                $description,
+                $transaction_date,
+                $category,
+                $dv_check_no,
+                $month_label,
+                $cash_advance,
+                $payments,
+                $tax_withheld,
+                $balance,
+                $beginning_balance,
+                $mooe_col,
+                $electricity,
+                $semi_expendable,
+                $other_general,
+                $training,
+                $water,
+                $other_supplies,
+                $internet,
+                $due_to_bir,
+                $amount_other,
+                $account_description,
+                $uacs_code
+            ]
+                = _extract_post();
 
-            if (empty($transaction_date)) $transaction_date = date('Y-m-d');
+            $cdr_meta = _build_meta(compact(
+                'dv_check_no',
+                'cash_advance',
+                'payments',
+                'tax_withheld',
+                'balance',
+                'mooe_col',
+                'electricity',
+                'semi_expendable',
+                'other_general',
+                'training',
+                'water',
+                'other_supplies',
+                'internet',
+                'due_to_bir',
+                'amount_other',
+                'account_description',
+                'uacs_code',
+                'description'
+            ));
 
-            // Handle image upload (optional - only if new image provided)
+            // handle optional image replacement
             $proof_image = null;
             $update_image = false;
-
-            if (isset($_FILES['proof_image']) && $_FILES['proof_image']['error'] == 0) {
-                $target_dir = "admin_assets/finance_proofs/";
-
-                if (!file_exists($target_dir)) {
-                    mkdir($target_dir, 0777, true);
+            $img = _handle_upload();
+            if ($img !== null) {
+                $proof_image = $img;
+                $update_image = true;
+                // delete old
+                $s2 = $conn->prepare("SELECT proof_image FROM finance_records WHERE id=?");
+                $s2->bind_param("i", $id);
+                $s2->execute();
+                $old = $s2->get_result()->fetch_assoc();
+                $s2->close();
+                if ($old && $old['proof_image']) {
+                    $of = "admin_assets/finance_proofs/" . $old['proof_image'];
+                    if (file_exists($of)) unlink($of);
                 }
-
-                $file_extension = strtolower(pathinfo($_FILES["proof_image"]["name"], PATHINFO_EXTENSION));
-                $new_filename = uniqid() . '_' . time() . '.' . $file_extension;
-                $target_file = $target_dir . $new_filename;
-
-                $allowed_types = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-                $max_size = 5 * 1024 * 1024;
-
-                if (!in_array($file_extension, $allowed_types)) {
-                    echo json_encode(['status' => 'error', 'message' => 'Invalid file type. Allowed: JPG, PNG, GIF, WebP.']);
-                    exit;
-                }
-
-                if ($_FILES['proof_image']['size'] > $max_size) {
-                    echo json_encode(['status' => 'error', 'message' => 'File size exceeds 5MB limit.']);
-                    exit;
-                }
-
-                if (move_uploaded_file($_FILES["proof_image"]["tmp_name"], $target_file)) {
-                    $proof_image = $new_filename;
-                    $update_image = true;
-
-                    // Delete old image
-                    $stmt = $conn->prepare("SELECT proof_image FROM finance_records WHERE id = ?");
-                    if ($stmt) {
-                        $stmt->bind_param("i", $id);
-                        $stmt->execute();
-                        $result = $stmt->get_result();
-                        $old_record = $result->fetch_assoc();
-                        $stmt->close();
-
-                        if ($old_record && $old_record['proof_image']) {
-                            $old_file = "admin_assets/finance_proofs/" . $old_record['proof_image'];
-                            if (file_exists($old_file)) {
-                                unlink($old_file);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Merge CDR extra fields into description as JSON meta
-            $cdr_meta = json_encode([
-                'dv_check_no'    => $dv_check_no,
-                'cash_advance'   => $cash_advance,
-                'payments'       => $payments,
-                'tax_withheld'   => $tax_withheld,
-                'balance'        => $balance,
-                'mooe_col'       => $mooe_col,
-                'electricity'    => $electricity,
-                'semi_expendable' => $semi_expendable,
-                'other_general'  => $other_general,
-                'training'       => $training,
-                'water'          => $water,
-                'other_supplies' => $other_supplies,
-                'internet'       => $internet,
-                'due_to_bir'     => $due_to_bir,
-                'amount_other'   => $amount_other,
-                'account_description' => $account_description,
-                'uacs_code'      => $uacs_code,
-                'note'           => $description,
-            ]);
-
-            // Update database
-            if ($update_image) {
-                $stmt = $conn->prepare("UPDATE finance_records SET fund_title = ?, description = ?, amount = ?, transaction_date = ?, category = ?, proof_image = ?, updated_at = NOW() WHERE id = ?");
-            } else {
-                $stmt = $conn->prepare("UPDATE finance_records SET fund_title = ?, description = ?, amount = ?, transaction_date = ?, category = ?, updated_at = NOW() WHERE id = ?");
-            }
-
-            if (!$stmt) {
-                echo json_encode(['status' => 'error', 'message' => 'Database error.']);
-                exit;
             }
 
             if ($update_image) {
-                $stmt->bind_param("ssdsssi", $fund_title, $cdr_meta, $amount, $transaction_date, $category, $proof_image, $id);
+                $st = $conn->prepare("UPDATE finance_records SET fund_title=?,description=?,amount=?,transaction_date=?,category=?,month_label=?,beginning_balance=?,proof_image=?,updated_at=NOW() WHERE id=?");
+                $st->bind_param("ssdsssdsi", $fund_title, $cdr_meta, $payments, $transaction_date, $category, $month_label, $beginning_balance, $proof_image, $id);
             } else {
-                $stmt->bind_param("ssdssi", $fund_title, $cdr_meta, $amount, $transaction_date, $category, $id);
+                $st = $conn->prepare("UPDATE finance_records SET fund_title=?,description=?,amount=?,transaction_date=?,category=?,month_label=?,beginning_balance=?,updated_at=NOW() WHERE id=?");
+                $st->bind_param("ssdsssdi", $fund_title, $cdr_meta, $payments, $transaction_date, $category, $month_label, $beginning_balance, $id);
             }
-
-            $success = $stmt->execute();
-            $stmt->close();
-
-            if ($success) {
-                echo json_encode(['status' => 'success', 'message' => 'Finance record updated successfully!']);
-            } else {
-                echo json_encode(['status' => 'error', 'message' => 'Error updating finance record.']);
-            }
+            $ok = $st->execute();
+            $st->close();
+            echo json_encode($ok
+                ? ['status' => 'success', 'message' => 'Finance record updated successfully!']
+                : ['status' => 'error', 'message' => 'Error updating record.']);
             exit;
         }
 
-        // Add new finance record
-        $fund_title       = trim($_POST['fund_title']        ?? '');
-        $description      = trim($_POST['description']       ?? '');
-        $transaction_date = $_POST['transaction_date']        ?? '';
-        $category         = trim($_POST['category']          ?? '');
-        $dv_check_no      = trim($_POST['dv_check_no']       ?? '');
-        $cash_advance     = floatval($_POST['cash_advance']   ?? 0);
-        $payments         = floatval($_POST['payments']       ?? 0);
-        $tax_withheld     = floatval($_POST['tax_withheld']   ?? 0);
-        $balance          = floatval($_POST['balance']        ?? 0);
-        $mooe_col         = trim($_POST['mooe_col']           ?? '');
-        $electricity      = floatval($_POST['electricity']    ?? 0);
-        $semi_expendable  = floatval($_POST['semi_expendable'] ?? 0);
-        $other_general    = floatval($_POST['other_general']  ?? 0);
-        $training         = floatval($_POST['training']       ?? 0);
-        $water            = floatval($_POST['water']          ?? 0);
-        $other_supplies   = floatval($_POST['other_supplies'] ?? 0);
-        $internet         = floatval($_POST['internet']       ?? 0);
-        $due_to_bir           = floatval($_POST['due_to_bir']          ?? 0);
-        $amount_other         = floatval($_POST['amount_other']        ?? 0);
-        $account_description  = trim($_POST['account_description']     ?? '');
-        $uacs_code            = trim($_POST['uacs_code']               ?? '');
-        $amount = $payments; // amount stored in DB = payments value
+        // ── ADD ───────────────────────────────────────────────────────────
+        [
+            $fund_title,
+            $description,
+            $transaction_date,
+            $category,
+            $dv_check_no,
+            $month_label,
+            $cash_advance,
+            $payments,
+            $tax_withheld,
+            $balance,
+            $beginning_balance,
+            $mooe_col,
+            $electricity,
+            $semi_expendable,
+            $other_general,
+            $training,
+            $water,
+            $other_supplies,
+            $internet,
+            $due_to_bir,
+            $amount_other,
+            $account_description,
+            $uacs_code
+        ]
+            = _extract_post();
 
-        if (empty($transaction_date)) $transaction_date = date('Y-m-d');
+        $cdr_meta = _build_meta(compact(
+            'dv_check_no',
+            'cash_advance',
+            'payments',
+            'tax_withheld',
+            'balance',
+            'mooe_col',
+            'electricity',
+            'semi_expendable',
+            'other_general',
+            'training',
+            'water',
+            'other_supplies',
+            'internet',
+            'due_to_bir',
+            'amount_other',
+            'account_description',
+            'uacs_code',
+            'description'
+        ));
+        $proof_image = _handle_upload() ?? '';
 
-        // Handle image upload
-        $proof_image = '';
-        if (isset($_FILES['proof_image']) && $_FILES['proof_image']['error'] == 0) {
-            $target_dir = "admin_assets/finance_proofs/";
-
-            if (!file_exists($target_dir)) {
-                mkdir($target_dir, 0777, true);
-            }
-
-            $file_extension = strtolower(pathinfo($_FILES["proof_image"]["name"], PATHINFO_EXTENSION));
-            $new_filename = uniqid() . '_' . time() . '.' . $file_extension;
-            $target_file = $target_dir . $new_filename;
-
-            $allowed_types = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-            $max_size = 5 * 1024 * 1024;
-
-            if (!in_array($file_extension, $allowed_types)) {
-                echo json_encode(['status' => 'error', 'message' => 'Invalid file type. Allowed: JPG, PNG, GIF, WebP.']);
-                exit;
-            }
-
-            if ($_FILES['proof_image']['size'] > $max_size) {
-                echo json_encode(['status' => 'error', 'message' => 'File size exceeds 5MB limit.']);
-                exit;
-            }
-
-            if (move_uploaded_file($_FILES["proof_image"]["tmp_name"], $target_file)) {
-                $proof_image = $new_filename;
-            }
-        }
-
-        // Encode CDR extra fields into description
-        $cdr_meta = json_encode([
-            'dv_check_no'    => $dv_check_no,
-            'cash_advance'   => $cash_advance,
-            'payments'       => $payments,
-            'tax_withheld'   => $tax_withheld,
-            'balance'        => $balance,
-            'mooe_col'       => $mooe_col,
-            'electricity'    => $electricity,
-            'semi_expendable' => $semi_expendable,
-            'other_general'  => $other_general,
-            'training'       => $training,
-            'water'          => $water,
-            'other_supplies' => $other_supplies,
-            'internet'       => $internet,
-            'due_to_bir'     => $due_to_bir,
-            'amount_other'   => $amount_other,
-            'account_description' => $account_description,
-            'uacs_code'      => $uacs_code,
-            'note'           => $description,
-        ]);
-
-        $stmt = $conn->prepare("INSERT INTO finance_records (fund_title, description, amount, transaction_date, category, proof_image, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())");
-        if (!$stmt) {
-            echo json_encode(['status' => 'error', 'message' => 'Database error.']);
-            exit;
-        }
-        $stmt->bind_param("ssdsss", $fund_title, $cdr_meta, $amount, $transaction_date, $category, $proof_image);
-        $success = $stmt->execute();
-        $stmt->close();
-
-        if ($success) {
-            echo json_encode(['status' => 'success', 'message' => 'Finance record added successfully!']);
-        } else {
-            echo json_encode(['status' => 'error', 'message' => 'Error adding finance record.']);
-        }
+        $st = $conn->prepare("INSERT INTO finance_records
+            (fund_title,description,amount,transaction_date,category,month_label,beginning_balance,proof_image,created_at)
+            VALUES (?,?,?,?,?,?,?,?,NOW())");
+        $st->bind_param("ssdsssds", $fund_title, $cdr_meta, $payments, $transaction_date, $category, $month_label, $beginning_balance, $proof_image);
+        $ok = $st->execute();
+        $st->close();
+        echo json_encode($ok
+            ? ['status' => 'success', 'message' => 'Finance record added successfully!']
+            : ['status' => 'error', 'message' => 'Error adding finance record.']);
+        exit;
     }
 
-    // Handle GET requests for export
-    if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['export']) && $_GET['export'] == 'csv') {
-        $export_query = "SELECT * FROM finance_records ORDER BY transaction_date DESC, created_at DESC";
-        $export_result = $conn->query($export_query);
-
-        if ($export_result instanceof mysqli_result && $export_result->num_rows > 0) {
-            header('Content-Type: text/csv');
-            header('Content-Disposition: attachment; filename="finance_records_' . date('Y-m-d') . '.csv"');
-
-            $output = fopen('php://output', 'w');
-
-            fputcsv($output, ['ID', 'Fund Title', 'Description', 'Amount', 'Category', 'Transaction Date', 'Created At']);
-
-            while ($row = $export_result->fetch_assoc()) {
-                fputcsv($output, [
-                    $row['id'],
-                    $row['fund_title'],
-                    $row['description'],
-                    $row['amount'],
-                    $row['category'],
-                    $row['transaction_date'],
-                    $row['created_at']
-                ]);
-            }
-
-            fclose($output);
-        } else {
-            echo json_encode(['status' => 'error', 'message' => 'No records to export.']);
+    // ── CSV EXPORT ────────────────────────────────────────────────────────
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'csv') {
+        $res = $conn->query("SELECT * FROM finance_records ORDER BY month_label,transaction_date,created_at");
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename="CDR_' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, [
+            'ID',
+            'Month',
+            'Date',
+            'DV/Check No',
+            'Particulars/Supplier',
+            'Purpose',
+            'Cash Advance',
+            'Payments',
+            'Tax Withheld',
+            'Balance',
+            'Beginning Balance',
+            'Electricity',
+            'Training',
+            'Semi-Exp ICT',
+            'Other Gen Svc',
+            'Other Supplies',
+            'Water',
+            'Semi-Exp Other',
+            'Internet',
+            'Office Supplies',
+            'Other Gen Svc 2',
+            'Account Desc',
+            'UACS Code',
+            'Amount',
+            'Category',
+            'Created At'
+        ]);
+        while ($row = $res->fetch_assoc()) {
+            $m = json_decode($row['description'] ?? '{}', true) ?: [];
+            fputcsv($out, [
+                $row['id'],
+                $row['month_label'] ?? '',
+                $row['transaction_date'],
+                $m['dv_check_no'] ?? 'DV-' . str_pad($row['id'], 4, '0', STR_PAD_LEFT),
+                $row['fund_title'],
+                $m['note'] ?? '',
+                $m['cash_advance'] ?? 0,
+                $m['payments'] ?? $row['amount'],
+                $m['tax_withheld'] ?? 0,
+                $m['balance'] ?? 0,
+                $row['beginning_balance'] ?? 0,
+                $m['electricity'] ?? 0,
+                $m['training'] ?? 0,
+                $m['semi_expendable'] ?? 0,
+                $m['other_general'] ?? 0,
+                $m['other_supplies'] ?? 0,
+                $m['water'] ?? 0,
+                0,
+                $m['internet'] ?? 0,
+                $m['due_to_bir'] ?? 0,
+                0,
+                $m['account_description'] ?? '',
+                $m['uacs_code'] ?? '',
+                $m['amount_other'] ?? 0,
+                $row['category'],
+                $row['created_at']
+            ]);
         }
+        fclose($out);
         exit;
     }
     exit;
 }
 
-// Get total count for pagination
-$count_query = "SELECT COUNT(*) as total FROM finance_records $where_clause";
+// ── Helper functions ──────────────────────────────────────────────────────
+function _extract_post(): array
+{
+    $p = static fn(string $k, $def = '') => isset($_POST[$k]) ? trim($_POST[$k]) : $def;
+    $f = static fn(string $k) => floatval($_POST[$k] ?? 0);
+    return [
+        $p('fund_title'),
+        $p('description'),
+        $p('transaction_date') ?: date('Y-m-d'),
+        $p('category'),
+        $p('dv_check_no'),
+        strtoupper($p('month_label', 'MAY')),
+        $f('cash_advance'),
+        $f('payments'),
+        $f('tax_withheld'),
+        $f('balance'),
+        $f('beginning_balance'),
+        $p('mooe_col'),
+        $f('electricity'),
+        $f('semi_expendable'),
+        $f('other_general'),
+        $f('training'),
+        $f('water'),
+        $f('other_supplies'),
+        $f('internet'),
+        $f('due_to_bir'),
+        $f('amount_other'),
+        $p('account_description'),
+        $p('uacs_code'),
+    ];
+}
+
+function _build_meta(array $d): string
+{
+    return json_encode([
+        'dv_check_no' => $d['dv_check_no'],
+        'cash_advance' => $d['cash_advance'],
+        'payments' => $d['payments'],
+        'tax_withheld' => $d['tax_withheld'],
+        'balance' => $d['balance'],
+        'mooe_col' => $d['mooe_col'],
+        'electricity' => $d['electricity'],
+        'semi_expendable' => $d['semi_expendable'],
+        'other_general' => $d['other_general'],
+        'training' => $d['training'],
+        'water' => $d['water'],
+        'other_supplies' => $d['other_supplies'],
+        'internet' => $d['internet'],
+        'due_to_bir' => $d['due_to_bir'],
+        'amount_other' => $d['amount_other'],
+        'account_description' => $d['account_description'],
+        'uacs_code' => $d['uacs_code'],
+        'note' => $d['description'],
+    ]);
+}
+
+function _handle_upload(): ?string
+{
+    if (!isset($_FILES['proof_image']) || $_FILES['proof_image']['error'] !== 0) return null;
+    $dir = "admin_assets/finance_proofs/";
+    if (!file_exists($dir)) mkdir($dir, 0777, true);
+    $ext = strtolower(pathinfo($_FILES['proof_image']['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return null;
+    if ($_FILES['proof_image']['size'] > 5 * 1024 * 1024) return null;
+    $name = uniqid() . '_' . time() . '.' . $ext;
+    if (move_uploaded_file($_FILES['proof_image']['tmp_name'], $dir . $name)) return $name;
+    return null;
+}
+
+// ── Pagination & filtering ────────────────────────────────────────────────
+$records_per_page = 25;
+$page             = max(1, intval($_GET['page'] ?? 1));
+$search           = trim($_GET['search'] ?? '');
+$month_filter     = trim($_GET['month'] ?? '');
+$offset           = ($page - 1) * $records_per_page;
+
+$where_parts = [];
+$params = [];
+$ptypes = '';
+if ($search) {
+    $where_parts[] = "(fund_title LIKE ? OR description LIKE ?)";
+    $sp = "%$search%";
+    $params[] = &$sp;
+    $params[] = &$sp;
+    $ptypes .= 'ss';
+}
+if ($month_filter) {
+    $where_parts[] = "month_label = ?";
+    $params[] = &$month_filter;
+    $ptypes .= 's';
+}
+$where = $where_parts ? 'WHERE ' . implode(' AND ', $where_parts) : '';
+
+// total count
 $total_records = 0;
-
-if (!empty($params)) {
-    $count_stmt = $conn->prepare($count_query);
-    if ($count_stmt) {
-        $count_stmt->bind_param($param_types, ...$params);
-        $count_stmt->execute();
-        $count_result = $count_stmt->get_result();
-        if ($count_result) {
-            $total_records = (int)($count_result->fetch_assoc()['total'] ?? 0);
-        }
-        $count_stmt->close();
-    }
+if ($params) {
+    $cs = $conn->prepare("SELECT COUNT(*) AS t FROM finance_records $where");
+    $cs->bind_param($ptypes, ...$params);
+    $cs->execute();
+    $total_records = (int)($cs->get_result()->fetch_assoc()['t'] ?? 0);
+    $cs->close();
 } else {
-    $count_result = $conn->query($count_query);
-    if ($count_result instanceof mysqli_result) {
-        $total_records = (int)($count_result->fetch_assoc()['total'] ?? 0);
-    }
+    $cr = $conn->query("SELECT COUNT(*) AS t FROM finance_records $where");
+    $total_records = (int)($cr->fetch_assoc()['t'] ?? 0);
 }
+$total_pages = max(1, ceil($total_records / $records_per_page));
 
-$total_pages = ceil($total_records / $records_per_page);
-
-// Get finance records with pagination
+// paginated records
 $finance_records = [];
-$query = "SELECT * FROM finance_records $where_clause ORDER BY transaction_date DESC, created_at DESC LIMIT ? OFFSET ?";
-$params[] = &$records_per_page;
-$params[] = &$offset;
-$param_types .= "ii";
-
-$stmt = $conn->prepare($query);
-if ($stmt) {
-    $stmt->bind_param($param_types, ...$params);
-    $stmt->execute();
-    $result = $stmt->get_result();
-
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $finance_records[] = $row;
-        }
-    }
-    $stmt->close();
+$lp = $records_per_page;
+$lo = $offset;
+$params[] = &$lp;
+$params[] = &$lo;
+$ptypes .= 'ii';
+$rs = $conn->prepare("SELECT * FROM finance_records $where ORDER BY month_label,transaction_date,created_at LIMIT ? OFFSET ?");
+if ($rs) {
+    $rs->bind_param($ptypes, ...$params);
+    $rs->execute();
+    $res = $rs->get_result();
+    while ($r = $res->fetch_assoc()) $finance_records[] = $r;
+    $rs->close();
 }
 
-// Get all records for statistics
+// ALL records for stats & monthly grouping
 $all_records = [];
-$all_result = $conn->query("SELECT * FROM finance_records ORDER BY transaction_date DESC, created_at DESC");
-if ($all_result instanceof mysqli_result && $all_result->num_rows > 0) {
-    while ($row = $all_result->fetch_assoc()) {
-        $all_records[] = $row;
+$ar = $conn->query("SELECT * FROM finance_records ORDER BY month_label,transaction_date,created_at");
+if ($ar) while ($r = $ar->fetch_assoc()) $all_records[] = $r;
+
+// ── Build monthly groups from ALL records ─────────────────────────────────
+$month_groups = [];
+$col_map = [
+    'Utilities' => 'electricity',
+    'Equipment' => 'semi_expendable',
+    'Salaries' => 'other_general',
+    'Other' => 'other_general',
+    'Events' => 'training',
+    'Sports' => 'training',
+    'Transportation' => 'training',
+    'Maintenance' => 'water',
+    'Supplies' => 'other_supplies',
+    'Books' => 'other_supplies',
+];
+
+foreach ($all_records as $rec) {
+    $ml = strtoupper(trim($rec['month_label'] ?? 'UNCATEGORISED'));
+    if (!isset($month_groups[$ml])) {
+        $month_groups[$ml] = [
+            'label' => $ml,
+            'beginning_balance' => floatval($rec['beginning_balance'] ?? 0),
+            'records' => [],
+            'cash_advance_total' => 0,
+            'payments_total' => 0,
+            'tax_total' => 0,
+            'col_totals' => array_fill_keys(['electricity', 'semi_expendable', 'other_general', 'training', 'water', 'other_supplies', 'internet', 'due_to_bir', 'amount_other'], 0),
+        ];
     }
-}
-
-// Calculate comprehensive statistics
-$total_amount = 0;
-$current_month_total = 0;
-$previous_month_total = 0;
-$current_month = date('Y-m');
-$previous_month = date('Y-m', strtotime('-1 month'));
-$category_totals = [];
-$highest_expense = ['amount' => 0, 'title' => ''];
-
-foreach ($all_records as $record) {
-    $amount = $record['amount'];
-    $total_amount += $amount;
-
-    if (!empty($record['category'])) {
-        if (!isset($category_totals[$record['category']])) {
-            $category_totals[$record['category']] = 0;
+    $cdr = json_decode($rec['description'] ?? '{}', true) ?: [];
+    $ca  = floatval($cdr['cash_advance'] ?? 0);
+    $pay = floatval($cdr['payments']     ?? $rec['amount']);
+    $tax = floatval($cdr['tax_withheld'] ?? 0);
+    $month_groups[$ml]['cash_advance_total'] += $ca;
+    $month_groups[$ml]['payments_total']     += $pay;
+    $month_groups[$ml]['tax_total']          += $tax;
+    // MOOE cols
+    $mooe_fields = ['electricity', 'semi_expendable', 'other_general', 'training', 'water', 'other_supplies', 'internet', 'due_to_bir', 'amount_other'];
+    $any = false;
+    foreach ($mooe_fields as $mf) {
+        $v = floatval($cdr[$mf] ?? 0);
+        if ($v > 0) {
+            $month_groups[$ml]['col_totals'][$mf] += $v;
+            $any = true;
         }
-        $category_totals[$record['category']] += $amount;
     }
-
-    if (substr($record['transaction_date'], 0, 7) === $current_month) {
-        $current_month_total += $amount;
+    if (!$any) {
+        $col = (!empty($cdr['mooe_col']) ? $cdr['mooe_col'] : null) ?? ($col_map[$rec['category']] ?? 'other_general');
+        $month_groups[$ml]['col_totals'][$col] += floatval($rec['amount']);
     }
-
-    if (substr($record['transaction_date'], 0, 7) === $previous_month) {
-        $previous_month_total += $amount;
-    }
-
-    if ($amount > $highest_expense['amount']) {
-        $highest_expense = ['amount' => $amount, 'title' => $record['fund_title']];
-    }
+    $month_groups[$ml]['records'][] = $rec;
 }
 
-$average_transaction = count($all_records) > 0 ? $total_amount / count($all_records) : 0;
-$month_over_month_change = $previous_month_total > 0 ? (($current_month_total - $previous_month_total) / $previous_month_total) * 100 : 0;
+// Sort month groups
+uksort($month_groups, fn($a, $b) => ($MONTH_ORDER[$a] ?? 99) <=> ($MONTH_ORDER[$b] ?? 99));
 
-// ── Fetch Principal info from admin table ──────────────────────────
+// ── Global stats ──────────────────────────────────────────────────────────
+$global_cash_advance = 0;
+$global_payments = 0;
+$global_tax = 0;
+$global_beginning    = 0; // from first month
+$uacs_totals = array_fill_keys(['electricity', 'semi_expendable', 'other_general', 'training', 'water', 'other_supplies', 'internet', 'due_to_bir'], 0);
+$current_month_label = strtoupper(date('F')); // e.g. MARCH
+$prev_month_label    = strtoupper(date('F', strtotime('-1 month')));
+$current_month_total = 0;
+$prev_month_total = 0;
+$highest = ['amount' => 0, 'title' => ''];
+
+$first_month = true;
+foreach ($month_groups as $mg) {
+    if ($first_month) {
+        $global_beginning = $mg['beginning_balance'];
+        $first_month = false;
+    }
+    $global_cash_advance += $mg['cash_advance_total'];
+    $global_payments     += $mg['payments_total'];
+    $global_tax          += $mg['tax_total'];
+    foreach ($uacs_totals as $k => $_) $uacs_totals[$k] += $mg['col_totals'][$k];
+    if (stripos($mg['label'], $current_month_label) !== false) $current_month_total = $mg['payments_total'];
+    if (stripos($mg['label'], $prev_month_label)    !== false) $prev_month_total    = $mg['payments_total'];
+}
+// Overall ending balance
+$global_ending = $global_beginning + $global_cash_advance - $global_payments - $global_tax;
+
+foreach ($all_records as $rec) {
+    $cdr = json_decode($rec['description'] ?? '{}', true) ?: [];
+    $pay = floatval($cdr['payments'] ?? $rec['amount']);
+    if ($pay > $highest['amount']) $highest = ['amount' => $pay, 'title' => $rec['fund_title']];
+}
+$mom_change = $prev_month_total > 0 ? (($current_month_total - $prev_month_total) / $prev_month_total) * 100 : 0;
+
+// ── Fetch signatories ────────────────────────────────────────────────────
 $principal_name  = 'JOJO D. APULI';
 $principal_title = 'School Principal I';
-$admin_row = $conn->query("SELECT full_name, title FROM admin ORDER BY id ASC LIMIT 1");
-if ($admin_row && $admin_row->num_rows > 0) {
-    $ar = $admin_row->fetch_assoc();
-    if (!empty($ar['full_name'])) $principal_name  = strtoupper($ar['full_name']);
-    if (!empty($ar['title']))     $principal_title = $ar['title'];
+$ar2 = $conn->query("SELECT full_name,title FROM admin ORDER BY id ASC LIMIT 1");
+if ($ar2 && $ar2->num_rows > 0) {
+    $r2 = $ar2->fetch_assoc();
+    if (!empty($r2['full_name'])) $principal_name  = strtoupper($r2['full_name']);
+    if (!empty($r2['title']))     $principal_title = $r2['title'];
 }
-
-// ── Fetch Senior Bookkeeper from sub_admin table ───────────────────
 $bookkeeper_name  = 'SHANE V. BOLAÑOS';
 $bookkeeper_title = 'Senior Bookkeeper-Designate';
-$bk_row = $conn->query(
-    "SELECT CONCAT(first_name,' ',last_name) AS full_name, role FROM sub_admin
-     WHERE FIND_IN_SET('senior_bookkeeper', role) > 0 AND status='approved'
-     ORDER BY id ASC LIMIT 1"
-);
-if ($bk_row && $bk_row->num_rows > 0) {
-    $bk = $bk_row->fetch_assoc();
-    if (!empty($bk['full_name'])) $bookkeeper_name  = strtoupper(trim($bk['full_name']));
-    $bookkeeper_title = 'Senior Bookkeeper-Designate';
+$bk = $conn->query("SELECT CONCAT(first_name,' ',last_name) AS full_name FROM sub_admin WHERE FIND_IN_SET('senior_bookkeeper',role)>0 AND status='approved' ORDER BY id ASC LIMIT 1");
+if ($bk && $bk->num_rows > 0) {
+    $bkr = $bk->fetch_assoc();
+    if (!empty($bkr['full_name'])) $bookkeeper_name = strtoupper(trim($bkr['full_name']));
 }
 
-if (isset($conn) && $conn instanceof mysqli) {
-    $conn->close();
-}
+// distinct month labels for filter dropdown
+$distinct_months = array_keys($month_groups);
 
-$category_icons = [
-    'Supplies' => 'fa-box',
-    'Maintenance' => 'fa-wrench',
-    'Equipment' => 'fa-laptop',
-    'Sports' => 'fa-basketball-ball',
-    'Books' => 'fa-book',
-    'Transportation' => 'fa-bus',
-    'Utilities' => 'fa-lightbulb',
-    'Events' => 'fa-party-horn',
-    'Salaries' => 'fa-money-bill-wave',
-    'Other' => 'fa-clipboard-list'
+$conn->close();
+
+// ── UACS labels for cards ─────────────────────────────────────────────────
+$uacs_labels = [
+    'electricity'    => ['label' => 'Electricity Expenses',        'code' => '5020402000', 'icon' => 'fa-bolt',          'color' => 'orange'],
+    'training'       => ['label' => 'Training Expenses',           'code' => '5020201000', 'icon' => 'fa-chalkboard-teacher', 'color' => 'blue'],
+    'semi_expendable' => ['label' => 'Semi-Expendable ICT',         'code' => '50203210',  'icon' => 'fa-laptop',        'color' => 'purple'],
+    'other_general'  => ['label' => 'Other General Services',      'code' => '5021299000', 'icon' => 'fa-concierge-bell', 'color' => 'teal'],
+    'other_supplies' => ['label' => 'Other Supplies & Materials',  'code' => '5020399000', 'icon' => 'fa-box-open',      'color' => 'green'],
+    'water'          => ['label' => 'Water Expenses',              'code' => '5020401000', 'icon' => 'fa-tint',          'color' => 'cyan'],
+    'internet'       => ['label' => 'Internet Subscription',       'code' => '5020503000', 'icon' => 'fa-wifi',          'color' => 'indigo'],
+    'due_to_bir'     => ['label' => 'Office Supplies Expenses',    'code' => '5020301002', 'icon' => 'fa-file-invoice',  'color' => 'rose'],
 ];
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Finance Management - School Admin Dashboard</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Finance — Cash Disbursement Register · Buyoan NHS</title>
     <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap');
 
@@ -518,11 +574,11 @@ $category_icons = [
             --border-light: #f3f4f6;
             --light-color: #f8fafc;
             --bg-page: #f1f5f0;
-            --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
-            --shadow: 0 1px 4px rgba(0, 0, 0, 0.07), 0 4px 12px rgba(0, 0, 0, 0.04);
-            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.05);
-            --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
-            --shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.18);
+            --shadow-xs: 0 1px 2px rgba(0, 0, 0, .05);
+            --shadow: 0 1px 4px rgba(0, 0, 0, .07), 0 4px 12px rgba(0, 0, 0, .04);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, .08), 0 1px 4px rgba(0, 0, 0, .05);
+            --shadow-lg: 0 12px 40px rgba(0, 0, 0, .14), 0 2px 8px rgba(0, 0, 0, .06);
+            --shadow-xl: 0 24px 64px rgba(0, 0, 0, .18);
             --radius-sm: 6px;
             --radius: 10px;
             --radius-lg: 14px;
@@ -544,12 +600,12 @@ $category_icons = [
             color: var(--text-primary);
         }
 
-        /* ── PAGE HEADER ── */
+        /* ── PAGE HEADER ─────────────────────────────────────────────────────── */
         .page-title {
             margin-bottom: 0;
             padding: 28px 36px 20px;
             background: linear-gradient(160deg, #ecf2e8 0%, #e8f0f5 100%);
-            border-bottom: 1px solid rgba(92, 122, 62, 0.15);
+            border-bottom: 1px solid rgba(92, 122, 62, .15);
             width: 100%;
         }
 
@@ -562,7 +618,7 @@ $category_icons = [
             font-size: 26px;
             font-weight: 700;
             color: var(--text-primary);
-            letter-spacing: -0.4px;
+            letter-spacing: -.4px;
         }
 
         .page-title p {
@@ -573,19 +629,18 @@ $category_icons = [
 
         .breadcrumbs {
             padding: 12px 36px !important;
-            background: rgba(255, 255, 255, 0.7) !important;
+            background: rgba(255, 255, 255, .7) !important;
             border-bottom: 1px solid var(--border-color);
             width: 100%;
             font-size: 13px;
         }
 
-        /* ── MAIN SECTION ── */
         .finance-section {
             padding: 24px 36px 36px;
             width: 100%;
         }
 
-        /* ── STAT CARDS ── */
+        /* ── STAT CARDS ──────────────────────────────────────────────────────── */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -601,20 +656,10 @@ $category_icons = [
             align-items: flex-start;
             gap: 14px;
             box-shadow: var(--shadow);
-            transition: transform 0.22s ease, box-shadow 0.22s ease;
+            transition: transform .22s ease, box-shadow .22s ease;
             border: 1px solid var(--border-color);
             position: relative;
             overflow: hidden;
-        }
-
-        .stat-card::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            border-radius: var(--radius-lg);
-            opacity: 0;
-            transition: opacity 0.22s ease;
-            pointer-events: none;
         }
 
         .stat-card:hover {
@@ -650,6 +695,22 @@ $category_icons = [
 
         .stat-card.red::before {
             background: linear-gradient(90deg, #dc2626, #f87171);
+        }
+
+        .stat-card.teal::before {
+            background: linear-gradient(90deg, #0d9488, #2dd4bf);
+        }
+
+        .stat-card.cyan::before {
+            background: linear-gradient(90deg, #0891b2, #22d3ee);
+        }
+
+        .stat-card.indigo::before {
+            background: linear-gradient(90deg, #4f46e5, #818cf8);
+        }
+
+        .stat-card.rose::before {
+            background: linear-gradient(90deg, #e11d48, #fb7185);
         }
 
         .stat-icon {
@@ -688,6 +749,26 @@ $category_icons = [
             color: #dc2626;
         }
 
+        .stat-icon.teal {
+            background: #ccfbf1;
+            color: #0d9488;
+        }
+
+        .stat-icon.cyan {
+            background: #cffafe;
+            color: #0891b2;
+        }
+
+        .stat-icon.indigo {
+            background: #e0e7ff;
+            color: #4f46e5;
+        }
+
+        .stat-icon.rose {
+            background: #ffe4e6;
+            color: #e11d48;
+        }
+
         .stat-icon i {
             font-size: 18px;
         }
@@ -702,7 +783,7 @@ $category_icons = [
             color: var(--text-muted);
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.6px;
+            letter-spacing: .6px;
             margin-bottom: 5px;
         }
 
@@ -711,7 +792,7 @@ $category_icons = [
             font-weight: 700;
             color: var(--text-primary);
             line-height: 1.1;
-            letter-spacing: -0.5px;
+            letter-spacing: -.5px;
             font-feature-settings: "tnum";
         }
 
@@ -729,11 +810,196 @@ $category_icons = [
             color: var(--danger-color);
         }
 
-        .stat-change:not(.positive):not(.negative) {
-            color: var(--text-muted);
+        /* ── ENDING BALANCE HERO CARD ────────────────────────────────────────── */
+        .balance-hero {
+            background: var(--gradient-primary);
+            border-radius: var(--radius-xl);
+            padding: 28px 32px;
+            color: #fff;
+            margin-bottom: 24px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(92, 122, 62, .35);
         }
 
-        /* ── CARD ── */
+        .balance-hero::after {
+            content: '';
+            position: absolute;
+            right: -40px;
+            top: -40px;
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, .07);
+        }
+
+        .balance-hero .hero-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            opacity: .8;
+            margin-bottom: 6px;
+        }
+
+        .balance-hero .hero-amount {
+            font-size: 42px;
+            font-weight: 800;
+            letter-spacing: -1.5px;
+            font-feature-settings: "tnum";
+        }
+
+        .balance-hero .hero-sub {
+            font-size: 13px;
+            opacity: .75;
+            margin-top: 8px;
+        }
+
+        .balance-hero .hero-pills {
+            display: flex;
+            gap: 12px;
+            margin-top: 18px;
+            flex-wrap: wrap;
+        }
+
+        .balance-hero .hero-pill {
+            background: rgba(255, 255, 255, .15);
+            border: 1px solid rgba(255, 255, 255, .25);
+            border-radius: 30px;
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .balance-hero .hero-pill span {
+            opacity: .75;
+            font-weight: 400;
+        }
+
+        /* ── MONTHLY SUMMARY CARDS ───────────────────────────────────────────── */
+        .month-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .month-card {
+            background: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+            box-shadow: var(--shadow);
+            transition: transform .18s;
+        }
+
+        .month-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .month-card .mc-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .month-card .mc-label i {
+            font-size: 10px;
+        }
+
+        .month-card .mc-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 3px 0;
+            border-bottom: 1px solid var(--border-light);
+        }
+
+        .month-card .mc-row:last-child {
+            border-bottom: none;
+        }
+
+        .month-card .mc-key {
+            color: var(--text-secondary);
+        }
+
+        .month-card .mc-val {
+            font-weight: 600;
+            font-feature-settings: "tnum";
+        }
+
+        .month-card .mc-ending {
+            font-size: 13.5px;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 2px solid var(--primary-dim);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* ── UACS CARDS ──────────────────────────────────────────────────────── */
+        .uacs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .uacs-card {
+            background: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 14px 16px;
+            box-shadow: var(--shadow);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .uacs-card .uc-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 15px;
+        }
+
+        .uacs-card .uc-content .uc-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .4px;
+        }
+
+        .uacs-card .uc-content .uc-code {
+            font-size: 9.5px;
+            color: var(--text-muted);
+            font-family: 'DM Mono', monospace;
+            margin-top: 1px;
+        }
+
+        .uacs-card .uc-content .uc-val {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            font-feature-settings: "tnum";
+            margin-top: 3px;
+        }
+
+        /* ── CARD ─────────────────────────────────────────────────────────────── */
         .card {
             border: 1px solid var(--border-color);
             border-radius: var(--radius-lg);
@@ -753,14 +1019,14 @@ $category_icons = [
             font-weight: 600;
             color: var(--text-primary);
             margin: 0;
-            letter-spacing: -0.2px;
+            letter-spacing: -.2px;
         }
 
         .card-body {
             padding: 20px 22px;
         }
 
-        /* ── FILTER BAR ── */
+        /* ── FILTER BAR ──────────────────────────────────────────────────────── */
         .filter-bar {
             display: flex;
             gap: 10px;
@@ -784,18 +1050,14 @@ $category_icons = [
             font-family: 'DM Sans', sans-serif;
             color: var(--text-primary);
             background: var(--light-color);
-            transition: all 0.2s ease;
+            transition: all .2s;
         }
 
         .search-box input:focus {
             border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(92, 122, 62, 0.1);
+            box-shadow: 0 0 0 3px rgba(92, 122, 62, .1);
             outline: none;
             background: #fff;
-        }
-
-        .search-box input::placeholder {
-            color: var(--text-muted);
         }
 
         .search-box i {
@@ -814,10 +1076,10 @@ $category_icons = [
             font-size: 13.5px;
             font-family: 'DM Sans', sans-serif;
             background: var(--light-color);
-            min-width: 170px;
+            min-width: 160px;
             cursor: pointer;
             color: var(--text-primary);
-            transition: all 0.2s ease;
+            transition: all .2s;
             appearance: none;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
@@ -827,9 +1089,7 @@ $category_icons = [
 
         .filter-select:focus {
             border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(92, 122, 62, 0.1);
             outline: none;
-            background-color: #fff;
         }
 
         .btn-export {
@@ -842,155 +1102,36 @@ $category_icons = [
             font-size: 13px;
             font-family: 'DM Sans', sans-serif;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all .2s;
             display: flex;
             align-items: center;
             gap: 7px;
-            letter-spacing: 0.1px;
         }
 
         .btn-export:hover {
             transform: translateY(-1px);
-            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+            box-shadow: 0 4px 14px rgba(79, 70, 229, .35);
         }
 
-        /* ── TABLE ── */
-        .table-responsive {
-            overflow-x: auto;
-        }
-
-        .table {
-            margin-bottom: 0;
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-        }
-
-        .table thead th {
-            font-weight: 600;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.7px;
-            color: var(--text-muted);
-            background: var(--light-color);
-            border-bottom: 1px solid var(--border-color);
-            padding: 11px 16px;
-            white-space: nowrap;
-        }
-
-        .table tbody td {
-            vertical-align: middle;
-            padding: 13px 16px;
-            border-bottom: 1px solid var(--border-light);
-            font-size: 13.5px;
-            color: var(--text-primary);
-        }
-
-        .table tbody tr:last-child td {
-            border-bottom: none;
-        }
-
-        .table tbody tr {
-            transition: background 0.15s ease;
-        }
-
-        .table tbody tr:hover td {
-            background: #f7faf5;
-        }
-
-        .table tfoot th {
-            font-weight: 700;
-            padding: 12px 16px;
-            background: var(--light-color);
-            border-top: 1px solid var(--border-color);
-            font-size: 13.5px;
-        }
-
-        /* ── CATEGORY BADGES ── */
-        .category-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 11.5px;
-            font-weight: 600;
-            letter-spacing: 0.1px;
-        }
-
-        .category-badge i {
-            font-size: 10px;
-        }
-
-        .category-badge.supplies {
-            background: #dbeafe;
-            color: #1d4ed8;
-        }
-
-        .category-badge.maintenance {
-            background: #fef3c7;
-            color: #b45309;
-        }
-
-        .category-badge.equipment {
-            background: #ede9fe;
-            color: #6d28d9;
-        }
-
-        .category-badge.sports {
-            background: #dcfce7;
-            color: #15803d;
-        }
-
-        .category-badge.books {
-            background: #fce7f3;
-            color: #be185d;
-        }
-
-        .category-badge.transportation {
-            background: #cffafe;
-            color: #0e7490;
-        }
-
-        .category-badge.utilities {
-            background: #ffedd5;
-            color: #c2410c;
-        }
-
-        .category-badge.events {
-            background: #f3e8ff;
-            color: #7e22ce;
-        }
-
-        .category-badge.salaries {
-            background: #e0e7ff;
-            color: #3730a3;
-        }
-
-        .category-badge.other {
-            background: #f3f4f6;
-            color: #4b5563;
-        }
-
-        /* ── BUTTONS ── */
+        /* ── BUTTONS ──────────────────────────────────────────────────────────── */
         .btn {
             font-family: 'DM Sans', sans-serif;
             font-weight: 600;
             border-radius: var(--radius);
             padding: 8px 16px;
             font-size: 13px;
-            transition: all 0.18s ease;
+            transition: all .18s;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            letter-spacing: 0.1px;
+            letter-spacing: .1px;
             border: none;
         }
 
         .btn-sm {
-            padding: 6px 11px;
-            font-size: 12px;
+            padding: 5px 10px;
+            font-size: 11.5px;
             border-radius: var(--radius-sm);
         }
 
@@ -1004,114 +1145,278 @@ $category_icons = [
             background: var(--primary-dim);
         }
 
-        .btn-outline-danger {
-            border: 1.5px solid #fca5a5;
-            color: var(--danger-color);
-            background: transparent;
-        }
-
-        .btn-outline-danger:hover {
-            background: #fee2e2;
-            border-color: var(--danger-color);
-        }
-
         .btn-outline-secondary {
             border: 1.5px solid var(--border-color);
             color: var(--text-secondary);
-            background: #fff;
+            background: transparent;
         }
 
         .btn-outline-secondary:hover {
-            background: var(--light-color);
-            color: var(--text-primary);
+            background: var(--border-light);
         }
 
         .btn-success {
             background: var(--gradient-success);
             color: #fff;
-            box-shadow: 0 2px 6px rgba(22, 163, 74, 0.25);
+            box-shadow: 0 4px 12px rgba(22, 163, 74, .25);
         }
 
         .btn-success:hover {
-            box-shadow: 0 4px 14px rgba(22, 163, 74, 0.35);
-            transform: translateY(-1px);
-        }
-
-        .btn-primary {
-            background: var(--gradient-primary);
-            color: #fff;
-            box-shadow: 0 2px 6px rgba(92, 122, 62, 0.25);
-        }
-
-        .btn-primary:hover {
-            box-shadow: 0 4px 14px rgba(92, 122, 62, 0.35);
-            transform: translateY(-1px);
+            opacity: .9;
         }
 
         .btn-info {
-            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            background: linear-gradient(135deg, #2d5c43, #3c785a);
             color: #fff;
-            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
         }
 
         .btn-info:hover {
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
-            transform: translateY(-1px);
+            opacity: .9;
         }
 
         .btn-danger {
             background: var(--gradient-danger);
             color: #fff;
-            box-shadow: 0 2px 6px rgba(220, 38, 38, 0.2);
         }
 
         .btn-danger:hover {
-            box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
-            transform: translateY(-1px);
+            opacity: .9;
         }
 
         .action-buttons {
             display: flex;
-            gap: 6px;
+            gap: 5px;
+            align-items: center;
         }
 
-        .action-buttons .btn {
-            padding: 5px 10px;
+        /* ── SECTION DIVIDER (month group header) ─────────────────────────────── */
+        .month-divider {
+            background: linear-gradient(135deg, #e8f2e2, #dceae8);
+            border-left: 4px solid var(--primary-color);
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             font-size: 12px;
+            color: #1e3d2f;
+            font-weight: 700;
+            letter-spacing: .4px;
+            text-transform: uppercase;
         }
 
-        /* ── AMOUNT ── */
-        .amount-positive {
-            color: var(--success-color);
-            font-weight: 700;
-            font-feature-settings: "tnum";
-            font-family: 'DM Mono', monospace;
+        .month-divider .md-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             font-size: 13px;
         }
 
-        /* ── PAGINATION ── */
+        .month-divider .md-right {
+            display: flex;
+            gap: 20px;
+            font-size: 11.5px;
+            font-weight: 600;
+        }
+
+        .month-divider .md-pill {
+            background: rgba(255, 255, 255, .6);
+            border: 1px solid rgba(92, 122, 62, .2);
+            border-radius: 20px;
+            padding: 2px 10px;
+        }
+
+        /* ══════════════════════════════════════════════════════════════════════
+   CASH DISBURSEMENT REGISTER TABLE — exact xlsx column replica
+   ══════════════════════════════════════════════════════════════════════ */
+        .cdr-doc-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 18px 24px 12px;
+            border-bottom: 1px solid #ccc;
+            font-size: 11.5px;
+            color: #000;
+            line-height: 1.7;
+        }
+
+        .cdr-doc-header .left-info div,
+        .cdr-doc-header .right-info div {
+            white-space: nowrap;
+        }
+
+        .cdr-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            background: #fff;
+        }
+
+        .cdr-table {
+            table-layout: fixed;
+            border-collapse: collapse;
+            font-size: 11px;
+            color: #000;
+            font-family: Arial, sans-serif;
+            min-width: 2260px;
+            width: 100%;
+        }
+
+        .cdr-table th,
+        .cdr-table td {
+            border: 1px solid #999;
+            text-align: center;
+            vertical-align: middle;
+            overflow: hidden;
+            word-wrap: break-word;
+            padding: 2px 3px;
+            box-sizing: border-box;
+            line-height: 1.3;
+        }
+
+        .cdr-table thead tr.cdr-r1 th {
+            background: #f0f0f0;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: .6px;
+            height: 36px;
+        }
+
+        .cdr-table thead tr.cdr-r2 th {
+            background: #e8e8e8;
+            font-size: 11px;
+            font-weight: 700;
+            height: 42px;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .cdr-table thead tr.cdr-r3 th {
+            background: #f0f0f0;
+            font-size: 10px;
+            font-weight: 700;
+            height: 22px;
+        }
+
+        .cdr-table thead tr.cdr-r3b th {
+            background: #f0f0f0;
+            font-size: 10px;
+            font-weight: 700;
+            height: 28px;
+        }
+
+        .cdr-table thead tr.cdr-r4 th {
+            background: #f5f5f5;
+            font-size: 10px;
+            font-weight: 700;
+            height: 93px;
+            width: 93px;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .cdr-table thead tr.cdr-r5 th {
+            background: #f5f5f5;
+            font-size: 9px;
+            font-weight: 400;
+            height: 28px;
+            color: #333;
+        }
+
+        .cdr-table tbody td {
+            height: 28px;
+            font-size: 11px;
+        }
+
+        .cdr-table tbody td.cdr-part,
+        .cdr-table tfoot td.cdr-part {
+            text-align: left;
+            padding-left: 5px;
+        }
+
+        .cdr-table tbody td.cdr-num,
+        .cdr-table tfoot td.cdr-num {
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            font-size: 10.5px;
+        }
+
+        .cdr-table tbody tr:hover td {
+            background: #f8fcf5;
+        }
+
+        /* Month balance row */
+        .cdr-table tbody tr.cdr-bal-row td {
+            background: #fffce8;
+            font-weight: 700;
+            font-size: 10.5px;
+        }
+
+        .cdr-table tbody tr.cdr-adv-row td {
+            background: #e8f5e9;
+            font-weight: 700;
+            font-size: 10.5px;
+        }
+
+        /* Totals footer */
+        .cdr-table tfoot td {
+            font-weight: 700;
+            background: #efefef;
+            font-size: 11px;
+        }
+
+        /* Signature footer */
+        .cdr-footer {
+            display: flex;
+            justify-content: space-between;
+            padding: 28px 40px 20px;
+            font-size: 11.5px;
+            color: #000;
+        }
+
+        .cdr-footer .sig-block {
+            text-align: center;
+            min-width: 220px;
+        }
+
+        .cdr-footer .sig-label {
+            font-size: 10px;
+            color: #555;
+            margin-bottom: 28px;
+            text-transform: uppercase;
+            letter-spacing: .4px;
+        }
+
+        .cdr-footer .sig-name {
+            font-weight: 700;
+            font-size: 12px;
+            border-top: 1px solid #000;
+            padding-top: 4px;
+        }
+
+        .cdr-footer .sig-title {
+            font-size: 10.5px;
+            color: #333;
+        }
+
+        /* ── PAGINATION ───────────────────────────────────────────────────────── */
         .pagination-wrapper {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 14px 22px;
-            background: var(--light-color);
             border-top: 1px solid var(--border-light);
-            flex-wrap: wrap;
-            gap: 10px;
+            font-size: 13px;
         }
 
         .pagination-info {
-            font-size: 13px;
-            color: var(--text-muted);
+            color: var(--text-secondary);
         }
 
         .pagination {
             display: flex;
-            gap: 3px;
+            list-style: none;
+            gap: 4px;
             margin: 0;
             padding: 0;
-            list-style: none;
         }
 
         .pagination li a,
@@ -1119,89 +1424,46 @@ $category_icons = [
             display: flex;
             align-items: center;
             justify-content: center;
-            min-width: 34px;
+            width: 34px;
             height: 34px;
-            padding: 0 8px;
             border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
             font-size: 13px;
             font-weight: 500;
-            color: var(--text-secondary);
-            background: #fff;
-            border: 1.5px solid var(--border-color);
             text-decoration: none;
-            transition: all 0.18s ease;
+            transition: all .15s;
+        }
+
+        .pagination li.active span {
+            background: var(--primary-color);
+            color: #fff;
+            border-color: var(--primary-color);
+        }
+
+        .pagination li.disabled span {
+            opacity: .4;
+            cursor: default;
         }
 
         .pagination li a:hover {
             background: var(--primary-dim);
             border-color: var(--primary-color);
-            color: var(--primary-color);
         }
 
-        .pagination li.active span {
-            background: var(--gradient-primary);
-            border-color: transparent;
-            color: #fff;
-            font-weight: 700;
-        }
-
-        .pagination li.disabled span {
-            opacity: 0.38;
-            cursor: not-allowed;
-        }
-
-        /* ── EMPTY STATE ── */
-        .empty-state {
-            text-align: center;
-            padding: 72px 20px;
-        }
-
-        .empty-state-icon {
-            width: 80px;
-            height: 80px;
-            background: var(--light-color);
-            border: 2px dashed var(--border-color);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 20px;
-        }
-
-        .empty-state-icon i {
-            font-size: 32px;
-            color: var(--text-muted);
-        }
-
-        .empty-state h5 {
-            color: var(--text-primary);
-            font-weight: 600;
-            margin-bottom: 8px;
-            font-size: 15px;
-        }
-
-        .empty-state p {
-            color: var(--text-secondary);
-            font-size: 13.5px;
-            max-width: 320px;
-            margin: 0 auto;
-        }
-
-        /* ── POPUP OVERLAY ── */
+        /* ── POPUP OVERLAY ────────────────────────────────────────────────────── */
         .popup-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(15, 14, 23, 0.55);
-            backdrop-filter: blur(6px);
+            background: rgba(0, 0, 0, .45);
+            backdrop-filter: blur(3px);
+            z-index: 1050;
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             justify-content: center;
-            z-index: 9999;
             opacity: 0;
             visibility: hidden;
-            transition: opacity 0.25s ease, visibility 0.25s ease;
-            padding: 20px;
-            overflow-y: auto;
+            transition: all .25s;
         }
 
         .popup-overlay.active {
@@ -1211,31 +1473,31 @@ $category_icons = [
 
         .popup-card {
             background: #fff;
-            border-radius: 24px;
-            box-shadow: 0 32px 80px rgba(15, 14, 23, .22), 0 0 0 1px rgba(15, 14, 23, .06);
-            width: 100%;
-            max-width: 600px;
-            overflow: hidden;
-            transform: scale(0.94) translateY(16px);
-            transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
-            margin: auto;
+            border-radius: var(--radius-xl);
+            width: min(720px, 95vw);
+            max-height: 90vh;
             display: flex;
             flex-direction: column;
+            box-shadow: var(--shadow-xl);
+            transform: scale(.96);
+            transition: transform .25s;
         }
 
         .popup-overlay.active .popup-card {
-            transform: scale(1) translateY(0);
+            transform: scale(1);
         }
 
-        /* ── Hero header (students.php style) ── */
+        .popup-card.wide {
+            width: min(880px, 95vw);
+        }
+
         .popup-card .card-header {
-            background: linear-gradient(135deg, #0d2b1e 0%, #1a4733 50%, #2a6347 100%);
-            padding: 24px 28px 20px;
-            border-bottom: none;
-            display: flex;
-            flex-direction: column;
+            background: linear-gradient(135deg, #1d3d28 0%, #2d5c43 50%, #3c785a 100%);
+            border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+            padding: 22px 28px;
             position: relative;
             overflow: hidden;
+            border-bottom: none;
             flex-shrink: 0;
         }
 
@@ -1243,27 +1505,13 @@ $category_icons = [
             content: '';
             position: absolute;
             inset: 0;
-            background: radial-gradient(ellipse 80% 60% at 80% 50%, rgba(180, 215, 100, .18) 0%, transparent 70%);
-            pointer-events: none;
-        }
-
-        .popup-card .card-header::after {
-            content: '';
-            position: absolute;
-            top: -40px;
-            right: -40px;
-            width: 160px;
-            height: 160px;
-            border-radius: 50%;
-            border: 1px solid rgba(139, 124, 248, .15);
-            pointer-events: none;
+            background: radial-gradient(ellipse 80% 60% at 80% 50%, rgba(120, 200, 160, .18) 0%, transparent 70%);
         }
 
         .popup-header-top {
             display: flex;
-            align-items: flex-start;
             justify-content: space-between;
-            gap: 16px;
+            align-items: flex-start;
             position: relative;
             z-index: 5;
         }
@@ -1271,278 +1519,105 @@ $category_icons = [
         .popup-header-badge {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            background: rgba(60, 120, 90, .25);
-            border: 1px solid rgba(120, 200, 150, .35);
+            gap: 5px;
+            padding: 4px 10px;
             border-radius: 20px;
-            padding: 3px 11px;
-            font-size: .66rem;
-            font-weight: 700;
-            letter-spacing: .12em;
+            background: rgba(255, 255, 255, .12);
+            border: 1px solid rgba(255, 255, 255, .2);
+            color: rgba(255, 255, 255, .9);
+            font-size: 11px;
+            font-weight: 600;
             text-transform: uppercase;
-            color: #a8e6c0;
+            letter-spacing: .5px;
             margin-bottom: 8px;
         }
 
         .popup-card .card-header h5 {
-            font-family: 'Sora', 'DM Sans', sans-serif;
-            font-size: 1.35rem;
-            font-weight: 800;
             color: #fff;
+            font-size: 18px;
+            font-weight: 700;
             margin: 0 0 4px;
-            letter-spacing: -.03em;
-            line-height: 1.1;
-            position: relative;
-            z-index: 5;
+            letter-spacing: -.3px;
         }
 
         .popup-header-sub {
-            font-size: .78rem;
-            color: rgba(255, 255, 255, .5);
-            font-weight: 400;
-            position: relative;
-            z-index: 5;
+            color: rgba(255, 255, 255, .65);
+            font-size: 12.5px;
         }
 
         .popup-close-btn {
-            background: rgba(255, 255, 255, .1);
-            border: 1px solid rgba(255, 255, 255, .15);
-            border-radius: 10px;
             width: 34px;
             height: 34px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, .12);
+            border: 1px solid rgba(255, 255, 255, .2);
+            color: #fff;
+            cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: rgba(255, 255, 255, .7);
-            cursor: pointer;
-            font-size: .9rem;
-            transition: background .15s, color .15s;
+            font-size: 14px;
+            transition: background .15s;
             flex-shrink: 0;
-            position: relative;
-            z-index: 10;
         }
 
         .popup-close-btn:hover {
-            background: rgba(255, 255, 255, .2);
-            color: #fff;
+            background: rgba(255, 255, 255, .22);
         }
 
         .popup-card .card-body {
-            padding: 24px 28px;
-            max-height: calc(85vh - 160px);
             overflow-y: auto;
+            padding: 24px 28px;
+            flex: 1;
         }
 
         .popup-card .card-footer {
-            padding: 16px 28px;
-            background: #f8f7f4;
-            border-top: 1px solid #e8e6e1;
             display: flex;
             justify-content: flex-end;
             gap: 10px;
+            padding: 14px 24px;
+            background: var(--light-color);
+            border-top: 1px solid var(--border-light);
+            border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+            flex-shrink: 0;
         }
 
-        /* ── FORM ELEMENTS (students.php style) ── */
-        .form-label {
-            font-size: .7rem;
+        .popup-card .card-footer .btn {
+            border-radius: 12px;
+            padding: 10px 20px;
+            font-size: .84rem;
             font-weight: 700;
-            color: #8b89a0;
+        }
+
+        /* Form styles */
+        .form-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            display: block;
             text-transform: uppercase;
-            letter-spacing: .07em;
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
+            letter-spacing: .4px;
         }
 
         .form-control,
         .form-select {
-            font-family: inherit;
-            font-size: .875rem;
-            font-weight: 500;
-            color: #0f0e17;
-            background: #f4faf7;
-            border: 1.5px solid #d5ebe0;
-            border-radius: 12px;
-            padding: 11px 14px;
-            outline: none;
-            transition: border-color .15s, box-shadow .15s, background .15s;
             width: 100%;
-        }
-
-        .form-control::placeholder {
-            color: #c5c3d6;
-            font-weight: 400;
+            padding: 9px 13px;
+            border: 1.5px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-family: 'DM Sans', sans-serif;
+            color: var(--text-primary);
+            background: #fff;
+            transition: border-color .15s, box-shadow .15s;
         }
 
         .form-control:focus,
         .form-select:focus {
-            border-color: #3c785a;
-            box-shadow: 0 0 0 4px rgba(60, 120, 90, .12);
-            background: #fff;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(92, 122, 62, .1);
             outline: none;
-        }
-
-        .form-select {
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%233c785a' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 14px center;
-            background-size: 12px 8px;
-            padding-right: 36px;
-            cursor: pointer;
-        }
-
-        textarea.form-control {
-            resize: vertical;
-            min-height: 70px;
-            line-height: 1.5;
-        }
-
-        .invalid-feedback {
-            font-size: 12px;
-            color: var(--danger-color);
-            margin-top: 4px;
-            display: none;
-            font-weight: 500;
-        }
-
-        .form-control.is-invalid,
-        .form-select.is-invalid {
-            border-color: var(--danger-color);
-            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.08);
-        }
-
-        .form-control.is-invalid+.invalid-feedback {
-            display: block;
-        }
-
-        .input-group-wrapper {
-            position: relative;
-        }
-
-        .input-group-wrapper .input-icon {
-            position: absolute;
-            left: 13px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-muted);
-            font-size: 13px;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        .input-group-wrapper .form-control {
-            padding-left: 38px;
-        }
-
-        .input-group-wrapper.trailing-icon .form-control {
-            padding-left: 13px;
-            padding-right: 38px;
-        }
-
-        .input-group-wrapper.trailing-icon .input-icon {
-            left: auto;
-            right: 13px;
-        }
-
-        .char-counter {
-            position: absolute;
-            right: 8px;
-            bottom: -20px;
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-
-        /* ── UPLOAD ZONE ── */
-        .upload-zone {
-            border: 2px dashed #d4d0ee;
-            border-radius: 16px;
-            padding: 24px 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: border-color .15s, background .15s;
-            background: #faf8ff;
-            position: relative;
-        }
-
-        .upload-zone:hover {
-            border-color: #3c785a;
-            background: #edf8f3;
-        }
-
-        .upload-zone.dragover {
-            border-color: #3c785a;
-            background: rgba(60, 120, 90, .08);
-        }
-
-        .upload-zone.has-file {
-            border-style: solid;
-            border-color: #3c785a;
-        }
-
-        .upload-zone .upload-icon {
-            font-size: 2rem;
-            color: #c4c2ce;
-            margin-bottom: 10px;
-            display: block;
-        }
-
-        .upload-zone .upload-text {
-            font-size: .84rem;
-            font-weight: 700;
-            color: #3d3b52;
-            margin-bottom: 4px;
-        }
-
-        .upload-zone .upload-hint {
-            font-size: .74rem;
-            color: #a8a6bc;
-            margin-top: 4px;
-        }
-
-        .upload-zone input[type="file"] {
-            position: absolute;
-            inset: 0;
-            opacity: 0;
-            cursor: pointer;
-            width: 100%;
-            height: 100%;
-        }
-
-        .image-preview {
-            display: none;
-            margin-top: 14px;
-            position: relative;
-        }
-
-        .image-preview.show {
-            display: block;
-        }
-
-        .image-preview img {
-            width: 100%;
-            max-height: 180px;
-            object-fit: cover;
-            border-radius: var(--radius);
-            border: 1px solid var(--border-color);
-        }
-
-        .image-preview .remove-image {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            width: 26px;
-            height: 26px;
-            border-radius: 50%;
-            background: rgba(220, 38, 38, 0.9);
-            color: #fff;
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
         }
 
         .form-section-title {
@@ -1572,99 +1647,52 @@ $category_icons = [
             color: #2d5c43;
         }
 
-        .form-group-animated {
-            animation: fadeInUp 0.25s ease forwards;
+        /* Upload zone */
+        .upload-zone {
+            border: 2px dashed #d4d0ee;
+            border-radius: 16px;
+            padding: 24px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color .15s, background .15s;
+            background: #faf8ff;
+            position: relative;
         }
 
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(8px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .upload-zone:hover {
+            border-color: #3c785a;
+            background: #edf8f3;
         }
 
-        /* ── POPUP FOOTER BUTTONS (students.php style) ── */
-        .popup-card .card-footer .btn {
-            border-radius: 12px;
-            padding: 11px 22px;
-            font-size: .84rem;
-            font-weight: 700;
-            letter-spacing: 0;
-            transition: opacity .15s, box-shadow .15s, background .15s;
+        .upload-zone input[type=file] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
         }
 
-        .popup-card .card-footer .btn-outline-secondary {
-            background: #f4f3f0;
-            border: none;
-            color: #0f0e17;
-            box-shadow: none;
+        .image-preview {
+            display: none;
+            margin-top: 14px;
+            position: relative;
         }
 
-        .popup-card .card-footer .btn-outline-secondary:hover {
-            background: #e8e6e0;
-            transform: none;
+        .image-preview.show {
+            display: block;
         }
 
-        .popup-card .card-footer .btn-success {
-            background: linear-gradient(135deg, #059669, #10b981);
-            box-shadow: 0 4px 16px rgba(5, 150, 105, .3);
+        .image-preview img {
+            width: 100%;
+            max-height: 180px;
+            object-fit: cover;
+            border-radius: var(--radius);
         }
 
-        .popup-card .card-footer .btn-success:hover {
-            opacity: .9;
-            box-shadow: 0 6px 20px rgba(5, 150, 105, .4);
-            transform: none;
-        }
-
-        .popup-card .card-footer .btn-info {
-            background: linear-gradient(135deg, #2d5c43, #3c785a);
-            box-shadow: 0 4px 16px rgba(44, 92, 67, .35);
-        }
-
-        .popup-card .card-footer .btn-info:hover {
-            opacity: .9;
-            box-shadow: 0 6px 20px rgba(44, 92, 67, .45);
-            transform: none;
-        }
-
-        .popup-card .card-footer .btn-danger {
-            background: linear-gradient(135deg, #b91c1c, #dc2626);
-            box-shadow: 0 4px 16px rgba(185, 28, 28, .3);
-        }
-
-        .popup-card .card-footer .btn-danger:hover {
-            opacity: .9;
-            box-shadow: 0 6px 20px rgba(185, 28, 28, .4);
-            transform: none;
-        }
-
-        /* ── DELETE POPUP ── */
+        /* Delete popup */
         .popup-card.delete-popup .card-header {
             background: linear-gradient(135deg, #2b0d0d 0%, #471a1a 50%, #632a2a 100%);
-        }
-
-        .popup-card.delete-popup .card-header::before {
-            background: radial-gradient(ellipse 80% 60% at 80% 50%, rgba(215, 100, 100, .18) 0%, transparent 70%);
-        }
-
-        .popup-card.delete-popup .popup-header-badge {
-            background: rgba(120, 60, 60, .25);
-            border-color: rgba(200, 120, 120, .35);
-            color: #f5b8b8;
-        }
-
-        .popup-card.delete-popup .card-body {
-            text-align: center;
-            padding: 32px 28px;
-        }
-
-        .popup-card.delete-popup .card-footer {
-            justify-content: center;
         }
 
         .delete-icon-circle {
@@ -1683,64 +1711,11 @@ $category_icons = [
             color: var(--danger-color);
         }
 
-        .delete-popup-title {
-            font-size: 17px;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 10px;
-            letter-spacing: -0.3px;
-        }
-
-        .delete-popup-message {
-            color: var(--text-secondary);
-            font-size: 13.5px;
-            line-height: 1.6;
-            max-width: 320px;
-            margin: 0 auto;
-        }
-
-        /* ── MODAL ── */
-        .modal-header {
-            background: linear-gradient(135deg, #f0f5eb, #ebf5f0);
-            border-bottom: 1px solid rgba(92, 122, 62, 0.12);
-            padding: 18px 24px;
-        }
-
-        .modal-title {
-            font-size: 16px;
-            font-weight: 700;
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            letter-spacing: -0.2px;
-        }
-
-        .modal-title i {
-            color: var(--primary-color);
-        }
-
-        .modal-body {
-            padding: 22px 24px;
-        }
-
-        .modal-footer {
-            border-top: 1px solid var(--border-light);
-            padding: 14px 24px;
-            background: var(--light-color);
-        }
-
-        .modal-content {
-            border: none;
-            border-radius: var(--radius-xl);
-            box-shadow: var(--shadow-xl);
-        }
-
-        /* ── SPINNER ── */
+        /* Spinner / Toast */
         .spinner-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(255, 255, 255, 0.75);
+            background: rgba(255, 255, 255, .75);
             backdrop-filter: blur(3px);
             display: flex;
             align-items: center;
@@ -1748,7 +1723,7 @@ $category_icons = [
             z-index: 9999;
             opacity: 0;
             visibility: hidden;
-            transition: all 0.25s ease;
+            transition: all .25s;
         }
 
         .spinner-overlay.active {
@@ -1762,7 +1737,7 @@ $category_icons = [
             border: 3px solid var(--border-color);
             border-top-color: var(--primary-color);
             border-radius: 50%;
-            animation: spin 0.85s linear infinite;
+            animation: spin .85s linear infinite;
         }
 
         @keyframes spin {
@@ -1771,14 +1746,6 @@ $category_icons = [
             }
         }
 
-        .spinner-text {
-            margin-top: 12px;
-            color: var(--text-secondary);
-            font-size: 13px;
-            font-weight: 500;
-        }
-
-        /* ── TOAST ── */
         .toast-container {
             z-index: 10000;
         }
@@ -1805,7 +1772,7 @@ $category_icons = [
         .toast .toast-header {
             background: transparent;
             color: #fff;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, .2);
             font-weight: 600;
         }
 
@@ -1813,12 +1780,8 @@ $category_icons = [
             filter: invert(1);
         }
 
-        .toast .btn-close {
-            filter: invert(1);
-        }
-
-        /* ── RESPONSIVE ── */
-        @media (max-width: 992px) {
+        /* Responsive */
+        @media(max-width:992px) {
             .finance-section {
                 padding: 16px;
             }
@@ -1829,10 +1792,6 @@ $category_icons = [
 
             .breadcrumbs {
                 padding: 12px 16px !important;
-            }
-
-            .page-title .heading-title {
-                font-size: 22px;
             }
 
             .stats-grid {
@@ -1848,229 +1807,63 @@ $category_icons = [
             .btn-export {
                 width: 100%;
             }
-
-            .btn-export {
-                justify-content: center;
-            }
         }
 
-        @media (max-width: 640px) {
-            .stats-grid {
+        @media(max-width:640px) {
+
+            .stats-grid,
+            .month-summary-grid,
+            .uacs-grid {
                 grid-template-columns: 1fr;
             }
 
             .popup-card {
                 width: 95%;
             }
-
-            .popup-card .card-header {
-                padding: 16px;
-            }
-
-            .popup-card .card-body {
-                padding: 16px;
-            }
-
-            .popup-card .card-footer {
-                padding: 12px 16px;
-                flex-direction: column;
-            }
-
-            .popup-card .card-footer .btn {
-                width: 100%;
-                justify-content: center;
-            }
-
-            .pagination-wrapper {
-                flex-direction: column;
-                text-align: center;
-            }
         }
 
-        /* ── SCROLLBARS ── */
-        .popup-card .card-body::-webkit-scrollbar {
-            width: 5px;
-        }
-
-        .popup-card .card-body::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .popup-card .card-body::-webkit-scrollbar-thumb {
-            background: var(--border-color);
-            border-radius: 10px;
-        }
-
-        .popup-card .card-body::-webkit-scrollbar-thumb:hover {
-            background: #cbd5e1;
-        }
-
-        /* ── AMOUNT CLICKABLE ── */
-        .amount-clickable {
+        /* Section toggle */
+        .section-toggle {
             cursor: pointer;
-            transition: all 0.18s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 3px 8px;
+            user-select: none;
+        }
+
+        .section-toggle .toggle-icon {
+            transition: transform .2s;
+        }
+
+        .section-collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .section-body-collapsible {
+            overflow: hidden;
+            transition: max-height .3s ease;
+        }
+
+        /* Table view switcher */
+        .view-tabs {
+            display: flex;
+            gap: 0;
+            border: 1.5px solid var(--border-color);
             border-radius: var(--radius-sm);
+            overflow: hidden;
         }
 
-        .amount-clickable:hover {
-            background: rgba(22, 163, 74, 0.08);
-        }
-
-        .amount-clickable .proof-indicator {
-            color: var(--primary-color);
-            font-size: 11px;
-            opacity: 0.7;
-        }
-
-        /* ── ROW INDEX ── */
-        .row-index {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 22px;
-            height: 22px;
-            background: var(--border-light);
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--text-muted);
-            font-feature-settings: "tnum";
-        }
-
-        /* ── RECORD TITLE ── */
-        .record-title {
-            font-weight: 600;
-            font-size: 13.5px;
-            color: var(--text-primary);
-            line-height: 1.3;
-        }
-
-        .record-desc {
+        .view-tab {
+            padding: 7px 16px;
             font-size: 12px;
-            color: var(--text-muted);
-            margin-top: 2px;
-            line-height: 1.4;
-        }
-
-        /* ── CASH DISBURSEMENT REGISTER TABLE ── */
-        .cdr-wrapper {
-            width: 100%;
-            overflow-x: auto;
+            font-weight: 600;
+            cursor: pointer;
             background: #fff;
+            border: none;
+            transition: all .15s;
+            color: var(--text-secondary);
         }
 
-        .cdr-doc-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            padding: 18px 24px 12px;
-            border-bottom: 1px solid #ccc;
-            font-size: 11.5px;
-            color: #000;
-            line-height: 1.7;
-        }
-
-        .cdr-doc-header .left-info div,
-        .cdr-doc-header .right-info div {
-            white-space: nowrap;
-        }
-
-        .cdr-doc-header .right-info {
-            text-align: left;
-        }
-
-        .cdr-table {
-            width: 100%;
-            min-width: 1700px;
-            border-collapse: collapse;
-            font-size: 11px;
-            color: #000;
-            font-family: Arial, sans-serif;
-        }
-
-        .cdr-table th,
-        .cdr-table td {
-            border: 1px solid #888;
-            padding: 3px 5px;
-            text-align: center;
-            vertical-align: middle;
-            line-height: 1.3;
-        }
-
-        .cdr-table thead th {
-            background: #f5f5f5;
-            font-weight: 700;
-            font-size: 10px;
-            text-transform: uppercase;
-        }
-
-        .cdr-table thead tr.cdr-group-row th {
-            background: #ececec;
-            font-size: 10.5px;
-        }
-
-        .cdr-table tbody td {
-            text-align: left;
-            font-size: 11px;
-        }
-
-        .cdr-table tbody td.cdr-num,
-        .cdr-table tfoot td.cdr-num {
-            text-align: right;
-            font-variant-numeric: tabular-nums;
-            white-space: nowrap;
-        }
-
-        .cdr-table tbody td.cdr-center,
-        .cdr-table tfoot td.cdr-center {
-            text-align: center;
-        }
-
-        .cdr-table tfoot tr td {
-            font-weight: 700;
-            background: #f0f0f0;
-            font-size: 11px;
-        }
-
-        .cdr-table tbody tr:hover td {
-            background: #fafdf7;
-        }
-
-        .cdr-footer {
-            display: flex;
-            justify-content: space-between;
-            padding: 28px 40px 20px;
-            font-size: 11.5px;
-            color: #000;
-        }
-
-        .cdr-footer .sig-block {
-            text-align: center;
-            min-width: 220px;
-        }
-
-        .cdr-footer .sig-label {
-            font-size: 10px;
-            color: #555;
-            margin-bottom: 28px;
-            text-transform: uppercase;
-            letter-spacing: 0.4px;
-        }
-
-        .cdr-footer .sig-name {
-            font-weight: 700;
-            font-size: 12px;
-            border-top: 1px solid #000;
-            padding-top: 4px;
-        }
-
-        .cdr-footer .sig-title {
-            font-size: 10.5px;
-            color: #333;
+        .view-tab.active {
+            background: var(--primary-color);
+            color: #fff;
         }
     </style>
 </head>
@@ -2079,197 +1872,191 @@ $category_icons = [
     <div id="navigation-container"></div>
 
     <div class="spinner-overlay" id="loadingOverlay">
-        <div class="spinner-content">
+        <div style="text-align:center;">
             <div class="spinner-border"></div>
-            <div class="spinner-text">Processing...</div>
+            <div style="margin-top:12px;color:var(--text-secondary);font-size:13px;font-weight:500;">Processing…</div>
         </div>
     </div>
 
-    <main class="main page-content" style="margin-left: 0; width: 100%; max-width: 100%;">
+    <main class="main page-content" style="margin-left:0;width:100%;max-width:100%;">
+        <!-- ── PAGE HEADER ── -->
         <div class="page-title">
             <div class="heading">
-                <div style="display:flex; align-items:center; gap:14px;">
-                    <div style="width:42px;height:42px;background:var(--gradient-primary);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 4px 12px rgba(92,122,62,0.3);">
+                <div style="display:flex;align-items:center;gap:14px;">
+                    <div style="width:42px;height:42px;background:var(--gradient-primary);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(92,122,62,.3);">
                         <i class="fas fa-wallet" style="color:#fff;font-size:17px;"></i>
                     </div>
                     <div>
                         <h1 class="heading-title" style="margin:0;">Finance Management</h1>
-                        <p class="mb-0" style="font-size:13px;color:var(--text-secondary);">Track and manage school funds and expenses</p>
+                        <p class="mb-0" style="font-size:13px;color:var(--text-secondary);">Cash Disbursement Register — Buyoan NHS · Fund Cluster 101101</p>
                     </div>
                 </div>
             </div>
             <nav class="breadcrumbs" aria-label="Breadcrumb">
-                <ol style="max-width: 100%; padding: 0; margin: 0; display:flex; gap:6px; align-items:center; list-style:none;">
+                <ol style="max-width:100%;padding:0;margin:0;display:flex;gap:6px;align-items:center;list-style:none;">
                     <li><a href="admin_dashboard.php" style="color:var(--text-secondary);text-decoration:none;font-size:13px;">Home</a></li>
                     <li style="color:var(--text-muted);font-size:12px;"><i class="fas fa-chevron-right"></i></li>
-                    <li class="current" aria-current="page" style="color:var(--primary-color);font-weight:600;font-size:13px;">Finance</li>
+                    <li aria-current="page" style="color:var(--primary-color);font-weight:600;font-size:13px;">Finance</li>
                 </ol>
             </nav>
         </div>
 
-        <section class="finance-section" style="width: 100%; max-width: 100%;">
-            <div class="stats-grid">
-                <div class="stat-card green">
-                    <div class="stat-icon green"><i class="fas fa-wallet"></i></div>
-                    <div class="stat-content">
-                        <div class="stat-label">Total Expenses</div>
-                        <div class="stat-value">₱<?php echo number_format($total_amount, 2); ?></div>
-                        <?php if ($total_records > 0): ?>
-                            <div class="stat-change"><?php echo $total_records; ?> transactions</div>
-                        <?php endif; ?>
-                    </div>
+        <section class="finance-section">
+
+            <!-- ── ENDING BALANCE HERO ── -->
+            <div class="balance-hero">
+                <div class="hero-label"><i class="fas fa-coins me-1"></i> Overall Available Funds</div>
+                <div class="hero-amount">₱<?php echo number_format(max(0, $global_ending), 2); ?></div>
+                <div class="hero-sub">
+                    Beginning Balance + Cash Advances − Payments − Tax Withheld
                 </div>
+                <div class="hero-pills">
+                    <div class="hero-pill"><span>Beg. Balance: </span>₱<?php echo number_format($global_beginning, 2); ?></div>
+                    <div class="hero-pill"><span>+ Cash Advances: </span>₱<?php echo number_format($global_cash_advance, 2); ?></div>
+                    <div class="hero-pill"><span>− Payments: </span>₱<?php echo number_format($global_payments, 2); ?></div>
+                    <div class="hero-pill"><span>− Tax: </span>₱<?php echo number_format($global_tax, 2); ?></div>
+                </div>
+            </div>
+
+            <!-- ── STAT CARDS ── -->
+            <div class="stats-grid">
                 <div class="stat-card blue">
                     <div class="stat-icon blue"><i class="fas fa-calendar-alt"></i></div>
                     <div class="stat-content">
-                        <div class="stat-label">This Month</div>
+                        <div class="stat-label">This Month Payments</div>
                         <div class="stat-value">₱<?php echo number_format($current_month_total, 2); ?></div>
-                        <?php if ($month_over_month_change != 0): ?>
-                            <div class="stat-change <?php echo $month_over_month_change >= 0 ? 'positive' : 'negative'; ?>">
-                                <i class="fas fa<?php echo $month_over_month_change >= 0 ? '-arrow-up' : '-arrow-down'; ?>"></i>
-                                <?php echo number_format(abs($month_over_month_change), 1); ?>% vs last month
+                        <?php if ($mom_change != 0): ?>
+                            <div class="stat-change <?php echo $mom_change >= 0 ? 'negative' : 'positive'; ?>">
+                                <i class="fas fa-arrow-<?php echo $mom_change >= 0 ? 'up' : 'down'; ?>"></i>
+                                <?php echo number_format(abs($mom_change), 1); ?>% vs last month
                             </div>
                         <?php endif; ?>
                     </div>
                 </div>
-                <div class="stat-card orange">
-                    <div class="stat-icon orange"><i class="fas fa-chart-line"></i></div>
+                <div class="stat-card green">
+                    <div class="stat-icon green"><i class="fas fa-arrow-circle-down"></i></div>
                     <div class="stat-content">
-                        <div class="stat-label">Average Transaction</div>
-                        <div class="stat-value">₱<?php echo number_format($average_transaction, 2); ?></div>
+                        <div class="stat-label">Total Cash Advances</div>
+                        <div class="stat-value">₱<?php echo number_format($global_cash_advance, 2); ?></div>
                     </div>
                 </div>
-                <div class="stat-card purple">
-                    <div class="stat-icon purple"><i class="fas fa-trophy"></i></div>
+                <div class="stat-card orange">
+                    <div class="stat-icon orange"><i class="fas fa-arrow-circle-up"></i></div>
                     <div class="stat-content">
-                        <div class="stat-label">Highest Expense</div>
-                        <div class="stat-value" style="font-size: 18px;">₱<?php echo number_format($highest_expense['amount'], 2); ?></div>
-                        <div class="stat-change" style="font-size: 11px; color: var(--text-secondary);"><?php echo htmlspecialchars($highest_expense['title']); ?></div>
+                        <div class="stat-label">Total Payments</div>
+                        <div class="stat-value">₱<?php echo number_format($global_payments, 2); ?></div>
                     </div>
                 </div>
                 <div class="stat-card red">
                     <div class="stat-icon red"><i class="fas fa-receipt"></i></div>
                     <div class="stat-content">
-                        <div class="stat-label">Total Records</div>
+                        <div class="stat-label">Total Tax Withheld</div>
+                        <div class="stat-value">₱<?php echo number_format($global_tax, 2); ?></div>
+                    </div>
+                </div>
+                <div class="stat-card purple">
+                    <div class="stat-icon purple"><i class="fas fa-layer-group"></i></div>
+                    <div class="stat-content">
+                        <div class="stat-label">Total Transactions</div>
                         <div class="stat-value"><?php echo count($all_records); ?></div>
+                        <div class="stat-change"><?php echo count($month_groups); ?> month groups</div>
                     </div>
                 </div>
             </div>
 
+            <!-- ── MONTHLY SUMMARY CARDS ── -->
+            <?php if (!empty($month_groups)): ?>
+                <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
+                    <h6 style="font-size:13px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin:0;">
+                        <i class="fas fa-calendar-week me-2" style="color:var(--primary-color);"></i>Monthly Summary
+                    </h6>
+                </div>
+                <div class="month-summary-grid">
+                    <?php
+                    $carry = 0;
+                    foreach ($month_groups as $mg):
+                        $beg = $mg['beginning_balance'] ?: $carry;
+                        $end = $beg + $mg['cash_advance_total'] - $mg['payments_total'] - $mg['tax_total'];
+                        $carry = $end;
+                    ?>
+                        <div class="month-card">
+                            <div class="mc-label"><i class="fas fa-calendar-day"></i><?php echo htmlspecialchars($mg['label']); ?></div>
+                            <div class="mc-row"><span class="mc-key">Beg. Balance</span><span class="mc-val">₱<?php echo number_format($beg, 2); ?></span></div>
+                            <div class="mc-row"><span class="mc-key">+ Cash Advances</span><span class="mc-val text-success">₱<?php echo number_format($mg['cash_advance_total'], 2); ?></span></div>
+                            <div class="mc-row"><span class="mc-key">− Payments</span><span class="mc-val">₱<?php echo number_format($mg['payments_total'], 2); ?></span></div>
+                            <div class="mc-row"><span class="mc-key">− Tax Withheld</span><span class="mc-val">₱<?php echo number_format($mg['tax_total'], 2); ?></span></div>
+                            <div class="mc-row"><span class="mc-key">Transactions</span><span class="mc-val"><?php echo count($mg['records']); ?></span></div>
+                            <div class="mc-ending"><span>Ending Balance</span><span>₱<?php echo number_format(max(0, $end), 2); ?></span></div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <!-- ── UACS / ACCOUNT BREAKDOWN CARDS ── -->
+            <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
+                <h6 style="font-size:13px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.6px;margin:0;">
+                    <i class="fas fa-tags me-2" style="color:var(--primary-color);"></i>Expenditure by Account (UACS)
+                </h6>
+            </div>
+            <div class="uacs-grid">
+                <?php foreach ($uacs_labels as $key => $ul): ?>
+                    <div class="uacs-card">
+                        <div class="uc-icon stat-icon <?php echo $ul['color']; ?>"><i class="fas <?php echo $ul['icon']; ?>"></i></div>
+                        <div class="uc-content">
+                            <div class="uc-label"><?php echo htmlspecialchars($ul['label']); ?></div>
+                            <div class="uc-code"><?php echo htmlspecialchars($ul['code']); ?></div>
+                            <div class="uc-val">₱<?php echo number_format($uacs_totals[$key], 2); ?></div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+
+            <!-- ── MAIN CDR TABLE CARD ── -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
-                    <h5 class="mb-0"><i class="fas fa-table-list me-2" style="color:var(--primary-color);"></i>Finance Records</h5>
+                    <h5 class="mb-0"><i class="fas fa-table-list me-2" style="color:var(--primary-color);"></i>Cash Disbursement Register</h5>
                     <div class="d-flex gap-2 flex-wrap">
                         <button class="btn btn-success" onclick="openAddModal()" aria-label="Add new finance record">
-                            <i class="fas fa-plus"></i>Add New Record
+                            <i class="fas fa-plus"></i>Add Entry
                         </button>
-                        <button class="btn btn-outline-secondary" onclick="refreshTable()" aria-label="Refresh table">
-                            <i class="fas fa-rotate-right"></i> Refresh
-                        </button>
+                        <button class="btn-export" onclick="exportToCSV()"><i class="fas fa-download"></i> Export CSV</button>
+                        <button class="btn btn-outline-secondary" onclick="refreshTable()"><i class="fas fa-rotate-right"></i> Refresh</button>
                     </div>
                 </div>
 
                 <div class="card-body pb-0">
-                    <form method="GET" action="" class="filter-bar" id="filterForm">
+                    <form method="GET" action="" class="filter-bar">
                         <div class="search-box">
                             <i class="fas fa-search"></i>
-                            <input type="text" name="search" id="searchInput" placeholder="Search by fund title or description..." value="<?php echo htmlspecialchars($search); ?>" aria-label="Search finance records">
+                            <input type="text" name="search" placeholder="Search supplier or purpose…" value="<?php echo htmlspecialchars($search); ?>">
                         </div>
-                        <select name="category" class="filter-select" id="categoryFilter" aria-label="Filter by category">
-                            <option value="">All Categories</option>
-                            <option value="Supplies" <?php echo $category_filter == 'Supplies' ? 'selected' : ''; ?>>Supplies</option>
-                            <option value="Maintenance" <?php echo $category_filter == 'Maintenance' ? 'selected' : ''; ?>>Maintenance</option>
-                            <option value="Equipment" <?php echo $category_filter == 'Equipment' ? 'selected' : ''; ?>>Equipment</option>
-                            <option value="Sports" <?php echo $category_filter == 'Sports' ? 'selected' : ''; ?>>Sports</option>
-                            <option value="Books" <?php echo $category_filter == 'Books' ? 'selected' : ''; ?>>Books</option>
-                            <option value="Transportation" <?php echo $category_filter == 'Transportation' ? 'selected' : ''; ?>>Transportation</option>
-                            <option value="Utilities" <?php echo $category_filter == 'Utilities' ? 'selected' : ''; ?>>Utilities</option>
-                            <option value="Events" <?php echo $category_filter == 'Events' ? 'selected' : ''; ?>>Events</option>
-                            <option value="Salaries" <?php echo $category_filter == 'Salaries' ? 'selected' : ''; ?>>Salaries</option>
-                            <option value="Other" <?php echo $category_filter == 'Other' ? 'selected' : ''; ?>>Other</option>
+                        <select name="month" class="filter-select">
+                            <option value="">All Months</option>
+                            <?php foreach ($distinct_months as $dm): ?>
+                                <option value="<?php echo htmlspecialchars($dm); ?>" <?php echo $month_filter === $dm ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($dm); ?>
+                                </option>
+                            <?php endforeach; ?>
                         </select>
-                        <button type="submit" class="btn btn-outline-primary"><i class="fas fa-filter me-1"></i> Filter</button>
-                        <?php if (!empty($search) || !empty($category_filter)): ?>
-                            <a href="finance.php" class="btn btn-outline-secondary"><i class="fas fa-times me-1"></i> Clear</a>
+                        <button type="submit" class="btn btn-outline-primary"><i class="fas fa-filter me-1"></i>Filter</button>
+                        <?php if ($search || $month_filter): ?>
+                            <a href="finance.php" class="btn btn-outline-secondary"><i class="fas fa-times me-1"></i>Clear</a>
                         <?php endif; ?>
-                        <button type="button" class="btn-export" onclick="exportToCSV()" aria-label="Export to CSV">
-                            <i class="fas fa-download"></i> Export CSV
-                        </button>
                     </form>
                 </div>
 
                 <div class="card-body p-0">
                     <?php
-                    $col_map = [
-                        'Utilities'      => 'electricity',
-                        'Equipment'      => 'semi_expendable',
-                        'Other'          => 'other_general',
-                        'Salaries'       => 'other_general',
-                        'Events'         => 'training',
-                        'Sports'         => 'training',
-                        'Transportation' => 'training',
-                        'Maintenance'    => 'water',
-                        'Supplies'       => 'other_supplies',
-                        'Books'          => 'other_supplies',
-                    ];
-                    $cash_advance_total  = 0;
-                    $page_total          = 0;
-                    $tax_withheld_total  = 0;
-                    $col_totals = [
-                        'electricity'     => 0,
-                        'semi_expendable' => 0,
-                        'other_general'   => 0,
-                        'training'        => 0,
-                        'water'           => 0,
-                        'other_supplies'  => 0,
-                        'internet'        => 0,
-                        'due_to_bir'      => 0,
-                        'amount_other'    => 0,
-                    ];
+                    // Group finance_records (paginated) by month for display
+                    $pg_groups = [];
                     foreach ($finance_records as $r) {
-                        $amt_r = floatval($r['amount']);
-                        $page_total += $amt_r;
-                        $raw_r = $r['description'] ?? '';
-                        $cdr_r = [];
-                        if ($raw_r && $raw_r[0] === '{') {
-                            $dec_r = json_decode($raw_r, true);
-                            if (is_array($dec_r)) $cdr_r = $dec_r;
-                        }
-                        $cash_advance_total += floatval($cdr_r['cash_advance'] ?? 0);
-                        $tax_withheld_total += floatval($cdr_r['tax_withheld'] ?? 0);
-
-                        // Sum each MOOE column from stored explicit values first,
-                        // then fall back to category mapping for the payments column
-                        $r_elec  = floatval($cdr_r['electricity']     ?? 0);
-                        $r_semi  = floatval($cdr_r['semi_expendable']  ?? 0);
-                        $r_ogen  = floatval($cdr_r['other_general']    ?? 0);
-                        $r_train = floatval($cdr_r['training']         ?? 0);
-                        $r_water = floatval($cdr_r['water']            ?? 0);
-                        $r_osup  = floatval($cdr_r['other_supplies']   ?? 0);
-                        $r_inet  = floatval($cdr_r['internet']         ?? 0);
-                        $r_bir   = floatval($cdr_r['due_to_bir']       ?? 0);
-                        $r_other = floatval($cdr_r['amount_other']     ?? 0);
-
-                        // If none of the explicit MOOE fields are set, fall back to category mapping
-                        $any_explicit = ($r_elec + $r_semi + $r_ogen + $r_train + $r_water + $r_osup + $r_inet + $r_bir + $r_other) > 0;
-                        if (!$any_explicit) {
-                            $mooe_override_r = !empty($cdr_r['mooe_col']) ? $cdr_r['mooe_col'] : null;
-                            $col_r = $mooe_override_r ?? ($col_map[$r['category']] ?? 'other_general');
-                            if (isset($col_totals[$col_r])) $col_totals[$col_r] += $amt_r;
-                        } else {
-                            $col_totals['electricity']     += $r_elec;
-                            $col_totals['semi_expendable'] += $r_semi;
-                            $col_totals['other_general']   += $r_ogen;
-                            $col_totals['training']        += $r_train;
-                            $col_totals['water']           += $r_water;
-                            $col_totals['other_supplies']  += $r_osup;
-                            $col_totals['internet']        += $r_inet;
-                            $col_totals['due_to_bir']      += $r_bir;
-                            $col_totals['amount_other']    += $r_other;
-                        }
+                        $ml = strtoupper(trim($r['month_label'] ?? 'UNCATEGORISED'));
+                        if (!isset($pg_groups[$ml])) $pg_groups[$ml] = ['records' => [], 'beginning_balance' => floatval($r['beginning_balance'] ?? 0)];
+                        $pg_groups[$ml]['records'][] = $r;
                     }
                     ?>
                     <div class="cdr-wrapper">
+                        <!-- ── DOC HEADER ── -->
                         <div class="cdr-doc-header">
                             <div class="left-info">
                                 <div><strong>Entity Name:</strong> BUYOAN NATIONAL HIGH SCHOOL (JUNIOR HIGH SCHOOL)</div>
@@ -2285,184 +2072,334 @@ $category_icons = [
                                 <div><strong>Sheet No.:</strong> &nbsp;</div>
                             </div>
                         </div>
+
                         <table class="cdr-table" role="table" aria-label="Cash Disbursement Register">
+                            <colgroup>
+                                <col style="width:76px"> <!-- A  Date -->
+                                <col style="width:100px"> <!-- B  DV/Payroll -->
+                                <col style="width:390px"> <!-- C  Particulars -->
+                                <col style="width:108px"> <!-- D  Cash Advance -->
+                                <col style="width:108px"> <!-- E  Payments -->
+                                <col style="width:101px"> <!-- F  Tax Withheld -->
+                                <col style="width:93px"> <!-- G  Balance -->
+                                <col style="width:41px"> <!-- H  narrow -->
+                                <col style="width:35px"> <!-- I  narrow -->
+                                <col style="width:97px"> <!-- J  Electricity (5020402000) -->
+                                <col style="width:72px"> <!-- K  Training (5020201000) -->
+                                <col style="width:145px"> <!-- L  Semi-Exp ICT (50203210) -->
+                                <col style="width:97px"> <!-- M  Other Gen Svc (5021299000) -->
+                                <col style="width:104px"> <!-- N  Other Supplies (5020399000) -->
+                                <col style="width:96px"> <!-- O  Water (5020401000) -->
+                                <col style="width:98px"> <!-- P  Semi-Exp Other (5020321099) -->
+                                <col style="width:95px"> <!-- Q  Internet (5020503000) -->
+                                <col style="width:99px"> <!-- R  Office Supplies (5020301002) -->
+                                <col style="width:87px"> <!-- S  Other Gen Svc 2 (5021299000) -->
+                                <col style="width:44px"> <!-- T  Account Desc -->
+                                <col style="width:42px"> <!-- U  UACS Code -->
+                                <col style="width:42px"> <!-- V  Amount -->
+                                <col style="width:90px"> <!-- Actions -->
+                            </colgroup>
                             <thead>
-                                <tr class="cdr-group-row">
-                                    <th rowspan="3" style="width:66px;">Date</th>
-                                    <th rowspan="3" style="width:76px;">DV/Payroll<br>Check No.</th>
-                                    <th rowspan="3" style="min-width:160px;">Particulars/Supplier</th>
-                                    <th colspan="4">Advances for<br>Operating Expenses<br>(19901010)</th>
-                                    <th colspan="11">BREAKDOWN OF WITHDRAWALS/PAYMENTS</th>
-                                    <th rowspan="3" style="width:76px;">Actions</th>
+                                <tr class="cdr-r1">
+                                    <th colspan="23">CASH DISBURSEMENT REGISTER</th>
                                 </tr>
-                                <tr class="cdr-group-row">
+                                <tr class="cdr-r2">
+                                    <th colspan="4">Advances for<br>Operating Expenses</th>
+                                    <th colspan="2" rowspan="2" style="font-size:9px;"></th>
+                                    <th colspan="13" rowspan="2">BREAKDOWN OF WITHDRAWALS/PAYMENTS</th>
+                                    <th rowspan="5">Actions</th>
+                                </tr>
+                                <tr class="cdr-r3">
+                                    <th colspan="4">(19901010)</th>
+                                </tr>
+                                <tr class="cdr-r3b">
                                     <th colspan="4">Amount</th>
-                                    <th colspan="11">MAINTENANCE AND OTHER OPERATING EXPENSES</th>
+                                    <th colspan="2"></th>
+                                    <th colspan="13">MAINTENANCE AND OTHER OPERATING EXPENSES</th>
                                 </tr>
-                                <tr>
-                                    <th style="width:76px;">Cash Advance</th>
-                                    <th style="width:76px;">Payments</th>
-                                    <th style="width:68px;">Tax Withheld</th>
-                                    <th style="width:76px;">Balance</th>
-                                    <th style="width:66px;">Electricity Expenses<br><small style="font-weight:400;">(5020401000)</small></th>
-                                    <th style="width:72px;">Semi-Expendable Information and Communications Technology Equipment<br><small style="font-weight:400;">(5020321210)</small></th>
-                                    <th style="width:68px;">Other General Services<br><small style="font-weight:400;">(5021299000)</small></th>
-                                    <th style="width:64px;">Training Expenses<br><small style="font-weight:400;">(5020201000)</small></th>
-                                    <th style="width:64px;">Water Expenses<br><small style="font-weight:400;">(5020402000)</small></th>
-                                    <th style="width:72px;">Other Supplies &amp; Materials Expenses<br><small style="font-weight:400;">(5020399000)</small></th>
-                                    <th style="width:66px;">Internet Subscription Expenses<br><small style="font-weight:400;">(5020503000)</small></th>
-                                    <th style="width:62px;">Due to BIR<br><small style="font-weight:400;">(2020101000)</small></th>
-                                    <th style="width:100px;">Account Description</th>
-                                    <th style="width:72px;">UACS Code</th>
-                                    <th style="width:66px;">Amount</th>
+                                <tr class="cdr-r4">
+                                    <th rowspan="2">date</th>
+                                    <th rowspan="2">DV/Payroll<br>Check No.</th>
+                                    <th rowspan="2">Particulars/Supplier</th>
+                                    <th rowspan="2">Cash<br>Advance</th>
+                                    <th rowspan="2">Payments</th>
+                                    <th rowspan="2">Tax<br>Withheld</th>
+                                    <th rowspan="2">Balance</th>
+                                    <th>Electricity<br>Expenses</th>
+                                    <th>Training<br>Expenses</th>
+                                    <th>Semi-Expendable Information and Communications Technology Equipment</th>
+                                    <th>Other General<br>Services</th>
+                                    <th>Other Supplies &amp; Materials Expenses</th>
+                                    <th>Water<br>Expenses</th>
+                                    <th>Semi-Expendable-Other Equipment</th>
+                                    <th>Internet Subscription Expenses</th>
+                                    <th>Office Supplies<br>Expenses</th>
+                                    <th>Other General<br>Services</th>
+                                    <th rowspan="2">Account<br>Description</th>
+                                    <th rowspan="2">UACS<br>Code</th>
+                                    <th rowspan="2">Amount</th>
+                                </tr>
+                                <tr class="cdr-r5">
+                                    <th></th>
+                                    <th></th>
+                                    <th>(5020402000)</th>
+                                    <th>(5020201000)</th>
+                                    <th>(50203210)</th>
+                                    <th>(5021299000)</th>
+                                    <th>(5020399000)</th>
+                                    <th>(5020401000)</th>
+                                    <th>(5020321099)</th>
+                                    <th>(5020503000)</th>
+                                    <th>(5020301002)</th>
+                                    <th>(5021299000)</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php
-                                $running_balance = $cash_advance_total;
-                                if (count($finance_records) === 0):
-                                ?>
+                                <?php if (empty($finance_records)): ?>
                                     <tr>
-                                        <td colspan="19" style="text-align:center;color:#999;font-size:11px;padding:12px;">No records found.</td>
+                                        <td colspan="23" style="padding:20px;text-align:center;color:#999;font-size:12px;">No records found. Add the first entry.</td>
                                     </tr>
-                                <?php
-                                endif;
-                                foreach ($finance_records as $record):
-                                    $amt = floatval($record['amount']);
-                                    // Decode CDR meta from description
-                                    $cdr = [];
-                                    $raw = $record['description'] ?? '';
-                                    if ($raw && $raw[0] === '{') {
-                                        $decoded = json_decode($raw, true);
-                                        if (is_array($decoded)) $cdr = $decoded;
-                                    }
-                                    $dv_no           = !empty($cdr['dv_check_no'])     ? $cdr['dv_check_no']             : 'DV-' . str_pad($record['id'], 4, '0', STR_PAD_LEFT);
-                                    $rec_advance     = isset($cdr['cash_advance'])      ? floatval($cdr['cash_advance'])   : 0;
-                                    $rec_payments    = isset($cdr['payments'])          ? floatval($cdr['payments'])       : $amt;
-                                    $rec_tax         = isset($cdr['tax_withheld'])      ? floatval($cdr['tax_withheld'])   : 0;
-                                    $rec_balance     = isset($cdr['balance'])           ? floatval($cdr['balance'])        : 0;
-                                    $mooe_override   = !empty($cdr['mooe_col'])         ? $cdr['mooe_col']                : null;
-                                    // Particulars fix: show only the note/description text, NOT JSON
-                                    $note            = !empty($cdr['note'])             ? $cdr['note']                    : '';
-                                    // Per-row MOOE overrides from individual columns if set
-                                    $row_electricity   = isset($cdr['electricity'])    ? floatval($cdr['electricity'])    : 0;
-                                    $row_semi          = isset($cdr['semi_expendable']) ? floatval($cdr['semi_expendable']) : 0;
-                                    $row_other_gen     = isset($cdr['other_general'])  ? floatval($cdr['other_general'])  : 0;
-                                    $row_training      = isset($cdr['training'])       ? floatval($cdr['training'])       : 0;
-                                    $row_water         = isset($cdr['water'])          ? floatval($cdr['water'])          : 0;
-                                    $row_other_sup     = isset($cdr['other_supplies']) ? floatval($cdr['other_supplies']) : 0;
-                                    $row_internet      = isset($cdr['internet'])       ? floatval($cdr['internet'])       : 0;
-                                    $row_bir           = isset($cdr['due_to_bir'])     ? floatval($cdr['due_to_bir'])     : 0;
-                                    $row_amount_other  = isset($cdr['amount_other'])   ? floatval($cdr['amount_other'])   : 0;
-                                    $row_account_desc  = isset($cdr['account_description']) ? $cdr['account_description'] : '';
-                                    $row_uacs_code     = isset($cdr['uacs_code'])      ? $cdr['uacs_code']               : '';
-                                    $running_balance -= $amt;
-                                    // MOOE column: if individual overrides set use those, else derive from category
-                                    $col = $mooe_override ?? ($col_map[$record['category']] ?? 'other_general');
-                                    // Use explicit per-row values if any were set, else use category mapping
-                                    $display_elec  = $row_electricity  > 0 ? $row_electricity  : ($col === 'electricity'    ? $amt : 0);
-                                    $display_semi  = $row_semi         > 0 ? $row_semi         : ($col === 'semi_expendable' ? $amt : 0);
-                                    $display_ogen  = $row_other_gen    > 0 ? $row_other_gen    : ($col === 'other_general'  ? $amt : 0);
-                                    $display_train = $row_training     > 0 ? $row_training     : ($col === 'training'       ? $amt : 0);
-                                    $display_water = $row_water        > 0 ? $row_water        : ($col === 'water'          ? $amt : 0);
-                                    $display_osup  = $row_other_sup    > 0 ? $row_other_sup    : ($col === 'other_supplies' ? $amt : 0);
-                                    $display_inet  = $row_internet     > 0 ? $row_internet     : ($col === 'internet'       ? $amt : 0);
-                                    $display_bir   = $row_bir          > 0 ? $row_bir          : ($col === 'due_to_bir'     ? $amt : 0);
-                                    $display_other = $row_amount_other > 0 ? $row_amount_other : 0;
-                                ?>
-                                    <tr data-id="<?php echo $record['id']; ?>">
-                                        <td class="cdr-center"><?php echo date('m/d/Y', strtotime($record['transaction_date'])); ?></td>
-                                        <td class="cdr-center" style="font-size:10px;"><?php echo htmlspecialchars($dv_no); ?></td>
-                                        <td style="padding-left:6px;">
-                                            <!-- FIX: Show fund_title (Particulars/Supplier) only — NOT JSON -->
-                                            <strong style="font-size:11px;"><?php echo htmlspecialchars($record['fund_title']); ?></strong>
-                                            <?php if ($note): ?>
-                                                <div style="font-size:10px;color:#555;"><?php echo htmlspecialchars(substr($note, 0, 45)); ?><?php echo strlen($note) > 45 ? '…' : ''; ?></div>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="cdr-num"><?php echo $rec_advance > 0 ? '₱' . number_format($rec_advance, 2) : '—'; ?></td>
-                                        <td class="cdr-num">
-                                            <?php if ($record['proof_image']): ?>
-                                                <span style="cursor:pointer;color:#1a4f12;" onclick="viewProof('<?php echo htmlspecialchars($record['proof_image']); ?>')" title="View proof">
-                                                    ₱<?php echo number_format($rec_payments, 2); ?> <i class="fas fa-eye" style="font-size:9px;"></i>
-                                                </span>
-                                            <?php else: ?>
-                                                ₱<?php echo number_format($rec_payments, 2); ?>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="cdr-num"><?php echo $rec_tax > 0 ? '₱' . number_format($rec_tax, 2) : '—'; ?></td>
-                                        <td class="cdr-num">₱<?php echo number_format(max(0, $running_balance), 2); ?></td>
-                                        <td class="cdr-num"><?php echo $display_elec  > 0 ? '₱' . number_format($display_elec,  2) : ''; ?></td>
-                                        <td class="cdr-num"><?php echo $display_semi  > 0 ? '₱' . number_format($display_semi,  2) : ''; ?></td>
-                                        <td class="cdr-num"><?php echo $display_ogen  > 0 ? '₱' . number_format($display_ogen,  2) : ''; ?></td>
-                                        <td class="cdr-num"><?php echo $display_train > 0 ? '₱' . number_format($display_train, 2) : ''; ?></td>
-                                        <td class="cdr-num"><?php echo $display_water > 0 ? '₱' . number_format($display_water, 2) : ''; ?></td>
-                                        <td class="cdr-num"><?php echo $display_osup  > 0 ? '₱' . number_format($display_osup,  2) : ''; ?></td>
-                                        <td class="cdr-num"><?php echo $display_inet  > 0 ? '₱' . number_format($display_inet,  2) : ''; ?></td>
-                                        <td class="cdr-num"><?php echo $display_bir   > 0 ? '₱' . number_format($display_bir,   2) : ''; ?></td>
-                                        <td style="padding-left:5px;font-size:10.5px;"><?php echo htmlspecialchars($row_account_desc); ?></td>
-                                        <td class="cdr-center" style="font-size:10.5px;"><?php echo htmlspecialchars($row_uacs_code); ?></td>
-                                        <td class="cdr-num"><?php echo $display_other > 0 ? '₱' . number_format($display_other, 2) : ''; ?></td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <button class="btn btn-sm btn-info edit-btn"
-                                                    data-id="<?php echo $record['id']; ?>"
-                                                    data-fund_title="<?php echo htmlspecialchars($record['fund_title']); ?>"
-                                                    data-note="<?php echo htmlspecialchars($note); ?>"
-                                                    data-dv_check_no="<?php echo htmlspecialchars($dv_no); ?>"
-                                                    data-cash_advance="<?php echo $rec_advance; ?>"
-                                                    data-payments="<?php echo $rec_payments; ?>"
-                                                    data-tax_withheld="<?php echo $rec_tax; ?>"
-                                                    data-balance="<?php echo $rec_balance; ?>"
-                                                    data-mooe_col="<?php echo htmlspecialchars($mooe_override ?? ''); ?>"
-                                                    data-electricity="<?php echo $row_electricity; ?>"
-                                                    data-semi_expendable="<?php echo $row_semi; ?>"
-                                                    data-other_general="<?php echo $row_other_gen; ?>"
-                                                    data-training="<?php echo $row_training; ?>"
-                                                    data-water="<?php echo $row_water; ?>"
-                                                    data-other_supplies="<?php echo $row_other_sup; ?>"
-                                                    data-internet="<?php echo $row_internet; ?>"
-                                                    data-due_to_bir="<?php echo $row_bir; ?>"
-                                                    data-amount_other="<?php echo $display_other; ?>"
-                                                    data-account_description="<?php echo htmlspecialchars($row_account_desc); ?>"
-                                                    data-uacs_code="<?php echo htmlspecialchars($row_uacs_code); ?>"
-                                                    data-amount="<?php echo $record['amount']; ?>"
-                                                    data-transaction_date="<?php echo $record['transaction_date']; ?>"
-                                                    data-category="<?php echo htmlspecialchars($record['category'] ?? ''); ?>"
-                                                    data-proof_image="<?php echo htmlspecialchars($record['proof_image'] ?? ''); ?>"
-                                                    onclick="openEditModal(this)" aria-label="Edit record">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                                <button class="btn btn-sm btn-outline-danger delete-btn" data-id="<?php echo $record['id']; ?>" aria-label="Delete record">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
+                                <?php else: ?>
+                                    <?php
+                                    // per-group running balance computation
+                                    foreach ($pg_groups as $mLabel => $pgGrp):
+                                        $grp_recs = $pgGrp['records'];
+
+                                        // Compute beg balance: use first record's beginning_balance
+                                        // but also pull from month_groups for accuracy
+                                        $mg_data = $month_groups[$mLabel] ?? null;
+                                        $beg_bal_grp = $mg_data ? $mg_data['beginning_balance'] : floatval($grp_recs[0]['beginning_balance'] ?? 0);
+
+                                        // compute totals for this group (may be partial page)
+                                        $grp_ca = 0;
+                                        $grp_pay = 0;
+                                        $grp_tax = 0;
+                                        $grp_col_totals = array_fill_keys(['electricity', 'semi_expendable', 'other_general', 'training', 'water', 'other_supplies', 'internet', 'due_to_bir', 'amount_other'], 0);
+                                        foreach ($grp_recs as $rr) {
+                                            $cc = json_decode($rr['description'] ?? '{}', true) ?: [];
+                                            $grp_ca  += floatval($cc['cash_advance'] ?? 0);
+                                            $grp_pay += floatval($cc['payments'] ?? $rr['amount']);
+                                            $grp_tax += floatval($cc['tax_withheld'] ?? 0);
+                                            $mooe_fs = ['electricity', 'semi_expendable', 'other_general', 'training', 'water', 'other_supplies', 'internet', 'due_to_bir', 'amount_other'];
+                                            $any = false;
+                                            foreach ($mooe_fs as $mf) {
+                                                $v = floatval($cc[$mf] ?? 0);
+                                                if ($v > 0) {
+                                                    $grp_col_totals[$mf] += $v;
+                                                    $any = true;
+                                                }
+                                            }
+                                            if (!$any) {
+                                                $col = (!empty($cc['mooe_col']) ? $cc['mooe_col'] : null) ?? ($col_map[$rr['category']] ?? 'other_general');
+                                                $grp_col_totals[$col] += floatval($rr['amount']);
+                                            }
+                                        }
+                                    ?>
+                                        <!-- Month divider row -->
+                                        <tr>
+                                            <td colspan="23" style="padding:0;">
+                                                <div class="month-divider">
+                                                    <div class="md-left">
+                                                        <i class="fas fa-calendar-alt"></i>
+                                                        <?php echo htmlspecialchars($mLabel); ?>
+                                                    </div>
+                                                    <div class="md-right">
+                                                        <span class="md-pill">Beg. Bal: ₱<?php echo number_format($beg_bal_grp, 2); ?></span>
+                                                        <span class="md-pill">+CA: ₱<?php echo number_format($grp_ca, 2); ?></span>
+                                                        <span class="md-pill">Ending: ₱<?php echo number_format(max(0, $beg_bal_grp + $grp_ca - $grp_pay - $grp_tax), 2); ?></span>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <!-- Balance forwarded row -->
+                                        <tr class="cdr-bal-row">
+                                            <td></td>
+                                            <td></td>
+                                            <td class="cdr-part" style="font-size:10px;text-align:left;">BALANCE FORWARDED</td>
+                                            <td></td>
+                                            <td></td>
+                                            <td></td>
+                                            <td class="cdr-num">₱<?php echo number_format($beg_bal_grp, 2); ?></td>
+                                            <td colspan="50"></td>
+                                        </tr>
+                                        <!-- Cash advance for month row -->
+                                        <tr class="cdr-adv-row">
+                                            <td></td>
+                                            <td></td>
+                                            <td class="cdr-part" style="font-size:10px;text-align:left;">CASH ADVANCE FOR THE MONTH OF <?php echo htmlspecialchars($mLabel); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_ca, 2); ?></td>
+                                            <td></td>
+                                            <td></td>
+                                            <td class="cdr-num">₱<?php echo number_format($beg_bal_grp + $grp_ca, 2); ?></td>
+                                            <td colspan="16"></td>
+                                        </tr>
+
+                                        <?php
+                                        // Running balance starts at beg_bal + cash_advance_for_month
+                                        $running = $beg_bal_grp + $grp_ca;
+                                        foreach ($grp_recs as $record):
+                                            $cdr = json_decode($record['description'] ?? '{}', true) ?: [];
+                                            $dv_no        = !empty($cdr['dv_check_no']) ? $cdr['dv_check_no'] : 'DV-' . str_pad($record['id'], 4, '0', STR_PAD_LEFT);
+                                            $rec_advance  = floatval($cdr['cash_advance'] ?? 0);
+                                            $rec_payments = floatval($cdr['payments'] ?? $record['amount']);
+                                            $rec_tax      = floatval($cdr['tax_withheld'] ?? 0);
+                                            $note         = $cdr['note'] ?? '';
+                                            $row_acct     = $cdr['account_description'] ?? '';
+                                            $row_uacs     = $cdr['uacs_code'] ?? '';
+
+                                            // MOOE display values
+                                            $r_elec  = floatval($cdr['electricity'] ?? 0);
+                                            $r_semi  = floatval($cdr['semi_expendable'] ?? 0);
+                                            $r_ogen  = floatval($cdr['other_general'] ?? 0);
+                                            $r_train = floatval($cdr['training'] ?? 0);
+                                            $r_water = floatval($cdr['water'] ?? 0);
+                                            $r_osup  = floatval($cdr['other_supplies'] ?? 0);
+                                            $r_inet  = floatval($cdr['internet'] ?? 0);
+                                            $r_bir   = floatval($cdr['due_to_bir'] ?? 0);
+                                            $r_other = floatval($cdr['amount_other'] ?? 0);
+
+                                            $any_expl = ($r_elec + $r_semi + $r_ogen + $r_train + $r_water + $r_osup + $r_inet + $r_bir + $r_other) > 0;
+                                            if (!$any_expl) {
+                                                $col = (!empty($cdr['mooe_col']) ? $cdr['mooe_col'] : null) ?? ($col_map[$record['category']] ?? 'other_general');
+                                                $amt_r = floatval($record['amount']);
+                                                if ($col === 'electricity')    $r_elec = $amt_r;
+                                                elseif ($col === 'semi_expendable') $r_semi = $amt_r;
+                                                elseif ($col === 'other_general')   $r_ogen = $amt_r;
+                                                elseif ($col === 'training')        $r_train = $amt_r;
+                                                elseif ($col === 'water')           $r_water = $amt_r;
+                                                elseif ($col === 'other_supplies')  $r_osup = $amt_r;
+                                                elseif ($col === 'internet')        $r_inet = $amt_r;
+                                                elseif ($col === 'due_to_bir')      $r_bir = $amt_r;
+                                            }
+
+                                            // Update running balance: per xlsx logic
+                                            // running = previous running + cash_advance_row - payments_row - tax_row
+                                            $running = $running + $rec_advance - $rec_payments - $rec_tax;
+                                        ?>
+                                            <tr data-id="<?php echo $record['id']; ?>">
+                                                <!-- A: Date -->
+                                                <td style="white-space:nowrap;font-size:10.5px;"><?php echo date('m/d/Y', strtotime($record['transaction_date'])); ?></td>
+                                                <!-- B: DV/Payroll Check No. -->
+                                                <td style="font-size:10px;word-break:break-all;"><?php echo htmlspecialchars($dv_no); ?></td>
+                                                <!-- C: Particulars/Supplier -->
+                                                <td class="cdr-part">
+                                                    <strong style="font-size:11px;"><?php echo htmlspecialchars($record['fund_title']); ?></strong>
+                                                    <?php if ($note): ?>
+                                                        <div style="font-size:9.5px;color:#555;"><?php echo htmlspecialchars(mb_substr($note, 0, 70)); ?><?php echo mb_strlen($note) > 70 ? '…' : ''; ?></div>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <!-- D: Cash Advance -->
+                                                <td class="cdr-num"><?php echo $rec_advance > 0 ? '₱' . number_format($rec_advance, 2) : ''; ?></td>
+                                                <!-- E: Payments -->
+                                                <td class="cdr-num">
+                                                    <?php if ($record['proof_image']): ?>
+                                                        <span style="cursor:pointer;color:#1a4f12;" onclick="viewProof('<?php echo htmlspecialchars($record['proof_image']); ?>')" title="View proof">
+                                                            ₱<?php echo number_format($rec_payments, 2); ?><i class="fas fa-eye" style="font-size:8px;margin-left:2px;"></i>
+                                                        </span>
+                                                    <?php else: ?>
+                                                        ₱<?php echo number_format($rec_payments, 2); ?>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <!-- F: Tax Withheld -->
+                                                <td class="cdr-num"><?php echo $rec_tax > 0 ? '₱' . number_format($rec_tax, 2) : ''; ?></td>
+                                                <!-- G: Running Balance -->
+                                                <td class="cdr-num">₱<?php echo number_format(max(0, $running), 2); ?></td>
+                                                <!-- H, I: narrow -->
+                                                <td></td>
+                                                <td></td>
+                                                <!-- J: Electricity (5020402000) -->
+                                                <td class="cdr-num"><?php echo $r_elec > 0 ? '₱' . number_format($r_elec, 2) : ''; ?></td>
+                                                <!-- K: Training (5020201000) -->
+                                                <td class="cdr-num"><?php echo $r_train > 0 ? '₱' . number_format($r_train, 2) : ''; ?></td>
+                                                <!-- L: Semi-Exp ICT (50203210) -->
+                                                <td class="cdr-num"><?php echo $r_semi > 0 ? '₱' . number_format($r_semi, 2) : ''; ?></td>
+                                                <!-- M: Other Gen Svc (5021299000) -->
+                                                <td class="cdr-num"><?php echo $r_ogen > 0 ? '₱' . number_format($r_ogen, 2) : ''; ?></td>
+                                                <!-- N: Other Supplies (5020399000) -->
+                                                <td class="cdr-num"><?php echo $r_osup > 0 ? '₱' . number_format($r_osup, 2) : ''; ?></td>
+                                                <!-- O: Water (5020401000) -->
+                                                <td class="cdr-num"><?php echo $r_water > 0 ? '₱' . number_format($r_water, 2) : ''; ?></td>
+                                                <!-- P: Semi-Exp Other (5020321099) -->
+                                                <td class="cdr-num"></td>
+                                                <!-- Q: Internet (5020503000) -->
+                                                <td class="cdr-num"><?php echo $r_inet > 0 ? '₱' . number_format($r_inet, 2) : ''; ?></td>
+                                                <!-- R: Office Supplies (5020301002) -->
+                                                <td class="cdr-num"><?php echo $r_bir > 0 ? '₱' . number_format($r_bir, 2) : ''; ?></td>
+                                                <!-- S: Other Gen Svc 2 (5021299000) -->
+                                                <td class="cdr-num"></td>
+                                                <!-- T: Account Description -->
+                                                <td style="font-size:9.5px;word-break:break-word;text-align:left;padding-left:4px;"><?php echo htmlspecialchars($row_acct); ?></td>
+                                                <!-- U: UACS Code -->
+                                                <td style="font-size:9.5px;white-space:nowrap;font-family:'DM Mono',monospace;"><?php echo htmlspecialchars($row_uacs); ?></td>
+                                                <!-- V: Amount (extra/other) -->
+                                                <td class="cdr-num"><?php echo $r_other > 0 ? '₱' . number_format($r_other, 2) : ''; ?></td>
+                                                <!-- Actions -->
+                                                <td>
+                                                    <div class="action-buttons" style="justify-content:center;flex-wrap:nowrap;">
+                                                        <button class="btn btn-sm btn-info edit-btn"
+                                                            data-id="<?php echo $record['id']; ?>"
+                                                            data-fund_title="<?php echo htmlspecialchars($record['fund_title']); ?>"
+                                                            data-note="<?php echo htmlspecialchars($note); ?>"
+                                                            data-dv_check_no="<?php echo htmlspecialchars($dv_no); ?>"
+                                                            data-cash_advance="<?php echo $rec_advance; ?>"
+                                                            data-payments="<?php echo $rec_payments; ?>"
+                                                            data-tax_withheld="<?php echo $rec_tax; ?>"
+                                                            data-balance="<?php echo max(0, $running); ?>"
+                                                            data-beginning_balance="<?php echo $beg_bal_grp; ?>"
+                                                            data-month_label="<?php echo htmlspecialchars($mLabel); ?>"
+                                                            data-transaction_date="<?php echo $record['transaction_date']; ?>"
+                                                            data-category="<?php echo htmlspecialchars($record['category']); ?>"
+                                                            data-mooe_col="<?php echo htmlspecialchars($cdr['mooe_col'] ?? ''); ?>"
+                                                            data-electricity="<?php echo $r_elec; ?>"
+                                                            data-semi_expendable="<?php echo $r_semi; ?>"
+                                                            data-other_general="<?php echo $r_ogen; ?>"
+                                                            data-training="<?php echo $r_train; ?>"
+                                                            data-water="<?php echo $r_water; ?>"
+                                                            data-other_supplies="<?php echo $r_osup; ?>"
+                                                            data-internet="<?php echo $r_inet; ?>"
+                                                            data-due_to_bir="<?php echo $r_bir; ?>"
+                                                            data-amount_other="<?php echo $r_other; ?>"
+                                                            data-account_description="<?php echo htmlspecialchars($row_acct); ?>"
+                                                            data-uacs_code="<?php echo htmlspecialchars($row_uacs); ?>"
+                                                            title="Edit"><i class="fas fa-pencil"></i>
+                                                        </button>
+                                                        <button class="btn btn-sm btn-danger delete-btn" data-id="<?php echo $record['id']; ?>" title="Delete">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+
+                                        <!-- Per-month totals footer row -->
+                                        <tr style="background:#e8f5e9;font-weight:700;font-size:10.5px;">
+                                            <td colspan="3" class="cdr-part" style="font-weight:700;font-size:10.5px;">TOTALS — <?php echo htmlspecialchars($mLabel); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_ca, 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_pay, 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_tax, 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format(max(0, $beg_bal_grp + $grp_ca - $grp_pay - $grp_tax), 2); ?></td>
+                                            <td></td>
+                                            <td></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['electricity'], 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['training'], 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['semi_expendable'], 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['other_general'], 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['other_supplies'], 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['water'], 2); ?></td>
+                                            <td></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['internet'], 2); ?></td>
+                                            <td class="cdr-num">₱<?php echo number_format($grp_col_totals['due_to_bir'], 2); ?></td>
+                                            <td></td>
+                                            <td colspan="3"></td>
+                                            <td></td>
+                                        </tr>
+                                    <?php endforeach; // end month groups 
+                                    ?>
+                                <?php endif; ?>
                             </tbody>
-                            <tfoot>
-                                <tr>
-                                    <td colspan="3" style="text-align:center;font-weight:700;letter-spacing:.5px;font-size:11px;">TOTALS</td>
-                                    <td class="cdr-num">₱<?php echo number_format($cash_advance_total, 2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($page_total, 2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($tax_withheld_total, 2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format(max(0, $cash_advance_total - $page_total), 2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['electricity'],     2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['semi_expendable'], 2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['other_general'],   2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['training'],        2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['water'],           2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['other_supplies'],  2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['internet'],        2); ?></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['due_to_bir'],      2); ?></td>
-                                    <td></td>
-                                    <td></td>
-                                    <td class="cdr-num">₱<?php echo number_format($col_totals['amount_other'],    2); ?></td>
-                                    <td></td>
-                                </tr>
-                            </tfoot>
                         </table>
+
+                        <!-- Signature footer -->
                         <div class="cdr-footer">
                             <div class="sig-block">
                                 <div class="sig-label">Prepared by:</div>
@@ -2477,33 +2414,32 @@ $category_icons = [
                                 <div class="sig-title"><?php echo htmlspecialchars($principal_title); ?></div>
                             </div>
                         </div>
-                    </div>
+                    </div><!-- .cdr-wrapper -->
+
+                    <!-- ── PAGINATION ── -->
                     <?php if ($total_pages > 1): ?>
                         <div class="pagination-wrapper">
                             <div class="pagination-info">
-                                Showing <?php echo ($offset + 1); ?> to <?php echo min($offset + $records_per_page, $total_records); ?> of <?php echo $total_records; ?> records
+                                Showing <?php echo $offset + 1; ?>–<?php echo min($offset + $records_per_page, $total_records); ?> of <?php echo $total_records; ?> entries
                             </div>
-                            <nav aria-label="Page navigation">
+                            <nav>
                                 <ul class="pagination">
                                     <?php if ($page > 1): ?>
-                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>" aria-label="First page"><i class="fas fa-angle-double-left"></i></a></li>
-                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>" aria-label="Previous page"><i class="fas fa-angle-left"></i></a></li>
+                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>"><i class="fas fa-angle-double-left"></i></a></li>
+                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>"><i class="fas fa-angle-left"></i></a></li>
                                     <?php else: ?>
                                         <li class="disabled"><span><i class="fas fa-angle-double-left"></i></span></li>
                                         <li class="disabled"><span><i class="fas fa-angle-left"></i></span></li>
                                     <?php endif; ?>
-                                    <?php
-                                    $start_page = max(1, $page - 2);
-                                    $end_page = min($total_pages, $page + 2);
-                                    for ($i = $start_page; $i <= $end_page; $i++):
-                                    ?>
+                                    <?php for ($i = max(1, $page - 2); $i <= min($total_pages, $page + 2); $i++): ?>
                                         <li class="<?php echo $i == $page ? 'active' : ''; ?>">
-                                            <span><?php echo $i; ?></span>
+                                            <?php if ($i == $page): ?><span><?php echo $i; ?></span>
+                                            <?php else: ?><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"><?php echo $i; ?></a><?php endif; ?>
                                         </li>
                                     <?php endfor; ?>
                                     <?php if ($page < $total_pages): ?>
-                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>" aria-label="Next page"><i class="fas fa-angle-right"></i></a></li>
-                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $total_pages])); ?>" aria-label="Last page"><i class="fas fa-angle-double-right"></i></a></li>
+                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>"><i class="fas fa-angle-right"></i></a></li>
+                                        <li><a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $total_pages])); ?>"><i class="fas fa-angle-double-right"></i></a></li>
                                     <?php else: ?>
                                         <li class="disabled"><span><i class="fas fa-angle-right"></i></span></li>
                                         <li class="disabled"><span><i class="fas fa-angle-double-right"></i></span></li>
@@ -2512,19 +2448,22 @@ $category_icons = [
                             </nav>
                         </div>
                     <?php endif; ?>
-                </div>
-            </div>
-        </section>
 
-        <!-- Add New Record Pop-up Card -->
+                </div><!-- .card-body p-0 -->
+            </div><!-- .card -->
+        </section><!-- .finance-section -->
+
+        <!-- ══════════════════════════════════════════════
+         ADD RECORD POPUP
+    ══════════════════════════════════════════════ -->
         <div class="popup-overlay" id="addRecordPopup" role="dialog" aria-modal="true">
-            <div class="popup-card">
+            <div class="popup-card wide">
                 <div class="card-header">
                     <div class="popup-header-top">
                         <div style="position:relative;z-index:5;">
-                            <div class="popup-header-badge"><i class="fas fa-plus-circle"></i> New Entry</div>
-                            <h5>Add Finance Record</h5>
-                            <div class="popup-header-sub">Fill in the transaction details below</div>
+                            <div class="popup-header-badge"><i class="fas fa-plus"></i> New Entry</div>
+                            <h5>Add CDR Transaction</h5>
+                            <div class="popup-header-sub">Enter all fields to match the spreadsheet register</div>
                         </div>
                         <button type="button" class="popup-close-btn" onclick="closeAddPopup()"><i class="fas fa-times"></i></button>
                     </div>
@@ -2532,165 +2471,170 @@ $category_icons = [
                 <div class="card-body">
                     <form id="financeForm" enctype="multipart/form-data" novalidate>
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                        <input type="hidden" name="action" value="add">
                         <div class="row g-3">
-                            <!-- Document Reference -->
+
+                            <!-- ── Section 1: Document Reference ── -->
                             <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-file-alt"></i> Document Reference</div>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="transaction_date" class="form-label">Date</label>
-                                <input type="date" class="form-control" id="transaction_date" name="transaction_date" value="<?php echo date('Y-m-d'); ?>">
-                            </div>
-                            <div class="col-md-6">
-                                <label for="dv_check_no" class="form-label">DV/Payroll Check No.</label>
-                                <input type="text" class="form-control" id="dv_check_no" name="dv_check_no" placeholder="e.g., DV-0001" maxlength="50">
-                            </div>
-                            <div class="col-12">
-                                <label for="fund_title" class="form-label">Particulars/Supplier</label>
-                                <input type="text" class="form-control" id="fund_title" name="fund_title" placeholder="e.g., ARCHIEMEDES A. AZURIN" maxlength="255">
-                            </div>
-                            <div class="col-12">
-                                <label for="description" class="form-label">Notes / Purpose</label>
-                                <textarea class="form-control" id="description" name="description" rows="2" placeholder="Optional notes about this transaction..."></textarea>
+                                <div class="form-section-title"><i class="fas fa-file-alt"></i>Document Reference</div>
                             </div>
 
-                            <!-- Advances for Operating Expenses -->
-                            <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-money-bill-wave"></i> Advances for Operating Expenses (19901010)</div>
+                            <div class="col-md-3">
+                                <label class="form-label">Month *</label>
+                                <select class="form-select" name="month_label" required>
+                                    <option value="">Select Month</option>
+                                    <?php foreach (array_keys($MONTH_ORDER) as $mo): ?>
+                                        <option value="<?php echo $mo; ?>"><?php echo $mo; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
                             </div>
                             <div class="col-md-3">
-                                <label for="cash_advance" class="form-label">Cash Advance (₱)</label>
-                                <input type="number" class="form-control" id="cash_advance" name="cash_advance" placeholder="0.00" step="0.01" min="0">
+                                <label class="form-label">Date *</label>
+                                <input type="date" class="form-control" name="transaction_date" required>
                             </div>
-                            <div class="col-md-3">
-                                <label for="amount" class="form-label">Payments (₱)</label>
-                                <input type="number" class="form-control" id="amount" name="payments" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-3">
-                                <label for="tax_withheld" class="form-label">Tax Withheld (₱)</label>
-                                <input type="number" class="form-control" id="tax_withheld" name="tax_withheld" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-3">
-                                <label for="balance" class="form-label">Balance (₱)</label>
-                                <input type="number" class="form-control" id="balance" name="balance" placeholder="0.00" step="0.01" min="0">
-                            </div>
-
-                            <!-- MOOE Breakdown -->
-                            <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-table"></i> Breakdown — MOOE Columns</div>
-                            </div>
-                            <div class="col-md-4">
-                                <label for="electricity" class="form-label">Electricity Expenses (₱)</label>
-                                <input type="number" class="form-control" id="electricity" name="electricity" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="semi_expendable" class="form-label">Semi-Expendable ICT Equipment (₱)</label>
-                                <input type="number" class="form-control" id="semi_expendable" name="semi_expendable" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="other_general" class="form-label">Other General Services (₱)</label>
-                                <input type="number" class="form-control" id="other_general" name="other_general" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="training" class="form-label">Training Expenses (₱)</label>
-                                <input type="number" class="form-control" id="training" name="training" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="water" class="form-label">Water Expenses (₱)</label>
-                                <input type="number" class="form-control" id="water" name="water" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="other_supplies" class="form-label">Other Supplies &amp; Materials (₱)</label>
-                                <input type="number" class="form-control" id="other_supplies" name="other_supplies" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="internet" class="form-label">Internet Subscription (₱)</label>
-                                <input type="number" class="form-control" id="internet" name="internet" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="due_to_bir" class="form-label">Due to BIR (₱)</label>
-                                <input type="number" class="form-control" id="due_to_bir" name="due_to_bir" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="account_description" class="form-label">Account Description</label>
-                                <input type="text" class="form-control" id="account_description" name="account_description" placeholder="e.g., Advertising Expenses" maxlength="255">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="uacs_code" class="form-label">UACS Code</label>
-                                <input type="text" class="form-control" id="uacs_code" name="uacs_code" placeholder="e.g., 5029901000" maxlength="50">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="amount_other" class="form-label">Amount (₱)</label>
-                                <input type="number" class="form-control" id="amount_other" name="amount_other" placeholder="0.00" step="0.01" min="0">
-                            </div>
-
-                            <!-- Category / Override -->
                             <div class="col-md-6">
-                                <label for="category" class="form-label">Category</label>
-                                <select class="form-select" id="category" name="category">
+                                <label class="form-label">DV / Payroll Check No.</label>
+                                <input type="text" class="form-control" name="dv_check_no" placeholder="e.g. 0002993401" maxlength="50">
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Particulars / Supplier *</label>
+                                <input type="text" class="form-control" name="fund_title" placeholder="e.g. ALBAY ELECTRIC COOPERATIVE, INC." maxlength="255" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Purpose / Notes</label>
+                                <input type="text" class="form-control" name="description" placeholder="Short description…" maxlength="255">
+                            </div>
+
+                            <!-- ── Section 2: Advances for Operating Expenses ── -->
+                            <div class="col-12">
+                                <div class="form-section-title"><i class="fas fa-money-bill-wave"></i>Advances for Operating Expenses (19901010)</div>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label">Cash Advance (₱)</label>
+                                <input type="number" class="form-control" name="cash_advance" placeholder="0.00" step="0.01" min="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Beginning Balance (₱)</label>
+                                <input type="number" class="form-control" name="beginning_balance" placeholder="0.00" step="0.01" min="0" title="Balance forwarded from previous month or period">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Payments (₱) *</label>
+                                <input type="number" class="form-control" name="payments" placeholder="0.00" step="0.01" min="0" required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Tax Withheld (₱)</label>
+                                <input type="number" class="form-control" name="tax_withheld" placeholder="0.00" step="0.01" min="0">
+                            </div>
+
+                            <!-- ── Section 3: MOOE Breakdown ── -->
+                            <div class="col-12">
+                                <div class="form-section-title"><i class="fas fa-table-columns"></i>MOOE Breakdown — Maintenance and Other Operating Expenses</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Category (auto-maps to MOOE column)</label>
+                                <select class="form-select" name="category">
                                     <option value="">Select Category</option>
-                                    <option value="Utilities">Utilities → Electricity Expenses</option>
-                                    <option value="Equipment">Equipment → Semi-Expendable ICT</option>
-                                    <option value="Salaries">Salaries → Other General Services</option>
-                                    <option value="Other">Other → Other General Services</option>
-                                    <option value="Events">Events → Training Expenses</option>
-                                    <option value="Sports">Sports → Training Expenses</option>
-                                    <option value="Transportation">Transportation → Training Expenses</option>
-                                    <option value="Maintenance">Maintenance → Water Expenses</option>
-                                    <option value="Supplies">Supplies → Other Supplies &amp; Materials</option>
-                                    <option value="Books">Books → Other Supplies &amp; Materials</option>
+                                    <option value="Utilities">Utilities → Electricity Expenses (5020402000)</option>
+                                    <option value="Equipment">Equipment → Semi-Expendable ICT (50203210)</option>
+                                    <option value="Events">Events → Training Expenses (5020201000)</option>
+                                    <option value="Sports">Sports → Training Expenses (5020201000)</option>
+                                    <option value="Transportation">Transportation → Training Expenses (5020201000)</option>
+                                    <option value="Salaries">Salaries → Other General Services (5021299000)</option>
+                                    <option value="Other">Other → Other General Services (5021299000)</option>
+                                    <option value="Maintenance">Maintenance → Water Expenses (5020401000)</option>
+                                    <option value="Supplies">Supplies → Other Supplies &amp; Materials (5020399000)</option>
+                                    <option value="Books">Books → Other Supplies &amp; Materials (5020399000)</option>
                                 </select>
                             </div>
                             <div class="col-md-6">
-                                <label for="mooe_col" class="form-label">Override MOOE Column (optional)</label>
-                                <select class="form-select" id="mooe_col" name="mooe_col">
+                                <label class="form-label">Override MOOE Column (optional)</label>
+                                <select class="form-select" name="mooe_col">
                                     <option value="">— Use category mapping —</option>
-                                    <option value="electricity">Electricity Expenses</option>
-                                    <option value="semi_expendable">Semi-Expendable ICT Equipment</option>
-                                    <option value="other_general">Other General Services</option>
-                                    <option value="training">Training Expenses</option>
-                                    <option value="water">Water Expenses</option>
-                                    <option value="other_supplies">Other Supplies &amp; Materials Expenses</option>
-                                    <option value="internet">Internet Subscription Expenses</option>
-                                    <option value="due_to_bir">Due to BIR</option>
+                                    <option value="electricity">Electricity Expenses (5020402000)</option>
+                                    <option value="training">Training Expenses (5020201000)</option>
+                                    <option value="semi_expendable">Semi-Expendable ICT Equipment (50203210)</option>
+                                    <option value="other_general">Other General Services (5021299000)</option>
+                                    <option value="other_supplies">Other Supplies &amp; Materials (5020399000)</option>
+                                    <option value="water">Water Expenses (5020401000)</option>
+                                    <option value="internet">Internet Subscription (5020503000)</option>
+                                    <option value="due_to_bir">Office Supplies Expenses (5020301002)</option>
                                 </select>
                             </div>
 
-                            <!-- Proof of Payment -->
+                            <!-- Explicit MOOE amounts (optional override per-column) -->
+                            <div class="col-md-3"><label class="form-label">Electricity (₱)</label><input type="number" class="form-control" name="electricity" placeholder="0.00" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Training Exp. (₱)</label><input type="number" class="form-control" name="training" placeholder="0.00" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Semi-Exp ICT (₱)</label><input type="number" class="form-control" name="semi_expendable" placeholder="0.00" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Other Gen Svc (₱)</label><input type="number" class="form-control" name="other_general" placeholder="0.00" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Other Supplies (₱)</label><input type="number" class="form-control" name="other_supplies" placeholder="0.00" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Water Exp. (₱)</label><input type="number" class="form-control" name="water" placeholder="0.00" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Internet Subs. (₱)</label><input type="number" class="form-control" name="internet" placeholder="0.00" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Office Supplies (₱)</label><input type="number" class="form-control" name="due_to_bir" placeholder="0.00" step="0.01" min="0"></div>
+
+                            <!-- ── Section 4: UACS / Account Description ── -->
                             <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-paperclip"></i> Proof of Payment</div>
+                                <div class="form-section-title"><i class="fas fa-code"></i>Account Description &amp; UACS Code</div>
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label">Account Description</label>
+                                <input type="text" class="form-control" name="account_description" placeholder="e.g. Electricity Expenses" maxlength="255">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">UACS Code</label>
+                                <select class="form-select" name="uacs_code">
+                                    <option value="">Select UACS Code</option>
+                                    <option value="5020402000">5020402000 — Electricity Expenses</option>
+                                    <option value="5020201000">5020201000 — Training Expenses</option>
+                                    <option value="50203210">50203210 — Semi-Expendable ICT</option>
+                                    <option value="5021299000">5021299000 — Other General Services</option>
+                                    <option value="5020399000">5020399000 — Other Supplies &amp; Materials</option>
+                                    <option value="5020401000">5020401000 — Water Expenses</option>
+                                    <option value="5020321099">5020321099 — Semi-Expendable Other Equip.</option>
+                                    <option value="5020503000">5020503000 — Internet Subscription</option>
+                                    <option value="5020301002">5020301002 — Office Supplies Expenses</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Amount (₱) — UACS col V</label>
+                                <input type="number" class="form-control" name="amount_other" placeholder="0.00" step="0.01" min="0">
+                            </div>
+
+                            <!-- ── Section 5: Proof ── -->
+                            <div class="col-12">
+                                <div class="form-section-title"><i class="fas fa-paperclip"></i>Proof of Payment</div>
                             </div>
                             <div class="col-12">
-                                <div class="upload-zone" id="proofUploadZone">
-                                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
-                                    <div class="upload-text">Click or drag to upload proof image</div>
-                                    <div class="upload-hint">JPG, PNG, GIF, WebP (Max 5MB) — Optional</div>
-                                    <input type="file" id="proof_image" name="proof_image" accept="image/jpeg,image/png,image/gif,image/webp">
+                                <div class="upload-zone">
+                                    <i class="fas fa-cloud-upload-alt" style="font-size:2rem;color:#c4c2ce;display:block;margin-bottom:8px;"></i>
+                                    <div style="font-size:.84rem;font-weight:700;color:#3d3b52;">Click or drag to upload proof image</div>
+                                    <div style="font-size:.74rem;color:#a8a6bc;margin-top:4px;">JPG, PNG, GIF, WebP (Max 5MB) — Optional</div>
+                                    <input type="file" name="proof_image" accept="image/jpeg,image/png,image/gif,image/webp">
                                 </div>
-                                <div class="image-preview" id="imagePreview">
-                                    <img id="previewImg" src="" alt="Preview">
-                                    <button type="button" class="remove-image" onclick="removeProofImage()"><i class="fas fa-times"></i></button>
-                                </div>
+                                <div class="image-preview" id="addImgPreview"><img id="addPreviewImg" src="" alt="Preview"></div>
                             </div>
-                        </div>
+
+                        </div><!-- .row -->
                     </form>
                 </div>
                 <div class="card-footer">
                     <button type="button" class="btn btn-outline-secondary" onclick="closeAddPopup()">Cancel</button>
-                    <button type="submit" form="financeForm" class="btn btn-success" id="submitBtn">Save Record</button>
+                    <button type="submit" form="financeForm" class="btn btn-success" id="submitBtn">
+                        <i class="fas fa-save me-1"></i>Save Entry
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- Edit Record Pop-up Card -->
+        <!-- ══════════════════════════════════════════════
+         EDIT RECORD POPUP
+    ══════════════════════════════════════════════ -->
         <div class="popup-overlay" id="editRecordPopup" role="dialog" aria-modal="true">
-            <div class="popup-card">
+            <div class="popup-card wide">
                 <div class="card-header">
                     <div class="popup-header-top">
                         <div style="position:relative;z-index:5;">
                             <div class="popup-header-badge"><i class="fas fa-edit"></i> Edit Entry</div>
-                            <h5>Edit Finance Record</h5>
+                            <h5>Edit CDR Transaction</h5>
                             <div class="popup-header-sub">Update the transaction details below</div>
                         </div>
                         <button type="button" class="popup-close-btn" onclick="closeEditPopup()"><i class="fas fa-times"></i></button>
@@ -2702,143 +2646,115 @@ $category_icons = [
                         <input type="hidden" name="action" value="edit">
                         <input type="hidden" name="id" id="edit_id">
                         <div class="row g-3">
-                            <!-- Document Reference -->
+
                             <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-file-alt"></i> Document Reference</div>
+                                <div class="form-section-title"><i class="fas fa-file-alt"></i>Document Reference</div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Month *</label>
+                                <select class="form-select" name="month_label" id="edit_month_label" required>
+                                    <?php foreach (array_keys($MONTH_ORDER) as $mo): ?>
+                                        <option value="<?php echo $mo; ?>"><?php echo $mo; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Date</label>
+                                <input type="date" class="form-control" name="transaction_date" id="edit_transaction_date">
                             </div>
                             <div class="col-md-6">
-                                <label for="edit_transaction_date" class="form-label">Date</label>
-                                <input type="date" class="form-control" id="edit_transaction_date" name="transaction_date">
+                                <label class="form-label">DV / Payroll Check No.</label>
+                                <input type="text" class="form-control" name="dv_check_no" id="edit_dv_check_no" maxlength="50">
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Particulars / Supplier</label>
+                                <input type="text" class="form-control" name="fund_title" id="edit_fund_title" maxlength="255">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Purpose / Notes</label>
+                                <input type="text" class="form-control" name="description" id="edit_description" maxlength="255">
+                            </div>
+
+                            <div class="col-12">
+                                <div class="form-section-title"><i class="fas fa-money-bill-wave"></i>Advances for Operating Expenses (19901010)</div>
+                            </div>
+                            <div class="col-md-3"><label class="form-label">Cash Advance (₱)</label><input type="number" class="form-control" name="cash_advance" id="edit_cash_advance" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Beginning Balance (₱)</label><input type="number" class="form-control" name="beginning_balance" id="edit_beginning_balance" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Payments (₱)</label><input type="number" class="form-control" name="payments" id="edit_payments" step="0.01" min="0"></div>
+                            <div class="col-md-3"><label class="form-label">Tax Withheld (₱)</label><input type="number" class="form-control" name="tax_withheld" id="edit_tax_withheld" step="0.01" min="0"></div>
+
+                            <div class="col-12">
+                                <div class="form-section-title"><i class="fas fa-table-columns"></i>MOOE Breakdown</div>
                             </div>
                             <div class="col-md-6">
-                                <label for="edit_dv_check_no" class="form-label">DV/Payroll Check No.</label>
-                                <input type="text" class="form-control" id="edit_dv_check_no" name="dv_check_no" placeholder="e.g., DV-0001" maxlength="50">
-                            </div>
-                            <div class="col-12">
-                                <label for="edit_fund_title" class="form-label">Particulars/Supplier</label>
-                                <input type="text" class="form-control" id="edit_fund_title" name="fund_title" maxlength="255">
-                            </div>
-                            <div class="col-12">
-                                <label for="edit_description" class="form-label">Notes / Purpose</label>
-                                <textarea class="form-control" id="edit_description" name="description" rows="2"></textarea>
-                            </div>
-
-                            <!-- Advances for Operating Expenses -->
-                            <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-money-bill-wave"></i> Advances for Operating Expenses (19901010)</div>
-                            </div>
-                            <div class="col-md-3">
-                                <label for="edit_cash_advance" class="form-label">Cash Advance (₱)</label>
-                                <input type="number" class="form-control" id="edit_cash_advance" name="cash_advance" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-3">
-                                <label for="edit_amount" class="form-label">Payments (₱)</label>
-                                <input type="number" class="form-control" id="edit_amount" name="payments" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-3">
-                                <label for="edit_tax_withheld" class="form-label">Tax Withheld (₱)</label>
-                                <input type="number" class="form-control" id="edit_tax_withheld" name="tax_withheld" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-3">
-                                <label for="edit_balance" class="form-label">Balance (₱)</label>
-                                <input type="number" class="form-control" id="edit_balance" name="balance" placeholder="0.00" step="0.01" min="0">
-                            </div>
-
-                            <!-- MOOE Breakdown -->
-                            <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-table"></i> Breakdown — MOOE Columns</div>
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_electricity" class="form-label">Electricity Expenses (₱)</label>
-                                <input type="number" class="form-control" id="edit_electricity" name="electricity" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_semi_expendable" class="form-label">Semi-Expendable ICT Equipment (₱)</label>
-                                <input type="number" class="form-control" id="edit_semi_expendable" name="semi_expendable" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_other_general" class="form-label">Other General Services (₱)</label>
-                                <input type="number" class="form-control" id="edit_other_general" name="other_general" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_training" class="form-label">Training Expenses (₱)</label>
-                                <input type="number" class="form-control" id="edit_training" name="training" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_water" class="form-label">Water Expenses (₱)</label>
-                                <input type="number" class="form-control" id="edit_water" name="water" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_other_supplies" class="form-label">Other Supplies &amp; Materials (₱)</label>
-                                <input type="number" class="form-control" id="edit_other_supplies" name="other_supplies" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_internet" class="form-label">Internet Subscription (₱)</label>
-                                <input type="number" class="form-control" id="edit_internet" name="internet" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_due_to_bir" class="form-label">Due to BIR (₱)</label>
-                                <input type="number" class="form-control" id="edit_due_to_bir" name="due_to_bir" placeholder="0.00" step="0.01" min="0">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_account_description" class="form-label">Account Description</label>
-                                <input type="text" class="form-control" id="edit_account_description" name="account_description" placeholder="e.g., Advertising Expenses" maxlength="255">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_uacs_code" class="form-label">UACS Code</label>
-                                <input type="text" class="form-control" id="edit_uacs_code" name="uacs_code" placeholder="e.g., 5029901000" maxlength="50">
-                            </div>
-                            <div class="col-md-4">
-                                <label for="edit_amount_other" class="form-label">Amount (₱)</label>
-                                <input type="number" class="form-control" id="edit_amount_other" name="amount_other" placeholder="0.00" step="0.01" min="0">
-                            </div>
-
-                            <!-- Category / Override -->
-                            <div class="col-md-6">
-                                <label for="edit_category" class="form-label">Category</label>
-                                <select class="form-select" id="edit_category" name="category">
+                                <label class="form-label">Category</label>
+                                <select class="form-select" name="category" id="edit_category">
                                     <option value="">Select Category</option>
                                     <option value="Utilities">Utilities → Electricity Expenses</option>
                                     <option value="Equipment">Equipment → Semi-Expendable ICT</option>
-                                    <option value="Salaries">Salaries → Other General Services</option>
-                                    <option value="Other">Other → Other General Services</option>
                                     <option value="Events">Events → Training Expenses</option>
                                     <option value="Sports">Sports → Training Expenses</option>
                                     <option value="Transportation">Transportation → Training Expenses</option>
+                                    <option value="Salaries">Salaries → Other General Services</option>
+                                    <option value="Other">Other → Other General Services</option>
                                     <option value="Maintenance">Maintenance → Water Expenses</option>
                                     <option value="Supplies">Supplies → Other Supplies &amp; Materials</option>
                                     <option value="Books">Books → Other Supplies &amp; Materials</option>
                                 </select>
                             </div>
                             <div class="col-md-6">
-                                <label for="edit_mooe_col" class="form-label">Override MOOE Column (optional)</label>
-                                <select class="form-select" id="edit_mooe_col" name="mooe_col">
+                                <label class="form-label">Override MOOE Column</label>
+                                <select class="form-select" name="mooe_col" id="edit_mooe_col">
                                     <option value="">— Use category mapping —</option>
                                     <option value="electricity">Electricity Expenses</option>
-                                    <option value="semi_expendable">Semi-Expendable ICT Equipment</option>
-                                    <option value="other_general">Other General Services</option>
                                     <option value="training">Training Expenses</option>
+                                    <option value="semi_expendable">Semi-Expendable ICT</option>
+                                    <option value="other_general">Other General Services</option>
+                                    <option value="other_supplies">Other Supplies &amp; Materials</option>
                                     <option value="water">Water Expenses</option>
-                                    <option value="other_supplies">Other Supplies &amp; Materials Expenses</option>
-                                    <option value="internet">Internet Subscription Expenses</option>
-                                    <option value="due_to_bir">Due to BIR</option>
+                                    <option value="internet">Internet Subscription</option>
+                                    <option value="due_to_bir">Office Supplies Expenses</option>
                                 </select>
                             </div>
+                            <div class="col-md-3"><label class="form-label">Electricity (₱)</label><input type="number" class="form-control" name="electricity" id="edit_electricity" step="0.01" min="0" value="0"></div>
+                            <div class="col-md-3"><label class="form-label">Training Exp. (₱)</label><input type="number" class="form-control" name="training" id="edit_training" step="0.01" min="0" value="0"></div>
+                            <div class="col-md-3"><label class="form-label">Semi-Exp ICT (₱)</label><input type="number" class="form-control" name="semi_expendable" id="edit_semi_expendable" step="0.01" min="0" value="0"></div>
+                            <div class="col-md-3"><label class="form-label">Other Gen Svc (₱)</label><input type="number" class="form-control" name="other_general" id="edit_other_general" step="0.01" min="0" value="0"></div>
+                            <div class="col-md-3"><label class="form-label">Other Supplies (₱)</label><input type="number" class="form-control" name="other_supplies" id="edit_other_supplies" step="0.01" min="0" value="0"></div>
+                            <div class="col-md-3"><label class="form-label">Water Exp. (₱)</label><input type="number" class="form-control" name="water" id="edit_water" step="0.01" min="0" value="0"></div>
+                            <div class="col-md-3"><label class="form-label">Internet Subs. (₱)</label><input type="number" class="form-control" name="internet" id="edit_internet" step="0.01" min="0" value="0"></div>
+                            <div class="col-md-3"><label class="form-label">Office Supplies (₱)</label><input type="number" class="form-control" name="due_to_bir" id="edit_due_to_bir" step="0.01" min="0" value="0"></div>
 
-                            <!-- Proof of Payment -->
                             <div class="col-12">
-                                <div class="form-section-title"><i class="fas fa-paperclip"></i> Proof of Payment</div>
+                                <div class="form-section-title"><i class="fas fa-code"></i>Account Description &amp; UACS Code</div>
+                            </div>
+                            <div class="col-md-5"><label class="form-label">Account Description</label><input type="text" class="form-control" name="account_description" id="edit_account_description" maxlength="255"></div>
+                            <div class="col-md-4">
+                                <label class="form-label">UACS Code</label>
+                                <select class="form-select" name="uacs_code" id="edit_uacs_code">
+                                    <option value="">Select UACS Code</option>
+                                    <option value="5020402000">5020402000 — Electricity Expenses</option>
+                                    <option value="5020201000">5020201000 — Training Expenses</option>
+                                    <option value="50203210">50203210 — Semi-Expendable ICT</option>
+                                    <option value="5021299000">5021299000 — Other General Services</option>
+                                    <option value="5020399000">5020399000 — Other Supplies &amp; Materials</option>
+                                    <option value="5020401000">5020401000 — Water Expenses</option>
+                                    <option value="5020321099">5020321099 — Semi-Expendable Other Equip.</option>
+                                    <option value="5020503000">5020503000 — Internet Subscription</option>
+                                    <option value="5020301002">5020301002 — Office Supplies Expenses</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3"><label class="form-label">Amount (₱) — UACS col V</label><input type="number" class="form-control" name="amount_other" id="edit_amount_other" step="0.01" min="0" value="0"></div>
+
+                            <div class="col-12">
+                                <div class="form-section-title"><i class="fas fa-paperclip"></i>Proof of Payment (optional)</div>
                             </div>
                             <div class="col-12">
-                                <div class="upload-zone" id="editProofUploadZone">
-                                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
-                                    <div class="upload-text">Click or drag to replace proof image</div>
-                                    <div class="upload-hint">JPG, PNG, GIF, WebP (Max 5MB) — Leave empty to keep existing</div>
-                                    <input type="file" id="edit_proof_image" name="proof_image" accept="image/jpeg,image/png,image/gif,image/webp">
-                                </div>
-                                <div class="image-preview" id="editImagePreview">
-                                    <img id="editPreviewImg" src="" alt="Preview">
-                                    <button type="button" class="remove-image" onclick="removeEditProofImage()"><i class="fas fa-times"></i></button>
+                                <div class="upload-zone">
+                                    <i class="fas fa-cloud-upload-alt" style="font-size:2rem;color:#c4c2ce;display:block;margin-bottom:8px;"></i>
+                                    <div style="font-size:.84rem;font-weight:700;color:#3d3b52;">Click or drag to replace proof image</div>
+                                    <div style="font-size:.74rem;color:#a8a6bc;margin-top:4px;">JPG, PNG, GIF, WebP (Max 5MB)</div>
+                                    <input type="file" name="proof_image" accept="image/jpeg,image/png,image/gif,image/webp">
                                 </div>
                             </div>
                         </div>
@@ -2846,56 +2762,57 @@ $category_icons = [
                 </div>
                 <div class="card-footer">
                     <button type="button" class="btn btn-outline-secondary" onclick="closeEditPopup()">Cancel</button>
-                    <button type="submit" form="editFinanceForm" class="btn btn-info" id="editSubmitBtn">Update Record</button>
+                    <button type="submit" form="editFinanceForm" class="btn btn-info" id="editSubmitBtn">
+                        <i class="fas fa-save me-1"></i>Update Entry
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- Proof Image Modal -->
-        <div class="modal fade" id="proofModal" tabindex="-1" aria-hidden="true" style="display: none;">
-            <div class="modal-dialog modal-dialog-centered modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title"><i class="fas fa-file-image"></i> Proof</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body text-center">
-                        <img id="proofImage" src="" alt="Proof" class="img-fluid" style="max-height: 70vh; border-radius: 8px;">
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Delete Confirmation Pop-up Card -->
-        <div class="popup-overlay" id="deletePopup" role="dialog" aria-modal="true">
-            <div class="popup-card delete-popup">
+        <!-- ══════════════════════════════════════════════
+         DELETE POPUP
+    ══════════════════════════════════════════════ -->
+        <div class="popup-overlay" id="deleteRecordPopup" role="dialog" aria-modal="true">
+            <div class="popup-card delete-popup" style="max-width:420px;">
                 <div class="card-header">
                     <div class="popup-header-top">
                         <div style="position:relative;z-index:5;">
-                            <div class="popup-header-badge"><i class="fas fa-exclamation-triangle"></i> Danger Zone</div>
-                            <h5>Confirm Delete</h5>
-                            <div class="popup-header-sub">This action is permanent and cannot be undone</div>
+                            <div class="popup-header-badge"><i class="fas fa-trash"></i> Delete</div>
+                            <h5>Delete Transaction</h5>
                         </div>
                         <button type="button" class="popup-close-btn" onclick="closeDeletePopup()"><i class="fas fa-times"></i></button>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div class="delete-icon-circle"><i class="fas fa-trash-alt"></i></div>
-                    <h4 class="delete-popup-title">Delete Finance Record?</h4>
-                    <p class="delete-popup-message">Are you sure you want to delete this finance record? This action cannot be undone.</p>
+                <div class="card-body" style="text-align:center;padding:32px 28px;">
+                    <div class="delete-icon-circle"><i class="fas fa-triangle-exclamation"></i></div>
+                    <div style="font-size:17px;font-weight:700;margin-bottom:10px;">Are you sure?</div>
+                    <div style="color:var(--text-secondary);font-size:13.5px;line-height:1.6;">This transaction will be permanently removed from the register and cannot be undone.</div>
                 </div>
-                <div class="card-footer">
+                <div class="card-footer" style="justify-content:center;">
                     <button type="button" class="btn btn-outline-secondary" onclick="closeDeletePopup()">Cancel</button>
-                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete Record</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn"><i class="fas fa-trash me-1"></i>Delete</button>
                 </div>
             </div>
         </div>
 
-        <!-- Toast Container -->
+        <!-- Proof image modal -->
+        <div class="modal fade" id="proofModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content" style="border:none;border-radius:20px;overflow:hidden;">
+                    <div class="modal-header" style="background:linear-gradient(135deg,#f0f5eb,#ebf5f0);border-bottom:1px solid rgba(92,122,62,.12);">
+                        <span style="font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;"><i class="fas fa-image" style="color:var(--primary-color);"></i>Proof of Payment</span>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body p-0"><img id="proofImage" src="" alt="Proof" style="width:100%;max-height:80vh;object-fit:contain;display:block;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast -->
         <div class="toast-container position-fixed bottom-0 end-0 p-3">
-            <div id="toast" class="toast custom-toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="3000" style="display:none;">
+            <div id="toast" class="toast custom-toast" role="alert" aria-live="assertive">
                 <div class="toast-header">
-                    <strong class="me-auto" id="toastTitle">Success</strong>
+                    <strong class="me-auto" id="toastTitle">Notification</strong>
                     <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
                 </div>
                 <div class="toast-body" id="toastMessage"></div>
@@ -2905,174 +2822,33 @@ $category_icons = [
 
     <script src="admin_assets/js/admin_script.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
     <script>
+        const CSRF = '<?php echo $_SESSION['csrf_token']; ?>';
         let deleteRecordId = null;
-        let addPopup = null;
-        let deletePopup = null;
-        let proofModal = null;
 
-        document.addEventListener('DOMContentLoaded', function() {
-            addPopup = document.getElementById('addRecordPopup');
-            deletePopup = document.getElementById('deletePopup');
-            proofModal = new bootstrap.Modal(document.getElementById('proofModal'));
+        // ── Load navigation bar ───────────────────────────────────────────────────
+        fetch('./admin_nav.php')
+            .then(r => r.text())
+            .then(html => {
+                document.getElementById('navigation-container').innerHTML = html;
+            })
+            .catch(err => console.error('Error loading navigation:', err));
 
-            fetch('./admin_nav.php')
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('navigation-container').innerHTML = data;
-                })
-                .catch(error => console.error('Error loading navigation:', error));
+        const addPopup = document.getElementById('addRecordPopup');
+        const editPopup = document.getElementById('editRecordPopup');
+        const deletePopup = document.getElementById('deleteRecordPopup');
+        const proofModal = new bootstrap.Modal(document.getElementById('proofModal'));
 
-            document.getElementById('financeForm').addEventListener('submit', handleFormSubmit);
-            initializeDeleteButtons();
-
-            addPopup.addEventListener('click', function(e) {
-                if (e.target === addPopup) closeAddPopup();
-            });
-            deletePopup.addEventListener('click', function(e) {
-                if (e.target === deletePopup) closeDeletePopup();
-            });
-
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') {
-                    if (addPopup.classList.contains('active')) closeAddPopup();
-                    if (deletePopup.classList.contains('active')) closeDeletePopup();
-                }
-            });
-        });
-
-        function removeProofImage() {
-            document.getElementById('proof_image').value = '';
-            document.getElementById('imagePreview').classList.remove('show');
-            document.getElementById('proofUploadZone').classList.remove('has-file');
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            const fileInput = document.getElementById('proof_image');
-            if (fileInput) {
-                fileInput.addEventListener('change', function() {
-                    if (this.files && this.files[0]) {
-                        const reader = new FileReader();
-                        reader.onload = e => {
-                            document.getElementById('previewImg').src = e.target.result;
-                            document.getElementById('imagePreview').classList.add('show');
-                            document.getElementById('proofUploadZone').classList.add('has-file');
-                        };
-                        reader.readAsDataURL(this.files[0]);
-                    }
-                });
+        // Escape key closes any open popup
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeAddPopup();
+                closeEditPopup();
+                closeDeletePopup();
             }
         });
 
-        function openEditModal(btn) {
-            const popup = document.getElementById('editRecordPopup');
-            document.getElementById('edit_id').value = btn.dataset.id || '';
-            document.getElementById('edit_fund_title').value = btn.dataset.fund_title || '';
-            document.getElementById('edit_description').value = btn.dataset.note || '';
-            document.getElementById('edit_dv_check_no').value = btn.dataset.dv_check_no || '';
-            document.getElementById('edit_cash_advance').value = btn.dataset.cash_advance || '';
-            document.getElementById('edit_amount').value = btn.dataset.payments || btn.dataset.amount || '';
-            document.getElementById('edit_tax_withheld').value = btn.dataset.tax_withheld || '';
-            document.getElementById('edit_balance').value = btn.dataset.balance || '';
-            document.getElementById('edit_transaction_date').value = btn.dataset.transaction_date || '';
-            document.getElementById('edit_electricity').value = btn.dataset.electricity || '';
-            document.getElementById('edit_semi_expendable').value = btn.dataset.semi_expendable || '';
-            document.getElementById('edit_other_general').value = btn.dataset.other_general || '';
-            document.getElementById('edit_training').value = btn.dataset.training || '';
-            document.getElementById('edit_water').value = btn.dataset.water || '';
-            document.getElementById('edit_other_supplies').value = btn.dataset.other_supplies || '';
-            document.getElementById('edit_internet').value = btn.dataset.internet || '';
-            document.getElementById('edit_due_to_bir').value = btn.dataset.due_to_bir || '';
-            document.getElementById('edit_amount_other').value = btn.dataset.amount_other || '';
-            document.getElementById('edit_account_description').value = btn.dataset.account_description || '';
-            document.getElementById('edit_uacs_code').value = btn.dataset.uacs_code || '';
-            // Set category select
-            const catSel = document.getElementById('edit_category');
-            for (let opt of catSel.options) {
-                opt.selected = opt.value === btn.dataset.category;
-            }
-            // Set mooe_col select
-            const mooeSel = document.getElementById('edit_mooe_col');
-            for (let opt of mooeSel.options) {
-                opt.selected = opt.value === (btn.dataset.mooe_col || '');
-            }
-            popup.classList.add('active');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeEditPopup() {
-            document.getElementById('editRecordPopup').classList.remove('active');
-            document.body.style.overflow = '';
-            document.getElementById('editFinanceForm').reset();
-            const preview = document.getElementById('editImagePreview');
-            preview.classList.remove('show');
-        }
-
-        function removeEditProofImage() {
-            document.getElementById('edit_proof_image').value = '';
-            document.getElementById('editImagePreview').classList.remove('show');
-            document.getElementById('editProofUploadZone').classList.remove('has-file');
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            // Edit proof image preview
-            const editFileInput = document.getElementById('edit_proof_image');
-            if (editFileInput) {
-                editFileInput.addEventListener('change', function() {
-                    if (this.files && this.files[0]) {
-                        const reader = new FileReader();
-                        reader.onload = e => {
-                            document.getElementById('editPreviewImg').src = e.target.result;
-                            document.getElementById('editImagePreview').classList.add('show');
-                            document.getElementById('editProofUploadZone').classList.add('has-file');
-                        };
-                        reader.readAsDataURL(this.files[0]);
-                    }
-                });
-            }
-
-            // Edit form submit
-            const editForm = document.getElementById('editFinanceForm');
-            if (editForm) {
-                editForm.addEventListener('submit', async function(e) {
-                    e.preventDefault();
-                    const btn = document.getElementById('editSubmitBtn');
-                    btn.disabled = true;
-                    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Updating...';
-
-                    try {
-                        const formData = new FormData(editForm);
-                        const response = await fetch('', {
-                            method: 'POST',
-                            body: formData,
-                            headers: {
-                                'X-Requested-With': 'XMLHttpRequest'
-                            }
-                        });
-                        const data = await response.json();
-                        if (data.status === 'success') {
-                            showToast('success', data.message);
-                            closeEditPopup();
-                            setTimeout(() => location.reload(), 1500);
-                        } else {
-                            showToast('error', data.message);
-                        }
-                    } catch (err) {
-                        showToast('error', 'An error occurred. Please try again.');
-                    } finally {
-                        btn.disabled = false;
-                        btn.innerHTML = 'Update Record';
-                    }
-                });
-            }
-
-            // Close edit popup on overlay click
-            document.getElementById('editRecordPopup').addEventListener('click', function(e) {
-                if (e.target === this) closeEditPopup();
-            });
-        });
-
+        // ── Add popup ──────────────────────────────────────────────────────────────
         function openAddModal() {
             addPopup.classList.add('active');
             document.body.style.overflow = 'hidden';
@@ -3082,88 +2858,10 @@ $category_icons = [
             addPopup.classList.remove('active');
             document.body.style.overflow = '';
             document.getElementById('financeForm').reset();
+            document.getElementById('addImgPreview').classList.remove('show');
         }
 
-        async function handleFormSubmit(e) {
-            e.preventDefault();
-            const submitBtn = document.getElementById('submitBtn');
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
-
-            try {
-                const formData = new FormData(document.getElementById('financeForm'));
-                const response = await fetch('', {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    showToast('success', data.message);
-                    closeAddPopup();
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    showToast('error', data.message);
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                showToast('error', 'An error occurred. Please try again.');
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = 'Save Record';
-            }
-        }
-
-        function initializeDeleteButtons() {
-            document.querySelectorAll('.delete-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    deleteRecordId = this.getAttribute('data-id');
-                    openDeletePopup();
-                });
-            });
-
-            document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
-                if (!deleteRecordId) return;
-                const btn = this;
-                btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Deleting...';
-
-                try {
-                    const formData = new FormData();
-                    formData.append('action', 'delete');
-                    formData.append('id', deleteRecordId);
-                    formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
-
-                    const response = await fetch('', {
-                        method: 'POST',
-                        body: formData,
-                        headers: {
-                            'X-Requested-With': 'XMLHttpRequest'
-                        }
-                    });
-                    const data = await response.json();
-
-                    if (data.status === 'success') {
-                        showToast('success', data.message);
-                        closeDeletePopup();
-                        setTimeout(() => location.reload(), 1500);
-                    } else {
-                        showToast('error', data.message);
-                    }
-                } catch (error) {
-                    console.error('Error:', error);
-                    showToast('error', 'An error occurred. Please try again.');
-                } finally {
-                    btn.disabled = false;
-                    btn.innerHTML = 'Delete Record';
-                    deleteRecordId = null;
-                }
-            });
-        }
-
+        // ── Delete popup ──────────────────────────────────────────────────────────
         function openDeletePopup() {
             deletePopup.classList.add('active');
             document.body.style.overflow = 'hidden';
@@ -3175,11 +2873,169 @@ $category_icons = [
             deleteRecordId = null;
         }
 
-        function viewProof(filename) {
-            document.getElementById('proofImage').src = 'admin_assets/finance_proofs/' + filename;
+        // ── Edit popup ────────────────────────────────────────────────────────────
+        function openEditPopup(btn) {
+            const d = btn.dataset;
+            document.getElementById('edit_id').value = d.id;
+            document.getElementById('edit_month_label').value = d.month_label || 'MAY';
+            document.getElementById('edit_transaction_date').value = d.transaction_date || '';
+            document.getElementById('edit_dv_check_no').value = d.dv_check_no || '';
+            document.getElementById('edit_fund_title').value = d.fund_title || '';
+            document.getElementById('edit_description').value = d.note || '';
+            document.getElementById('edit_cash_advance').value = d.cash_advance || '0';
+            document.getElementById('edit_payments').value = d.payments || '0';
+            document.getElementById('edit_tax_withheld').value = d.tax_withheld || '0';
+            document.getElementById('edit_beginning_balance').value = d.beginning_balance || '0';
+            document.getElementById('edit_category').value = d.category || '';
+            document.getElementById('edit_mooe_col').value = d.mooe_col || '';
+            document.getElementById('edit_electricity').value = d.electricity || '0';
+            document.getElementById('edit_training').value = d.training || '0';
+            document.getElementById('edit_semi_expendable').value = d.semi_expendable || '0';
+            document.getElementById('edit_other_general').value = d.other_general || '0';
+            document.getElementById('edit_other_supplies').value = d.other_supplies || '0';
+            document.getElementById('edit_water').value = d.water || '0';
+            document.getElementById('edit_internet').value = d.internet || '0';
+            document.getElementById('edit_due_to_bir').value = d.due_to_bir || '0';
+            document.getElementById('edit_amount_other').value = d.amount_other || '0';
+            document.getElementById('edit_account_description').value = d.account_description || '';
+            // UACS code — try to match option
+            const us = document.getElementById('edit_uacs_code');
+            const uv = d.uacs_code || '';
+            [...us.options].forEach(o => o.selected = (o.value === uv));
+            editPopup.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeEditPopup() {
+            editPopup.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        // ── Submit handlers ────────────────────────────────────────────────────────
+        document.getElementById('financeForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving…';
+            try {
+                const fd = new FormData(this);
+                const r = await fetch('', {
+                    method: 'POST',
+                    body: fd,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                const d = await r.json();
+                if (d.status === 'success') {
+                    showToast('success', d.message);
+                    closeAddPopup();
+                    setTimeout(() => location.reload(), 1200);
+                } else showToast('error', d.message);
+            } catch {
+                showToast('error', 'An error occurred. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-save me-1"></i>Save Entry';
+            }
+        });
+
+        document.getElementById('editFinanceForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('editSubmitBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Updating…';
+            try {
+                const fd = new FormData(this);
+                const r = await fetch('', {
+                    method: 'POST',
+                    body: fd,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                const d = await r.json();
+                if (d.status === 'success') {
+                    showToast('success', d.message);
+                    closeEditPopup();
+                    setTimeout(() => location.reload(), 1200);
+                } else showToast('error', d.message);
+            } catch {
+                showToast('error', 'An error occurred. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-save me-1"></i>Update Entry';
+            }
+        });
+
+        // ── Delete ─────────────────────────────────────────────────────────────────
+        document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+            if (!deleteRecordId) return;
+            const btn = this;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Deleting…';
+            try {
+                const fd = new FormData();
+                fd.append('action', 'delete');
+                fd.append('id', deleteRecordId);
+                fd.append('csrf_token', CSRF);
+                const r = await fetch('', {
+                    method: 'POST',
+                    body: fd,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                const d = await r.json();
+                if (d.status === 'success') {
+                    showToast('success', d.message);
+                    closeDeletePopup();
+                    setTimeout(() => location.reload(), 1200);
+                } else showToast('error', d.message);
+            } catch {
+                showToast('error', 'An error occurred.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-trash me-1"></i>Delete';
+            }
+        });
+
+        // ── Wire up row buttons ────────────────────────────────────────────────────
+        document.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', () => openEditPopup(btn)));
+        document.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', function() {
+            deleteRecordId = this.dataset.id;
+            openDeletePopup();
+        }));
+
+        // Close overlays on backdrop click
+        [addPopup, editPopup, deletePopup].forEach(el => el.addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAddPopup();
+                closeEditPopup();
+                closeDeletePopup();
+            }
+        }));
+
+        // ── Proof image viewer ────────────────────────────────────────────────────
+        function viewProof(fn) {
+            document.getElementById('proofImage').src = 'admin_assets/finance_proofs/' + fn;
             proofModal.show();
         }
 
+        // ── Image preview ────────────────────────────────────────────────────────
+        document.querySelector('#financeForm input[type=file]').addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                const r = new FileReader();
+                r.onload = e => {
+                    const p = document.getElementById('addImgPreview');
+                    document.getElementById('addPreviewImg').src = e.target.result;
+                    p.classList.add('show');
+                };
+                r.readAsDataURL(this.files[0]);
+            }
+        });
+
+        // ── Utilities ─────────────────────────────────────────────────────────────
         function exportToCSV() {
             window.location.href = '?export=csv';
         }
@@ -3188,23 +3044,36 @@ $category_icons = [
             location.reload();
         }
 
-        function showToast(type, message) {
-            const toast = document.getElementById('toast');
-            const toastTitle = document.getElementById('toastTitle');
-            const toastMessage = document.getElementById('toastMessage');
+        function showToast(type, msg) {
+            const t = document.getElementById('toast');
+            t.classList.remove('success', 'error');
+            t.classList.add(type);
+            document.getElementById('toastTitle').textContent = type === 'success' ? 'Success' : 'Error';
+            document.getElementById('toastMessage').textContent = msg;
+            bootstrap.Toast.getOrCreateInstance(t).show();
+        }
 
-            toast.style.display = '';
-            toast.classList.remove('success', 'error');
-            if (type === 'success') {
-                toast.classList.add('success');
-                toastTitle.textContent = 'Success';
-            } else {
-                toast.classList.add('error');
-                toastTitle.textContent = 'Error';
+        // ── Live balance preview in Add form ─────────────────────────────────────
+        ['cash_advance', 'payments', 'tax_withheld', 'beginning_balance'].forEach(id => {
+            const el = document.querySelector(`[name="${id}"]`);
+            if (el) el.addEventListener('input', updateLiveBalance);
+        });
+
+        function updateLiveBalance() {
+            const form = document.getElementById('financeForm');
+            const beg = parseFloat(form.querySelector('[name=beginning_balance]').value) || 0;
+            const ca = parseFloat(form.querySelector('[name=cash_advance]').value) || 0;
+            const pay = parseFloat(form.querySelector('[name=payments]').value) || 0;
+            const tax = parseFloat(form.querySelector('[name=tax_withheld]').value) || 0;
+            const end = beg + ca - pay - tax;
+            let hint = document.getElementById('liveBalanceHint');
+            if (!hint) {
+                hint = document.createElement('div');
+                hint.id = 'liveBalanceHint';
+                hint.style.cssText = 'font-size:11.5px;font-weight:600;color:var(--primary-color);margin-top:6px;';
+                form.querySelector('[name=tax_withheld]').closest('.col-md-3').appendChild(hint);
             }
-
-            toastMessage.textContent = message;
-            bootstrap.Toast.getOrCreateInstance(toast).show();
+            hint.textContent = `Projected Balance: ₱${end.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
         }
     </script>
 </body>

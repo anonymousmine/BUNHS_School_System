@@ -14,6 +14,16 @@
  * ─────────────────────────────────────────────────────────────
  */
 
+// ── 0. Embed mode ─────────────────────────────────────────────
+// ?embed=html  → full HTML (default, same as direct include)
+// ?embed=json  → JSON-only: counts, badge states, API URLs
+//   Call from JS: fetch('/admin_account/admin_nav.php?embed=json')
+$_embed = $_GET['embed'] ?? 'html';
+if ($_embed === 'json') {
+    // We still need the DB counts, so we continue to section 4.
+    // Output will happen at the very end of this file when embed=json.
+}
+
 // ── 1. Resolve base paths (directory-depth-safe) ──────────────
 // Uses __FILE__ + realpath so this works from ANY subdirectory.
 
@@ -166,6 +176,25 @@ function _nav_has_new(array $mods, string $key): bool
 }
 ?>
 
+<?php
+// ── JSON embed mode: output config + counts and exit early ────
+if ($_embed === 'json') {
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success'      => true,
+        'counts'       => $_counts,
+        'new_modules'  => $_new_modules,
+        'api'          => [
+            'notif'   => $notifApiPath,
+            'chat'    => $chatApiPath,
+            'chatUrl' => $chatboxPath,
+        ],
+        'adminBase'    => $adminBase,
+        'assetsBase'   => $assetsBase,
+    ]);
+    exit;
+}
+?>
 <!-- ════════════════════════════════════════════════════════════
      STYLES
 ════════════════════════════════════════════════════════════ -->
@@ -1218,385 +1247,430 @@ function _nav_has_new(array $mods, string $key): bool
     const _NAV_API = {
         notif: <?= json_encode($notifApiPath) ?>,
         chat: <?= json_encode($chatApiPath)  ?>,
-        chatUrl: <?= json_encode($chatboxPath) ?>,
+        chatUrl: <?= json_encode($chatboxPath)  ?>,
     };
 
-    /* ── One-time init guard ── */
-    if (!window.__adminNavReady) {
+    /* ── initAdminNav()
+         Called automatically on DOMContentLoaded when nav is PHP-included.
+         Call it manually after a fetch()+innerHTML insertion, e.g.:
+           fetch('/admin_account/admin_nav.php?embed=1')
+             .then(r => r.text())
+             .then(html => {
+               document.getElementById('navContainer').innerHTML = html;
+               // inline <script> tags won't run via innerHTML — call init manually:
+               if (typeof initAdminNav === 'function') initAdminNav();
+             });
+    ── */
+    function initAdminNav(options) {
+        /* One-time guard — safe when called multiple times */
+        if (window.__adminNavReady) return;
         window.__adminNavReady = true;
 
-        document.addEventListener('DOMContentLoaded', function() {
+        /* Support an optional rootSelector so the nav can mount into
+           a custom container: initAdminNav({ root: '#myNavContainer' }) */
+        var _root = (options && options.root) ?
+            document.querySelector(options.root) :
+            document;
 
-            /* ════════════════════════════════════════════════════════
-               DROPDOWN CONTROL — matches admin_chatbox.php pattern
-               ─────────────────────────────────────────────────────
-               KEY RULES (identical to chatbox):
-               • NO stopPropagation anywhere — it breaks outside-click
-               • ONE document click listener handles everything
-               • e.target.closest() detects wrapper vs outside click
-               • Buttons are identified by closest('[data-dropdown]')
-               • Lazy-load flags live here, not inside togglePanel
-            ════════════════════════════════════════════════════════ */
+        /* ════════════════════════════════════════════════════════
+           DROPDOWN CONTROL — matches admin_chatbox.php pattern
+           ─────────────────────────────────────────────────────
+           KEY RULES (identical to chatbox):
+           • NO stopPropagation anywhere — it breaks outside-click
+           • ONE document click listener handles everything
+           • e.target.closest() detects wrapper vs outside click
+           • Buttons are identified by closest('[data-dropdown]')
+           • Lazy-load flags live here, not inside togglePanel
+        ════════════════════════════════════════════════════════ */
 
-            /* Lazy-load flags — content fetched only on first open */
-            var bellLoaded = false;
-            var envLoaded = false;
+        /* Lazy-load flags — content fetched only on first open */
+        var bellLoaded = false;
+        var envLoaded = false;
 
-            /* ── Mark-all-read (bound directly — element is always present) ── */
-            var markAllBtn = document.getElementById('markAllReadBtn');
-            if (markAllBtn) {
-                markAllBtn.addEventListener('click', function() {
-                    fetch(_NAV_API.notif + '?action=mark_all_read', {
-                            method: 'POST'
+        /* ── Mark-all-read (bound directly — element is always present) ── */
+        var markAllBtn = _root.getElementById ?
+            _root.getElementById('markAllReadBtn') :
+            _root.querySelector('#markAllReadBtn');
+        if (markAllBtn) {
+            markAllBtn.addEventListener('click', function() {
+                fetch(_NAV_API.notif + '?action=mark_all_read', {
+                        method: 'POST'
+                    })
+                    .then(function() {
+                        _root.querySelectorAll('#bellBody .notif-item')
+                            .forEach(function(el) {
+                                el.classList.remove('unread');
+                            });
+                        setBellBadge(0);
+                    })
+                    .catch(function() {});
+            });
+        }
+
+        /* ── Close every .dropdown-panel except the one supplied ── */
+        function closeAll(keepPanel) {
+            _root.querySelectorAll('.dropdown-panel').forEach(function(panel) {
+                if (panel !== keepPanel) {
+                    panel.classList.remove('open');
+                }
+            });
+        }
+
+        /* ── Single document-level listener (same as chatbox pattern) ──
+           Logic flow — mirrors admin_chatbox.php exactly:
+           1. Did the click land inside a .dropdown-wrapper?
+              NO  → close everything and stop.
+              YES → which button triggered it (if any)?
+           2. Find the nearest [data-dropdown] button ancestor.
+              Found  → toggle that panel, lazy-load if needed.
+              Not found (clicked inside an already-open panel) → do nothing.
+        ─────────────────────────────────────────────────────────────── */
+        document.addEventListener('click', function(e) {
+
+            /* Step 1 — is the click inside any dropdown wrapper at all? */
+            var wrapper = e.target.closest('.dropdown-wrapper');
+            if (!wrapper) {
+                /* Clicked outside every wrapper → close all */
+                closeAll(null);
+                return;
+            }
+
+            /* Step 2 — did the click land on (or inside) a trigger button?
+               Using closest('[data-dropdown]') so clicking a child <i> icon
+               still resolves to the correct button element.                */
+            var btn = e.target.closest('[data-dropdown]');
+            if (!btn) {
+                /* Clicked inside the panel area, not on the button → keep open */
+                return;
+            }
+
+            /* Step 3 — toggle the target panel */
+            var targetId = btn.getAttribute('data-dropdown');
+            var panel = document.getElementById(targetId);
+            if (!panel) return;
+
+            var isOpen = panel.classList.contains('open');
+
+            /* Close all siblings first */
+            closeAll(panel);
+
+            if (isOpen) {
+                /* Already open → close it */
+                panel.classList.remove('open');
+            } else {
+                /* Closed → open it and lazy-load content if first time */
+                panel.classList.add('open');
+
+                if (targetId === 'bellPanel' && !bellLoaded) {
+                    bellLoaded = true;
+                    fetchNotifications();
+                }
+                if (targetId === 'envelopePanel' && !envLoaded) {
+                    envLoaded = true;
+                    fetchEnvelope();
+                }
+            }
+        });
+
+        /* ════════════════════════════════════════════════════════
+           BELL — NOTIFICATIONS
+        ════════════════════════════════════════════════════════ */
+        const ICONS = {
+            students: {
+                i: 'fa-user-graduate',
+                c: 'blue'
+            },
+            teachers: {
+                i: 'fa-chalkboard-teacher',
+                c: 'green'
+            },
+            clubs: {
+                i: 'fa-users-line',
+                c: 'purple'
+            },
+            forms: {
+                i: 'fa-file-circle-check',
+                c: 'orange'
+            },
+            announcements: {
+                i: 'fa-calendar-alt',
+                c: 'blue'
+            },
+            create_announcement: {
+                i: 'fa-calendar-check',
+                c: 'blue'
+            },
+            news: {
+                i: 'fa-newspaper',
+                c: 'green'
+            },
+            create_new: {
+                i: 'fa-newspaper',
+                c: 'green'
+            },
+        };
+
+        function getIcon(mod) {
+            return ICONS[(mod || '').toLowerCase().replace(/\s+/g, '_')] || {
+                i: 'fa-bell',
+                c: 'blue'
+            };
+        }
+
+        function fetchNotifications() {
+            var body = document.getElementById('bellBody');
+            if (!body) return;
+            body.innerHTML = '<div class="dp-loading"><i class="fas fa-spinner"></i> Loading…</div>';
+
+            fetch(_NAV_API.notif + '?action=fetch')
+                .then(function(r) {
+                    return r.json();
+                })
+                .then(function(d) {
+                    if (!d.success) throw new Error();
+                    setBellBadge(d.unread_count);
+                    renderNotifs(d.notifications);
+                })
+                .catch(function() {
+                    var b = document.getElementById('bellBody');
+                    if (b) b.innerHTML = '<div class="dp-empty"><i class="fas fa-wifi-slash"></i>Could not load.</div>';
+                });
+        }
+
+        function renderNotifs(list) {
+            var body = document.getElementById('bellBody');
+            if (!body) return;
+
+            if (!list.length) {
+                body.innerHTML = '<div class="dp-empty"><i class="fas fa-bell-slash"></i>No notifications yet.</div>';
+                return;
+            }
+
+            body.innerHTML = list.map(function(n) {
+                var m = getIcon(n.edited_module);
+                return '<div class="notif-item ' + (n.is_read == 0 ? 'unread' : '') + '" data-id="' + n.id + '">' +
+                    '<div class="notif-icon ' + m.c + '"><i class="fas ' + m.i + '"></i></div>' +
+                    '<div class="notif-content">' +
+                    '<div class="notif-name">' + esc(n.sub_admin_name) + '</div>' +
+                    '<div class="notif-desc">' + esc(n.edit_description) + '</div>' +
+                    '<div class="notif-meta">' +
+                    '<span class="notif-role">' + esc(n.role) + '</span>' +
+                    '<span>' + esc(n.sub_admin_email) + '</span>' +
+                    '<span class="notif-time">' + esc(n.time_ago) + '</span>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+
+            /* Attach click handlers to each row */
+            body.querySelectorAll('.notif-item').forEach(function(item) {
+                item.addEventListener('click', function() {
+                    if (!this.classList.contains('unread')) return;
+                    var id = this.dataset.id;
+                    var fd = new FormData();
+                    fd.append('action', 'mark_read');
+                    fd.append('id', id);
+                    var row = this;
+                    fetch(_NAV_API.notif, {
+                            method: 'POST',
+                            body: fd
                         })
                         .then(function() {
-                            document.querySelectorAll('#bellBody .notif-item')
-                                .forEach(function(el) {
-                                    el.classList.remove('unread');
-                                });
-                            setBellBadge(0);
+                            row.classList.remove('unread');
+                            var b = document.getElementById('bellBadge');
+                            var cur = parseInt(b ? b.textContent : '0') || 0;
+                            setBellBadge(Math.max(0, cur - 1));
                         })
                         .catch(function() {});
                 });
-            }
-
-            /* ── Close every .dropdown-panel except the one supplied ── */
-            function closeAll(keepPanel) {
-                document.querySelectorAll('.dropdown-panel').forEach(function(panel) {
-                    if (panel !== keepPanel) {
-                        panel.classList.remove('open');
-                    }
-                });
-            }
-
-            /* ── Single document-level listener (same as chatbox pattern) ──
-               Logic flow — mirrors admin_chatbox.php exactly:
-               1. Did the click land inside a .dropdown-wrapper?
-                  NO  → close everything and stop.
-                  YES → which button triggered it (if any)?
-               2. Find the nearest [data-dropdown] button ancestor.
-                  Found  → toggle that panel, lazy-load if needed.
-                  Not found (clicked inside an already-open panel) → do nothing.
-            ─────────────────────────────────────────────────────────────── */
-            document.addEventListener('click', function(e) {
-
-                /* Step 1 — is the click inside any dropdown wrapper at all? */
-                var wrapper = e.target.closest('.dropdown-wrapper');
-                if (!wrapper) {
-                    /* Clicked outside every wrapper → close all */
-                    closeAll(null);
-                    return;
-                }
-
-                /* Step 2 — did the click land on (or inside) a trigger button?
-                   Using closest('[data-dropdown]') so clicking a child <i> icon
-                   still resolves to the correct button element.                */
-                var btn = e.target.closest('[data-dropdown]');
-                if (!btn) {
-                    /* Clicked inside the panel area, not on the button → keep open */
-                    return;
-                }
-
-                /* Step 3 — toggle the target panel */
-                var targetId = btn.getAttribute('data-dropdown');
-                var panel = document.getElementById(targetId);
-                if (!panel) return;
-
-                var isOpen = panel.classList.contains('open');
-
-                /* Close all siblings first */
-                closeAll(panel);
-
-                if (isOpen) {
-                    /* Already open → close it */
-                    panel.classList.remove('open');
-                } else {
-                    /* Closed → open it and lazy-load content if first time */
-                    panel.classList.add('open');
-
-                    if (targetId === 'bellPanel' && !bellLoaded) {
-                        bellLoaded = true;
-                        fetchNotifications();
-                    }
-                    if (targetId === 'envelopePanel' && !envLoaded) {
-                        envLoaded = true;
-                        fetchEnvelope();
-                    }
-                }
             });
+        }
 
-            /* ════════════════════════════════════════════════════════
-               BELL — NOTIFICATIONS
-            ════════════════════════════════════════════════════════ */
-            const ICONS = {
-                students: {
-                    i: 'fa-user-graduate',
-                    c: 'blue'
-                },
-                teachers: {
-                    i: 'fa-chalkboard-teacher',
-                    c: 'green'
-                },
-                clubs: {
-                    i: 'fa-users-line',
-                    c: 'purple'
-                },
-                forms: {
-                    i: 'fa-file-circle-check',
-                    c: 'orange'
-                },
-                announcements: {
-                    i: 'fa-calendar-alt',
-                    c: 'blue'
-                },
-                create_announcement: {
-                    i: 'fa-calendar-check',
-                    c: 'blue'
-                },
-                news: {
-                    i: 'fa-newspaper',
-                    c: 'green'
-                },
-                create_new: {
-                    i: 'fa-newspaper',
-                    c: 'green'
-                },
-            };
+        function setBellBadge(n) {
+            var b = document.getElementById('bellBadge');
+            if (!b) return;
+            b.textContent = n > 99 ? '99+' : n;
+            b.dataset.count = n;
+            b.style.display = n > 0 ? '' : 'none';
+        }
 
-            function getIcon(mod) {
-                return ICONS[(mod || '').toLowerCase().replace(/\s+/g, '_')] || {
-                    i: 'fa-bell',
-                    c: 'blue'
-                };
-            }
+        /* ════════════════════════════════════════════════════════
+           ENVELOPE — CHAT PREVIEW
+        ════════════════════════════════════════════════════════ */
+        function fetchEnvelope() {
+            var body = document.getElementById('envelopeBody');
+            if (!body) return;
+            body.innerHTML = '<div class="dp-loading"><i class="fas fa-spinner"></i> Loading…</div>';
 
-            function fetchNotifications() {
-                var body = document.getElementById('bellBody');
-                if (!body) return;
-                body.innerHTML = '<div class="dp-loading"><i class="fas fa-spinner"></i> Loading…</div>';
-
-                fetch(_NAV_API.notif + '?action=fetch')
-                    .then(function(r) {
-                        return r.json();
-                    })
-                    .then(function(d) {
-                        if (!d.success) throw new Error();
-                        setBellBadge(d.unread_count);
-                        renderNotifs(d.notifications);
-                    })
-                    .catch(function() {
-                        var b = document.getElementById('bellBody');
-                        if (b) b.innerHTML = '<div class="dp-empty"><i class="fas fa-wifi-slash"></i>Could not load.</div>';
-                    });
-            }
-
-            function renderNotifs(list) {
-                var body = document.getElementById('bellBody');
-                if (!body) return;
-
-                if (!list.length) {
-                    body.innerHTML = '<div class="dp-empty"><i class="fas fa-bell-slash"></i>No notifications yet.</div>';
-                    return;
-                }
-
-                body.innerHTML = list.map(function(n) {
-                    var m = getIcon(n.edited_module);
-                    return '<div class="notif-item ' + (n.is_read == 0 ? 'unread' : '') + '" data-id="' + n.id + '">' +
-                        '<div class="notif-icon ' + m.c + '"><i class="fas ' + m.i + '"></i></div>' +
-                        '<div class="notif-content">' +
-                        '<div class="notif-name">' + esc(n.sub_admin_name) + '</div>' +
-                        '<div class="notif-desc">' + esc(n.edit_description) + '</div>' +
-                        '<div class="notif-meta">' +
-                        '<span class="notif-role">' + esc(n.role) + '</span>' +
-                        '<span>' + esc(n.sub_admin_email) + '</span>' +
-                        '<span class="notif-time">' + esc(n.time_ago) + '</span>' +
-                        '</div>' +
-                        '</div>' +
-                        '</div>';
-                }).join('');
-
-                /* Attach click handlers to each row */
-                body.querySelectorAll('.notif-item').forEach(function(item) {
-                    item.addEventListener('click', function() {
-                        if (!this.classList.contains('unread')) return;
-                        var id = this.dataset.id;
-                        var fd = new FormData();
-                        fd.append('action', 'mark_read');
-                        fd.append('id', id);
-                        var row = this;
-                        fetch(_NAV_API.notif, {
-                                method: 'POST',
-                                body: fd
-                            })
-                            .then(function() {
-                                row.classList.remove('unread');
-                                var b = document.getElementById('bellBadge');
-                                var cur = parseInt(b ? b.textContent : '0') || 0;
-                                setBellBadge(Math.max(0, cur - 1));
-                            })
-                            .catch(function() {});
-                    });
+            var fd = new FormData();
+            fd.append('action', 'envelope_preview');
+            fetch(_NAV_API.chat, {
+                    method: 'POST',
+                    body: fd
+                })
+                .then(function(r) {
+                    return r.json();
+                })
+                .then(function(d) {
+                    if (!d.success) throw new Error();
+                    setEnvBadge(d.total_unread);
+                    renderEnvelope(d.previews);
+                })
+                .catch(function() {
+                    var b = document.getElementById('envelopeBody');
+                    if (b) b.innerHTML = '<div class="dp-empty"><i class="fas fa-wifi-slash"></i>Could not load.</div>';
                 });
+        }
+
+        function renderEnvelope(list) {
+            var body = document.getElementById('envelopeBody');
+            if (!body) return;
+
+            if (!list.length) {
+                body.innerHTML = '<div class="dp-empty"><i class="fas fa-envelope-open"></i>No messages yet.</div>';
+                return;
             }
 
-            function setBellBadge(n) {
-                var b = document.getElementById('bellBadge');
-                if (!b) return;
+            body.innerHTML = list.map(function(m) {
+                return '<a class="msg-item ' + (m.unread > 0 ? 'unread' : '') + '" href="' + esc(_NAV_API.chatUrl) + '?conv=' + parseInt(m.conv_id) + '">' +
+                    '<div class="msg-avatar">' + esc(m.avatar_letter) + '</div>' +
+                    '<div class="msg-info">' +
+                    '<div class="msg-name">' +
+                    esc(m.student_name) +
+                    (m.unread > 0 ? '<span class="msg-badge">' + m.unread + '</span>' : '') +
+                    '</div>' +
+                    '<div class="msg-preview">' + esc(m.last_message || '—') + '</div>' +
+                    '<div class="msg-time">' + esc(m.time_ago) + '</div>' +
+                    '</div>' +
+                    '</a>';
+            }).join('');
+        }
+
+        function setEnvBadge(n) {
+            var b = document.getElementById('envelopeBadge');
+            if (b) {
                 b.textContent = n > 99 ? '99+' : n;
                 b.dataset.count = n;
                 b.style.display = n > 0 ? '' : 'none';
             }
+            var sb = document.getElementById('sidebarChatBadge');
+            if (sb) {
+                sb.textContent = n > 999 ? Math.round(n / 1000) + 'k' : n;
+                sb.style.display = n > 0 ? '' : 'none';
+            }
+        }
 
-            /* ════════════════════════════════════════════════════════
-               ENVELOPE — CHAT PREVIEW
-            ════════════════════════════════════════════════════════ */
-            function fetchEnvelope() {
-                var body = document.getElementById('envelopeBody');
-                if (!body) return;
-                body.innerHTML = '<div class="dp-loading"><i class="fas fa-spinner"></i> Loading…</div>';
+        /* ════════════════════════════════════════════════════════
+           MOBILE SIDEBAR TOGGLE
+        ════════════════════════════════════════════════════════ */
+        (function() {
+            var hamburger = document.getElementById('navHamburgerBtn');
+            var sidebar = document.querySelector('.sidebar');
+            var overlay = document.getElementById('sidebarOverlay');
+            if (!hamburger || !sidebar || !overlay) return;
 
-                var fd = new FormData();
-                fd.append('action', 'envelope_preview');
-                fetch(_NAV_API.chat, {
-                        method: 'POST',
-                        body: fd
-                    })
-                    .then(function(r) {
-                        return r.json();
-                    })
-                    .then(function(d) {
-                        if (!d.success) throw new Error();
-                        setEnvBadge(d.total_unread);
-                        renderEnvelope(d.previews);
-                    })
-                    .catch(function() {
-                        var b = document.getElementById('envelopeBody');
-                        if (b) b.innerHTML = '<div class="dp-empty"><i class="fas fa-wifi-slash"></i>Could not load.</div>';
-                    });
+            function openSidebar() {
+                sidebar.classList.add('mobile-open');
+                overlay.classList.add('visible');
+                hamburger.classList.add('open');
+                hamburger.setAttribute('aria-expanded', 'true');
+                document.body.style.overflow = 'hidden';
             }
 
-            function renderEnvelope(list) {
-                var body = document.getElementById('envelopeBody');
-                if (!body) return;
-
-                if (!list.length) {
-                    body.innerHTML = '<div class="dp-empty"><i class="fas fa-envelope-open"></i>No messages yet.</div>';
-                    return;
-                }
-
-                body.innerHTML = list.map(function(m) {
-                    return '<a class="msg-item ' + (m.unread > 0 ? 'unread' : '') + '" href="' + esc(_NAV_API.chatUrl) + '?conv=' + parseInt(m.conv_id) + '">' +
-                        '<div class="msg-avatar">' + esc(m.avatar_letter) + '</div>' +
-                        '<div class="msg-info">' +
-                        '<div class="msg-name">' +
-                        esc(m.student_name) +
-                        (m.unread > 0 ? '<span class="msg-badge">' + m.unread + '</span>' : '') +
-                        '</div>' +
-                        '<div class="msg-preview">' + esc(m.last_message || '—') + '</div>' +
-                        '<div class="msg-time">' + esc(m.time_ago) + '</div>' +
-                        '</div>' +
-                        '</a>';
-                }).join('');
+            function closeSidebar() {
+                sidebar.classList.remove('mobile-open');
+                overlay.classList.remove('visible');
+                hamburger.classList.remove('open');
+                hamburger.setAttribute('aria-expanded', 'false');
+                document.body.style.overflow = '';
             }
 
-            function setEnvBadge(n) {
-                var b = document.getElementById('envelopeBadge');
-                if (b) {
-                    b.textContent = n > 99 ? '99+' : n;
-                    b.dataset.count = n;
-                    b.style.display = n > 0 ? '' : 'none';
+            hamburger.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (sidebar.classList.contains('mobile-open')) {
+                    closeSidebar();
+                } else {
+                    openSidebar();
                 }
-                var sb = document.getElementById('sidebarChatBadge');
-                if (sb) {
-                    sb.textContent = n > 999 ? Math.round(n / 1000) + 'k' : n;
-                    sb.style.display = n > 0 ? '' : 'none';
-                }
-            }
+            });
 
-            /* ════════════════════════════════════════════════════════
-               MOBILE SIDEBAR TOGGLE
-            ════════════════════════════════════════════════════════ */
-            (function() {
-                var hamburger = document.getElementById('navHamburgerBtn');
-                var sidebar = document.querySelector('.sidebar');
-                var overlay = document.getElementById('sidebarOverlay');
-                if (!hamburger || !sidebar || !overlay) return;
+            overlay.addEventListener('click', closeSidebar);
 
-                function openSidebar() {
-                    sidebar.classList.add('mobile-open');
-                    overlay.classList.add('visible');
-                    hamburger.classList.add('open');
-                    hamburger.setAttribute('aria-expanded', 'true');
-                    document.body.style.overflow = 'hidden';
-                }
-
-                function closeSidebar() {
-                    sidebar.classList.remove('mobile-open');
-                    overlay.classList.remove('visible');
-                    hamburger.classList.remove('open');
-                    hamburger.setAttribute('aria-expanded', 'false');
-                    document.body.style.overflow = '';
-                }
-
-                hamburger.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    if (sidebar.classList.contains('mobile-open')) {
-                        closeSidebar();
-                    } else {
-                        openSidebar();
-                    }
+            /* Close sidebar when a nav link is clicked on mobile */
+            sidebar.querySelectorAll('a.menu-item').forEach(function(link) {
+                link.addEventListener('click', function() {
+                    if (window.innerWidth <= 900) closeSidebar();
                 });
+            });
 
-                overlay.addEventListener('click', closeSidebar);
+            /* Close on resize back to desktop */
+            window.addEventListener('resize', function() {
+                if (window.innerWidth > 900) closeSidebar();
+            });
+        })();
 
-                /* Close sidebar when a nav link is clicked on mobile */
-                sidebar.querySelectorAll('a.menu-item').forEach(function(link) {
-                    link.addEventListener('click', function() {
-                        if (window.innerWidth <= 900) closeSidebar();
-                    });
-                });
+        /* ════════════════════════════════════════════════════════
+           SIDEBAR ANNOUNCEMENTS SUB-MENU
+        ════════════════════════════════════════════════════════ */
+        var announceToggle = document.querySelector('.sidebar-dropdown-toggle');
+        if (announceToggle) {
+            announceToggle.addEventListener('click', function() {
+                var menuId = this.getAttribute('aria-controls');
+                var menu = document.getElementById(menuId);
+                var arrow = this.querySelector('.sidebar-dropdown-arrow');
+                if (!menu) return;
+                var nowOpen = menu.style.display !== 'none';
+                menu.style.display = nowOpen ? 'none' : 'block';
+                this.setAttribute('aria-expanded', String(!nowOpen));
+                if (arrow) arrow.style.transform = nowOpen ? '' : 'rotate(180deg)';
+            });
+        }
 
-                /* Close on resize back to desktop */
-                window.addEventListener('resize', function() {
-                    if (window.innerWidth > 900) {
-                        closeSidebar();
-                    }
-                });
-            })();
+        /* Auto-expand announcements menu if currently on a sub-page */
+        (function() {
+            var page = location.pathname.split('/').pop().replace('.php', '');
+            var subPages = ['create_announcement', 'create_new', 'Emergency_system'];
+            if (subPages.indexOf(page) === -1) return;
+            var menu = document.getElementById('announcementsMenu');
+            var btn = document.querySelector('[aria-controls="announcementsMenu"]');
+            var arrow = btn ? btn.querySelector('.sidebar-dropdown-arrow') : null;
+            if (menu) menu.style.display = 'block';
+            if (btn) btn.setAttribute('aria-expanded', 'true');
+            if (arrow) arrow.style.transform = 'rotate(180deg)';
+        })();
 
-            /* ════════════════════════════════════════════════════════
-               SIDEBAR ANNOUNCEMENTS SUB-MENU
-            ════════════════════════════════════════════════════════ */
-            var announceToggle = document.querySelector('.sidebar-dropdown-toggle');
-            if (announceToggle) {
-                announceToggle.addEventListener('click', function() {
-                    var menuId = this.getAttribute('aria-controls');
-                    var menu = document.getElementById(menuId);
-                    var arrow = this.querySelector('.sidebar-dropdown-arrow');
-                    if (!menu) return;
-                    var nowOpen = menu.style.display !== 'none';
-                    menu.style.display = nowOpen ? 'none' : 'block';
-                    this.setAttribute('aria-expanded', String(!nowOpen));
-                    if (arrow) arrow.style.transform = nowOpen ? '' : 'rotate(180deg)';
-                });
-            }
+        /* ════════════════════════════════════════════════════════
+           INITIAL BADGE COUNTS on page load
+        ════════════════════════════════════════════════════════ */
+        fetch(_NAV_API.notif + '?action=fetch')
+            .then(function(r) {
+                return r.json();
+            })
+            .then(function(d) {
+                if (d.success) setBellBadge(d.unread_count);
+            })
+            .catch(function() {});
 
-            /* Auto-expand announcements menu if currently on a sub-page */
-            (function() {
-                var page = location.pathname.split('/').pop().replace('.php', '');
-                var subPages = ['create_announcement', 'create_new', 'Emergency_system'];
-                if (subPages.indexOf(page) === -1) return;
-                var menu = document.getElementById('announcementsMenu');
-                var btn = document.querySelector('[aria-controls="announcementsMenu"]');
-                var arrow = btn ? btn.querySelector('.sidebar-dropdown-arrow') : null;
-                if (menu) menu.style.display = 'block';
-                if (btn) btn.setAttribute('aria-expanded', 'true');
-                if (arrow) arrow.style.transform = 'rotate(180deg)';
-            })();
+        (function() {
+            var fd = new FormData();
+            fd.append('action', 'envelope_preview');
+            fetch(_NAV_API.chat, {
+                    method: 'POST',
+                    body: fd
+                })
+                .then(function(r) {
+                    return r.json();
+                })
+                .then(function(d) {
+                    if (d.success) setEnvBadge(d.total_unread);
+                })
+                .catch(function() {});
+        })();
 
-            /* ════════════════════════════════════════════════════════
-               INITIAL BADGE COUNTS on page load
-            ════════════════════════════════════════════════════════ */
+        /* ════════════════════════════════════════════════════════
+           BACKGROUND REFRESH every 60 s
+        ════════════════════════════════════════════════════════ */
+        setInterval(function() {
             fetch(_NAV_API.notif + '?action=fetch')
                 .then(function(r) {
                     return r.json();
@@ -1606,62 +1680,42 @@ function _nav_has_new(array $mods, string $key): bool
                 })
                 .catch(function() {});
 
-            (function() {
-                var fd = new FormData();
-                fd.append('action', 'envelope_preview');
-                fetch(_NAV_API.chat, {
-                        method: 'POST',
-                        body: fd
-                    })
-                    .then(function(r) {
-                        return r.json();
-                    })
-                    .then(function(d) {
-                        if (d.success) setEnvBadge(d.total_unread);
-                    })
-                    .catch(function() {});
-            })();
+            var fd = new FormData();
+            fd.append('action', 'envelope_preview');
+            fetch(_NAV_API.chat, {
+                    method: 'POST',
+                    body: fd
+                })
+                .then(function(r) {
+                    return r.json();
+                })
+                .then(function(d) {
+                    if (d.success) setEnvBadge(d.total_unread);
+                })
+                .catch(function() {});
+        }, 60000);
 
-            /* ════════════════════════════════════════════════════════
-               BACKGROUND REFRESH every 60 s
-            ════════════════════════════════════════════════════════ */
-            setInterval(function() {
-                fetch(_NAV_API.notif + '?action=fetch')
-                    .then(function(r) {
-                        return r.json();
-                    })
-                    .then(function(d) {
-                        if (d.success) setBellBadge(d.unread_count);
-                    })
-                    .catch(function() {});
+        /* ════════════════════════════════════════════════════════
+           XSS-SAFE ESCAPE
+        ════════════════════════════════════════════════════════ */
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
-                var fd = new FormData();
-                fd.append('action', 'envelope_preview');
-                fetch(_NAV_API.chat, {
-                        method: 'POST',
-                        body: fd
-                    })
-                    .then(function(r) {
-                        return r.json();
-                    })
-                    .then(function(d) {
-                        if (d.success) setEnvBadge(d.total_unread);
-                    })
-                    .catch(function() {});
-            }, 60000);
+    } /* end initAdminNav() */
 
-            /* ════════════════════════════════════════════════════════
-               XSS-SAFE ESCAPE
-            ════════════════════════════════════════════════════════ */
-            function esc(s) {
-                return String(s == null ? '' : s)
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&#39;');
-            }
-
-        }); /* end DOMContentLoaded */
-    } /* end __adminNavReady guard */
+    /* ── Auto-run on DOMContentLoaded when PHP-included directly ── */
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            initAdminNav();
+        });
+    } else {
+        /* DOM already ready (e.g. script injected after load) */
+        initAdminNav();
+    }
 </script>

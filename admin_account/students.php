@@ -257,7 +257,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'docx') {
         $expTypes .= 's';
     }
     $expWhere = !empty($expConditions) ? 'WHERE ' . implode(' AND ', $expConditions) : '';
-    $expStmt  = $conn->prepare('SELECT * FROM students ' . $expWhere . ' ORDER BY grade_level, last_name, first_name');
+    $expStmt  = $conn->prepare('SELECT s.*, COALESCE(NULLIF(spd.photo,\'\'), s.profile_image, \'../assets/img/person/unknown.jpg\') AS effective_photo FROM students s LEFT JOIN student_profile_data spd ON spd.student_id = s.student_id ' . $expWhere . ' ORDER BY s.grade_level, s.last_name, s.first_name');
     if (!empty($expParams)) $expStmt->bind_param($expTypes, ...$expParams);
     $expStmt->execute();
     $expStudents = $expStmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -927,7 +927,7 @@ $totalFiltered = $countStmt->get_result()->fetch_assoc()['total'];
 $countStmt->close();
 $totalPages = max(1, ceil($totalFiltered / $perPage));
 
-$stmt = $conn->prepare("SELECT * FROM students {$whereClause} ORDER BY id DESC LIMIT ? OFFSET ?");
+$stmt = $conn->prepare("SELECT s.*, COALESCE(NULLIF(spd.photo,''), s.profile_image, '../assets/img/person/unknown.jpg') AS effective_photo FROM students s LEFT JOIN student_profile_data spd ON spd.student_id = s.student_id {$whereClause} ORDER BY s.id DESC LIMIT ? OFFSET ?");
 $allParams = array_merge($params, [$perPage, $offset]);
 $allTypes = $types . 'ii';
 $stmt->bind_param($allTypes, ...$allParams);
@@ -3048,7 +3048,7 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
                         <?php if (count($students) > 0): ?>
                             <?php foreach ($students as $student):
                                 $fullName = htmlspecialchars(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? ''));
-                                $imgSrc = htmlspecialchars($student['profile_image'] ?? '../assets/img/person/unknown.jpg');
+                                $imgSrc = htmlspecialchars($student['effective_photo'] ?? '../assets/img/person/unknown.jpg');
                                 $statusVal = $student['status'] ?? 'Active';
                                 $badgeClass = match ($statusVal) {
                                     'Active' => 'badge-active',
@@ -3060,7 +3060,7 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
                             ?>
                                 <tr class="student-row"
                                     data-id="<?php echo htmlspecialchars($student['student_id'] ?? ''); ?>"
-                                    data-image="<?php echo htmlspecialchars($student['profile_image'] ?? ''); ?>"
+                                    data-image="<?php echo htmlspecialchars($student['effective_photo'] ?? ''); ?>"
                                     data-name="<?php echo $fullName; ?>"
                                     data-grade="<?php echo htmlspecialchars($student['grade_level'] ?? ''); ?>"
                                     data-age="<?php echo htmlspecialchars($student['age'] ?? ''); ?>"
@@ -3085,7 +3085,7 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
                                         <div class="action-btns">
                                             <a href="#" class="action-btn edit" title="Edit"
                                                 data-id="<?php echo htmlspecialchars($student['student_id'] ?? ''); ?>"
-                                                data-image="<?php echo htmlspecialchars($student['profile_image'] ?? ''); ?>"
+                                                data-image="<?php echo htmlspecialchars($student['effective_photo'] ?? ''); ?>"
                                                 data-status="<?php echo htmlspecialchars($statusVal); ?>">
                                                 <i class="fas fa-pen"></i>
                                             </a>

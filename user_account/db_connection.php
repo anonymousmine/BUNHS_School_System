@@ -1,12 +1,13 @@
 <?php
-$host     = getenv("DB_HOST");
-$db_user  = getenv("DB_USER");
-$db_pass  = getenv("DB_PASSWORD");
-$db_name  = getenv("DB_NAME");
-$db_port  = getenv("DB_PORT");
 
-$conn = mysqli_connect($host, $db_user, $db_pass, $db_name, $db_port);
-
-if (!$conn) {
-    die("Connection failed: " . mysqli_connect_error());
+/**
+ * User DB Connection - Uses safe root connection with mysqli check
+ */
+$root_db = __DIR__ . '/../db_connection.php';
+if (file_exists($root_db)) {
+    require_once $root_db;
+} else {
+    error_log('Root db_connection.php missing: ' . $root_db);
+    http_response_code(500);
+    die('Database configuration unavailable. Contact administrator.');
 }

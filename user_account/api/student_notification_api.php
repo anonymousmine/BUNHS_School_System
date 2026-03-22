@@ -35,7 +35,7 @@ session_start();
 
 // ── DB: walk UP the directory tree until db_connection.php is found ───────────
 $_db     = null;
-$_search = __DIR__;
+$_search = dirname(__DIR__);
 for ($_i = 0; $_i < 6; $_i++) {
     $_cand = $_search . '/db_connection.php';
     if (file_exists($_cand)) {
@@ -57,7 +57,7 @@ include $_db;
 
 // ── Load caching layer (walk up same way) ─────────────────────────────────────
 $_ch     = null;
-$_search = __DIR__;
+$_search = dirname(__DIR__);
 for ($_i = 0; $_i < 6; $_i++) {
     $_cand = $_search . '/cache_helper.php';
     if (file_exists($_cand)) {

@@ -2980,7 +2980,7 @@ $conn->close();
                 fd.append('gender', gender);
                 fd.append('contact_method', isEmail ? 'email' : 'phone');
                 fd.append('password', pw);
-                fd.append('account_type', document.getElementById('scAccountType').value);
+                fd.append('user_type', 'student');
                 fd.append('confirm_password', cpw);
                 fd.append('email', isEmail ? email : '');
                 fd.append('phone', isEmail ? '' : phone);
