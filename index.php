@@ -4,11 +4,8 @@ require_once 'session_config.php';
 require_once 'cache_helper.php';
 
 // ── Safe DB include with error recovery ──────────────────────────────────────
-// SAFE START - Always load safe mode during Railway mysqli fix
-if (true) {
-    readfile('index_safe.html');
-    exit;
-}
+// SAFE MODE DISABLED - Full site live
+// mysqli safe check active in db_connection.php
 
 // Original DB include
 try {
