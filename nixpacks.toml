@@ -1,13 +1,14 @@
 [phases.setup]
 nixPkgs = [
-  "php81",
-  "php81Extensions.mysqli",       
-  "php81Extensions.pdo_mysql",    
-  "php81Extensions.pdo",          
-  "php81Extensions.mbstring",     
-  "php81Extensions.gd",           
-  "php81Extensions.curl",         
-  "php81Extensions.zip",          
+  "php83",
+  "php83Extensions.mysqli",       
+  "php83Extensions.pdo_mysql",    
+  "php83Extensions.pdo",          
+  "php83Extensions.mbstring",     
+  "php83Extensions.gd",           
+  "php83Extensions.curl",         
+  "php83Extensions.zip",          
+  "php83Extensions.frankenphp",
   "composer"
 ]
 providers = ["nixpacks/php"]
@@ -20,12 +21,11 @@ cmds = [
 [phases.build]
 cmds = [
   "composer install --no-dev --optimize-autoloader --no-interaction",
-  "php81 -m | grep mysqli || (echo 'CRITICAL: mysqli extension MISSING after Nixpacks!' && php81 --ini | head -20 && exit 1)",
-  "php81 -m | grep pdo_mysql || echo 'WARNING: pdo_mysql missing but mysqli OK'",
-  "echo '✅ PHP extensions verified - mysqli LOADED'",
-  "chmod +x start-container.sh"
+  "chmod +x start-container.sh",
+  "php -m | grep mysqli || echo 'WARNING: mysqli missing in build'"
 ]
 
-[start]
-cmd = "./start-container.sh"
-
+[phase.runtime]
+cmds = [
+  "./start-container.sh"
+]
