@@ -1,31 +1,15 @@
 [phases.setup]
 nixPkgs = [
-  "php83",
-  "php83Extensions.mysqli",       
-  "php83Extensions.pdo_mysql",    
-  "php83Extensions.pdo",          
-  "php83Extensions.mbstring",     
-  "php83Extensions.gd",           
-  "php83Extensions.curl",         
-  "php83Extensions.zip",          
-  "php83Extensions.frankenphp",
-  "composer"
-]
-providers = ["nixpacks/php"]
-
-[phases.install]
-cmds = [
-  "composer install --no-dev --optimize-autoloader --no-interaction"
+  'php83Extensions.mysqli',
+  'php83Extensions.pdo_mysql',
+  'composer'
 ]
 
 [phases.build]
 cmds = [
-  "composer install --no-dev --optimize-autoloader --no-interaction",
-  "chmod +x start-container.sh",
-  "php -m | grep mysqli || echo 'WARNING: mysqli missing in build'"
+  'composer install --no-dev --optimize-autoloader',
+  'chmod +x start-container.sh'
 ]
 
-[phase.runtime]
-cmds = [
-  "./start-container.sh"
-]
+[start]
+cmd = 'php -S 0.0.0.0:${PORT:-8080} -t /app'
