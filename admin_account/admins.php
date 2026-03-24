@@ -365,6 +365,7 @@ $all_permissions = [
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manage Sub-Admins</title>
     <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
+    <link rel="stylesheet" href="../overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
     <style>
@@ -376,7 +377,6 @@ $all_permissions = [
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
 
         :root {
-            --bg: #f0f2f8;
             --surface: #ffffff;
             --surface-2: #f7f8fc;
             --border: #e2e5f0;
@@ -384,9 +384,6 @@ $all_permissions = [
             --text-primary: #0f1523;
             --text-secondary: #5a6282;
             --text-muted: #9299b5;
-
-            --navy: #1a2240;
-            --navy-soft: #232c4f;
 
             --blue: #3b62f5;
             --blue-light: #eef1fe;
@@ -424,7 +421,7 @@ $all_permissions = [
 
         body {
             font-family: 'DM Sans', sans-serif;
-            background: var(--bg);
+            background: var(--light-color);
             margin: 0;
             padding: 0;
             color: var(--text-primary);

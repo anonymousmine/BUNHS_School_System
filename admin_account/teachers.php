@@ -583,6 +583,7 @@ $educMap = [
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <title>Teacher Information | BUNHS Admin</title>
     <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
+    <link rel="stylesheet" href="../overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -595,7 +596,7 @@ $educMap = [
 
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            background: #f1f5f0;
+            background: var(--light-color);
             margin: 0;
             padding: 0;
         }

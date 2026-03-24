@@ -19,6 +19,7 @@ include '../db_connection.php';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Forms & Documents - School Admin Dashboard</title>
     <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
+    <link rel="stylesheet" href="../overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>

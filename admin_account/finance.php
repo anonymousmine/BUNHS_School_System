@@ -530,8 +530,6 @@ if ($bk && $bk->num_rows > 0) {
 // distinct month labels for filter dropdown
 $distinct_months = array_keys($month_groups);
 
-$conn->close();
-
 // ── UACS labels for cards ─────────────────────────────────────────────────
 $uacs_labels = [
     'electricity'    => ['label' => 'Electricity Expenses',        'code' => '5020402000', 'icon' => 'fa-bolt',          'color' => 'orange'],
@@ -552,6 +550,7 @@ $uacs_labels = [
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <title>Finance — Cash Disbursement Register · Buyoan NHS</title>
     <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
+    <link rel="stylesheet" href="../overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -596,7 +595,7 @@ $uacs_labels = [
 
         body {
             font-family: 'DM Sans', sans-serif;
-            background: var(--bg-page);
+            background: var(--light-color);
             color: var(--text-primary);
         }
 

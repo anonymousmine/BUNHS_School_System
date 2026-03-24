@@ -284,7 +284,10 @@ if ($action === 'envelope_preview') {
         "SELECT cc.id AS conv_id, cc.last_message, cc.updated_at,
                 s.first_name, s.last_name,
                 (SELECT COUNT(*) FROM chat_messages cm
-                 WHERE cm.conversation_id = cc.id AND cm.is_read = 0 AND cm.sender_role = 'student') AS unread
+                 WHERE cm.conversation_id = cc.id AND cm.is_read = 0 AND cm.sender_role = 'student') AS unread,
+                (SELECT cm.sender_role FROM chat_messages cm 
+                 WHERE cm.conversation_id = cc.id 
+                 ORDER BY cm.created_at DESC LIMIT 1) AS last_sender_role
          FROM chat_conversations cc
          JOIN students s ON s.id = cc.student_id
          WHERE cc.last_message != ''
@@ -301,6 +304,7 @@ if ($action === 'envelope_preview') {
         $r['last_message']  = htmlspecialchars(mb_substr($r['last_message'] ?? '', 0, 60), ENT_QUOTES, 'UTF-8');
         $r['time_ago']      = time_ago($r['updated_at']);
         $r['avatar_letter'] = strtoupper(substr($r['first_name'], 0, 1));
+        $r['sender_role']   = $r['last_sender_role'] ?? 'student'; // Default to student for safety
         $total_unread      += (int) $r['unread'];
     }
     unset($r);

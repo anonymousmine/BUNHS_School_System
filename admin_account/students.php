@@ -973,6 +973,7 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
     <title>Student Records — School Admin</title>
     <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
     <link rel="stylesheet" href="admin_assets/cs/student.css">
+    <link rel="stylesheet" href="../overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
@@ -2782,14 +2783,6 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
     <?php include 'admin_nav.php'; ?>
     <script>
         // Initialize navigation functionality after include
-        if (typeof initializeNavigation === 'function') {
-            initializeNavigation();
-        }
-    </script>
-        }).catch(e => console.error('Nav error:', e));
-
-        // Initialize Navigation Functionality (already handled by admin_nav.php)
-        // No need for dropdown path fixing since PHP handles it correctly
         if (typeof initializeNavigation === 'function') {
             initializeNavigation();
         }

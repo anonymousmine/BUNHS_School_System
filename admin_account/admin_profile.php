@@ -128,9 +128,16 @@ $linkedin_url = $user_data['linkedin_url'] ?? '';
 $responsibilities = $user_data['responsibilities'] ?? '';
 $goals        = $user_data['leadership_goals'] ?? '';
 $profile_img  = $user_data['profile_image'] ?? '';
+$profile_picture_url = $user_data['profile_picture_url'] ?? '';
+$profile_picture_type = $user_data['profile_picture_type'] ?? 'icon';
+$registration_method = $user_data['registration_method'] ?? 'email';
 $mission      = $user_data['mission'] ?? '';
 $vision       = $user_data['vision'] ?? '';
 $core_values  = $user_data['core_values'] ?? '';
+
+// Profile path for uploads - role-specific
+// admin_profile.php lives in admin/, uploads/ is at root level, so we need ../
+$profile_path = $user_type === 'admin' ? '../uploads/admin_profiles/' : '../uploads/sub_admin_profiles/';
 
 // Role-specific data
 $user_role = 'Administrator';
@@ -162,19 +169,45 @@ $emerg_phone     = $user_data['emergency_contact_phone'] ?? '';
 $emerg_rel       = $user_data['emergency_relationship']  ?? '';
 $bank_account    = $user_data['bank_account']    ?? '';
 
-// Avatar: initials fallback or uploaded image
-$initials = strtoupper(
-    implode('', array_map(
-        fn($w) => $w[0],
-        array_slice(explode(' ', $full_name), 0, 2)
-    ))
-);
+// Avatar: handle different profile picture types
+if ($user_type === 'sub-admin') {
+    // Sub-admin profile picture logic
+    if ($profile_picture_type === 'gmail' && !empty($profile_picture_url)) {
+        // Gmail profile picture
+        $avatarStyle = 'background-image:url(' . h($profile_picture_url) . ');background-size:cover;background-position:center;';
+        $avatarContent = '';
+    } elseif ($profile_picture_type === 'upload' && !empty($profile_img)) {
+        // Uploaded profile picture
+        $avatarStyle = 'background-image:url(' . h($profile_path . $profile_img) . ');background-size:cover;background-position:center;';
+        $avatarContent = '';
+    } else {
+        // Icon display for phone registration or fallback
+        $avatarStyle = 'background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);display:flex;align-items:center;justify-content:center;';
+        $avatarContent = '<i class="fa-solid fa-user" style="color:white;font-size:28px;"></i>';
+    }
+} else {
+    // Admin profile picture logic (existing)
+    $initials = strtoupper(
+        implode('', array_map(
+            fn($w) => $w[0],
+            array_filter(
+                explode(' ', trim($full_name)),
+                fn($w) => !empty($w)
+            )
+        ))
+    );
 
-$profile_path = $user_type === 'admin' ? 'uploads/admin_profiles/' : 'uploads/sub_admin_profiles/';
-$avatarStyle = $profile_img
-    ? 'background-image:url(' . h($profile_path . $profile_img) . ');background-size:cover;background-position:center;'
-    : '';
-$avatarContent = $profile_img ? '' : h($initials);
+    $upload_subfolder = $user_type === 'admin' ? 'admin_profiles' : 'sub_admin_profiles';
+    if ($profile_img && file_exists(__DIR__ . '/../uploads/' . $upload_subfolder . '/' . $profile_img)) {
+        // Admin has uploaded profile picture and file exists
+        $avatarStyle = 'background-image:url(' . h($profile_path . $profile_img) . ');background-size:cover;background-position:center;';
+        $avatarContent = '';
+    } else {
+        // No profile picture or file doesn't exist, show initials
+        $avatarStyle = '';
+        $avatarContent = h($initials);
+    }
+}
 
 // Certification count
 $cert_count = count(array_filter(array_map('trim', explode("\n", $certs))));
@@ -242,6 +275,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
 
     <!-- Shared Admin Styles -->
     <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
+    <link rel="stylesheet" href="../overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -286,29 +320,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
         }
 
         body {
-            font-family: 'DM Sans', sans-serif;
-            background: var(--green-ghost);
+            font-family:
+                "Inter",
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            background: var(--light-color);
             color: var(--text-primary);
-            min-height: 100vh;
+            line-height: 1.5;
+            margin: 0;
+            padding: 0;
         }
 
         /* Main layout — .main is opened by admin_nav.php */
         .main {
             margin-left: 240px;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
             min-height: 100vh;
-            min-width: 0;
+            width: calc(100% - 240px);
+            box-sizing: border-box;
         }
 
-        /* PAGE CONTENT — appended into .main by JS, fills it edge-to-edge */
-        .page-content {
-            padding: 28px 32px 48px;
-            flex: 1;
-            width: 100%;
-            min-width: 0;
-            box-sizing: border-box;
+        html {
+            scroll-behavior: smooth;
         }
 
         .breadcrumb {
@@ -341,6 +375,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
         .breadcrumb span {
             font-weight: 600;
             color: var(--text-secondary);
+        }
+
+        /* PAGE CONTENT — fills the remaining space after sidebar */
+        .page-content {
+            padding: 28px 32px 48px;
+            width: 100%;
+            min-height: calc(100vh - 72px);
+            box-sizing: border-box;
+            background: #f8fafc;
+        }
+
+        /* Profile page specific styles */
+        .page-content.profile {
+            background: #f8fafc;
         }
 
         /* Hero */
@@ -1579,7 +1627,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
 <body>
     <?php include 'admin_nav.php'; ?>
 
-    <main class="page-content" id="profile-content">
+    <section class="page-content profile" id="profile-content" style="display: block !important;">
 
         <nav class="breadcrumb">
             <a href="admin_dashboard.php">Home</a>
@@ -1931,7 +1979,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
             </div>
         </section>
 
-    </main><!-- end #profile-content -->
+    </section><!-- end #profile-content -->
 
 
     <!-- ════════════════════════════════════════════════════
@@ -1966,108 +2014,114 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
                             <label class="form-label">Full Name *</label>
                             <input class="form-input" type="text" name="full_name" id="modal_full_name" value="<?php echo h($full_name); ?>" />
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">Professional Title</label>
-                            <input class="form-input" type="text" name="title" value="<?php echo h($title); ?>" />
-                        </div>
+                        <?php if ($user_type === 'admin'): ?>
+                            <div class="form-group">
+                                <label class="form-label">Professional Title</label>
+                                <input class="form-input" type="text" name="title" value="<?php echo h($title); ?>" />
+                            </div>
+                        <?php endif; ?>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Principal's Title (Official Rank)</label>
-                            <select class="form-input" name="principal_title">
-                                <?php foreach (['Principal I', 'Principal II', 'Principal III', 'Principal IV'] as $pt): ?>
-                                    <option value="<?php echo $pt; ?>" <?php echo $principal_title === $pt ? 'selected' : ''; ?>><?php echo $pt; ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                    <?php if ($user_type === 'admin'): ?>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Principal's Title (Official Rank)</label>
+                                <select class="form-input" name="principal_title">
+                                    <?php foreach (['Principal I', 'Principal II', 'Principal III', 'Principal IV'] as $pt): ?>
+                                        <option value="<?php echo $pt; ?>" <?php echo $principal_title === $pt ? 'selected' : ''; ?>><?php echo $pt; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Photo</label>
+                                <label for="profileImageInput" style="cursor:pointer;">
+                                    <span class="btn btn-ghost" style="font-size:12px;padding:7px 14px;display:inline-flex;align-items:center;gap:6px;width:100%;">
+                                        <i class="fas fa-upload"></i> Upload Photo
+                                    </span>
+                                </label>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">Photo</label>
-                            <label for="profileImageInput" style="cursor:pointer;">
-                                <span class="btn btn-ghost" style="font-size:12px;padding:7px 14px;display:inline-flex;align-items:center;gap:6px;width:100%;">
-                                    <i class="fas fa-upload"></i> Upload Photo
-                                </span>
-                            </label>
+                        <div class="form-row full">
+                            <div class="form-group">
+                                <label class="form-label">Biography</label>
+                                <textarea class="form-textarea" name="biography" rows="4"><?php echo h($biography); ?></textarea>
+                            </div>
                         </div>
-                    </div>
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label class="form-label">Biography</label>
-                            <textarea class="form-textarea" name="biography" rows="4"><?php echo h($biography); ?></textarea>
+                        <div class="form-row full">
+                            <div class="form-group">
+                                <label class="form-label">Principal's Responsibilities</label>
+                                <textarea class="form-textarea" name="responsibilities" rows="4" placeholder="Describe the principal's responsibilities (one per line)..."><?php echo h($responsibilities); ?></textarea>
+                            </div>
                         </div>
-                    </div>
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label class="form-label">Principal's Responsibilities</label>
-                            <textarea class="form-textarea" name="responsibilities" rows="4" placeholder="Describe the principal's responsibilities (one per line)..."><?php echo h($responsibilities); ?></textarea>
-                        </div>
-                    </div>
+                    <?php endif; ?>
                 </div>
 
-                <div class="form-section">
-                    <div class="form-section-head"><i class="fas fa-address-book"></i> Contact Details</div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Office Location</label>
-                            <input class="form-input" type="text" name="office_location" value="<?php echo h($office); ?>" />
+                <?php if ($user_type === 'admin'): ?>
+                    <div class="form-section">
+                        <div class="form-section-head"><i class="fas fa-address-book"></i> Contact Details</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Office Location</label>
+                                <input class="form-input" type="text" name="office_location" value="<?php echo h($office); ?>" />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">School Phone</label>
+                                <input class="form-input" type="tel" name="school_phone" value="<?php echo h($school_phone); ?>" />
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">School Phone</label>
-                            <input class="form-input" type="tel" name="school_phone" value="<?php echo h($school_phone); ?>" />
+                        <div class="form-row full">
+                            <div class="form-group">
+                                <label class="form-label">School Email</label>
+                                <input class="form-input" type="email" name="school_email" value="<?php echo h($school_email); ?>" />
+                            </div>
                         </div>
                     </div>
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label class="form-label">School Email</label>
-                            <input class="form-input" type="email" name="school_email" value="<?php echo h($school_email); ?>" />
-                        </div>
-                    </div>
-                </div>
 
-                <div class="form-section">
-                    <div class="form-section-head"><i class="fas fa-graduation-cap"></i> Education &amp; Credentials</div>
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label class="form-label">Educational History (one per line)</label>
-                            <textarea class="form-textarea" name="education_history" rows="3"><?php echo h($education); ?></textarea>
+                    <div class="form-section">
+                        <div class="form-section-head"><i class="fas fa-graduation-cap"></i> Education &amp; Credentials</div>
+                        <div class="form-row full">
+                            <div class="form-group">
+                                <label class="form-label">Educational History (one per line)</label>
+                                <textarea class="form-textarea" name="education_history" rows="3"><?php echo h($education); ?></textarea>
+                            </div>
+                        </div>
+                        <div class="form-row full">
+                            <div class="form-group">
+                                <label class="form-label">Professional Certifications (one per line)</label>
+                                <textarea class="form-textarea" name="certifications" rows="3"><?php echo h($certs); ?></textarea>
+                            </div>
+                        </div>
+                        <div class="form-row full">
+                            <div class="form-group">
+                                <label class="form-label">Years of Experience</label>
+                                <input class="form-input" type="number" name="years_experience" value="<?php echo h($years_exp); ?>" style="max-width:150px;" min="0" max="99" />
+                            </div>
                         </div>
                     </div>
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label class="form-label">Professional Certifications (one per line)</label>
-                            <textarea class="form-textarea" name="certifications" rows="3"><?php echo h($certs); ?></textarea>
-                        </div>
-                    </div>
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label class="form-label">Years of Experience</label>
-                            <input class="form-input" type="number" name="years_experience" value="<?php echo h($years_exp); ?>" style="max-width:150px;" min="0" max="99" />
-                        </div>
-                    </div>
-                </div>
 
-                <div class="form-section">
-                    <div class="form-section-head"><i class="fas fa-share-alt"></i> Social Media</div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Twitter / X URL</label>
-                            <input class="form-input" type="url" name="twitter_url" value="<?php echo h($twitter_url); ?>" />
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">LinkedIn URL</label>
-                            <input class="form-input" type="url" name="linkedin_url" value="<?php echo h($linkedin_url); ?>" />
+                    <div class="form-section">
+                        <div class="form-section-head"><i class="fas fa-share-alt"></i> Social Media</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Twitter / X URL</label>
+                                <input class="form-input" type="url" name="twitter_url" value="<?php echo h($twitter_url); ?>" />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">LinkedIn URL</label>
+                                <input class="form-input" type="url" name="linkedin_url" value="<?php echo h($linkedin_url); ?>" />
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="form-section">
-                    <div class="form-section-head"><i class="fas fa-tasks"></i> Goals</div>
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label class="form-label">Leadership Goals (one per line)</label>
-                            <textarea class="form-textarea" name="leadership_goals" rows="4"><?php echo h($goals); ?></textarea>
+                    <div class="form-section">
+                        <div class="form-section-head"><i class="fas fa-tasks"></i> Goals</div>
+                        <div class="form-row full">
+                            <div class="form-group">
+                                <label class="form-label">Leadership Goals (one per line)</label>
+                                <textarea class="form-textarea" name="leadership_goals" rows="4"><?php echo h($goals); ?></textarea>
+                            </div>
                         </div>
                     </div>
-                </div>
+                <?php endif; ?>
 
             </div>
             <div class="modal-footer">
@@ -2182,7 +2236,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
     </div>
 
 
-    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>
     <script>
         /* ── Load Navigation via fetch (same as original admin_profile.php) ── */
         function loadNavigation() {
@@ -2230,7 +2283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
         }
 
         // Kick off on page load
-        loadNavigation();
+        // loadNavigation(); // Disabled - navigation is included via PHP
 
         /* ── Modals ──────────────────────────────────────────────── */
         function openEditModal() {
@@ -2356,7 +2409,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
                     document.getElementById('heroRole').textContent = formData.get('title');
                     if (data.profile_image) {
                         const heroAv = document.getElementById('heroAvatar');
-                        heroAv.style.backgroundImage = `url(uploads/admin_profiles/${data.profile_image})`;
+                        const profilePath = '<?php echo $profile_path; ?>' + data.profile_image;
+                        // Use absolute path from root
+                        heroAv.style.backgroundImage = `url(${profilePath})`;
                         heroAv.style.backgroundSize = 'cover';
                         heroAv.style.backgroundPosition = 'center';
                         heroAv.textContent = '';

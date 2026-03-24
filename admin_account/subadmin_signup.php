@@ -205,6 +205,21 @@ if ($action === 'sa_verify_otp') {
         $types .= 's';
     }
 
+    // Add registration method
+    if (sa_has_col($conn, 'registration_method')) {
+        $cols[] = 'registration_method';
+        $vals[] = $p['method'];
+        $types .= 's';
+    }
+
+    // Set profile picture type based on registration method
+    if (sa_has_col($conn, 'profile_picture_type')) {
+        $cols[] = 'profile_picture_type';
+        $profile_type = ($p['method'] === 'email') ? 'gmail' : 'icon';
+        $vals[] = $profile_type;
+        $types .= 's';
+    }
+
     $sql = 'INSERT INTO `sub_admin` (' . implode(',', $cols) . ') VALUES (' . str_repeat('?,', count($cols) - 1) . '?)';
     $stmt = $conn->prepare($sql);
     $stmt->bind_param($types, ...$vals);

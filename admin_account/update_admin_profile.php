@@ -1,7 +1,7 @@
 <?php
 // ═════════════════════════════════════════════════════════════
 //  update_admin_profile.php
-//  Handles AJAX POST to update the admin's public profile data.
+//  Handles AJAX POST to update profile data for both admin and sub-admin.
 //  Returns JSON: { success: bool, message: string, profile_image?: string }
 // ═════════════════════════════════════════════════════════════
 session_start();
@@ -23,7 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 include 'db_connection.php';   // Provides $conn (mysqli)
 
-$admin_id = (int) $_SESSION['user_id'];
+$user_id = (int) $_SESSION['user_id'];
+$user_type = $_SESSION['user_type'];
 
 // ── Sanitise & validate inputs ────────────────────────────────
 function sanitise(string $v): string
@@ -44,6 +45,7 @@ $twitter_url      = filter_var(trim($_POST['twitter_url']  ?? ''), FILTER_SANITI
 $linkedin_url     = filter_var(trim($_POST['linkedin_url'] ?? ''), FILTER_SANITIZE_URL);
 $responsibilities = sanitise($_POST['responsibilities']  ?? '');
 $leadership_goals = sanitise($_POST['leadership_goals']  ?? '');
+$principal_title  = sanitise($_POST['principal_title']  ?? '');
 
 // Required field check
 if ($full_name === '') {
@@ -55,6 +57,17 @@ if ($full_name === '') {
 if ($school_email !== '' && !filter_var($school_email, FILTER_VALIDATE_EMAIL)) {
     echo json_encode(['success' => false, 'message' => 'Invalid school email address.']);
     exit;
+}
+
+// ── Ensure sub_admin table has required columns ───────────────
+// These columns are also added in admin_profile.php on page load,
+// but we must guard here too because this endpoint is called via
+// AJAX and may run before the page-load ALTER ever executes.
+if ($user_type === 'sub-admin') {
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS full_name VARCHAR(255) DEFAULT NULL");
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS profile_image VARCHAR(255) DEFAULT NULL");
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS profile_picture_type VARCHAR(50) DEFAULT 'icon'");
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP");
 }
 
 // ── Profile image upload ──────────────────────────────────────
@@ -81,8 +94,9 @@ if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === UPL
 
     // Build a safe filename
     $ext                = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $profile_image_name = 'admin_' . $admin_id . '_' . time() . '.' . strtolower($ext);
-    $uploadDir          = __DIR__ . '/uploads/admin_profiles/';
+    $prefix             = $user_type === 'admin' ? 'admin' : 'subadmin';
+    $profile_image_name = $prefix . '_' . $user_id . '_' . time() . '.' . strtolower($ext);
+    $uploadDir          = __DIR__ . '/../uploads/' . ($user_type === 'admin' ? 'admin_profiles' : 'sub_admin_profiles') . '/';
 
     if (!is_dir($uploadDir)) {
         mkdir($uploadDir, 0755, true);
@@ -93,93 +107,122 @@ if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === UPL
         exit;
     }
 
-    // Delete old image (optional – keeps the uploads folder clean)
-    $stmtOld = $conn->prepare("SELECT profile_image FROM admin WHERE id = ?");
-    $stmtOld->bind_param('i', $admin_id);
-    $stmtOld->execute();
-    $oldRow = $stmtOld->get_result()->fetch_assoc();
-    $stmtOld->close();
-    if (!empty($oldRow['profile_image'])) {
-        $oldFile = $uploadDir . $oldRow['profile_image'];
-        if (is_file($oldFile)) {
-            @unlink($oldFile);
+    // Delete old image – keeps the uploads folder clean
+    $table_name = $user_type === 'admin' ? 'admin' : 'sub_admin';
+    $stmtOld = $conn->prepare("SELECT profile_image FROM {$table_name} WHERE id = ?");
+    if ($stmtOld) {
+        $stmtOld->bind_param('i', $user_id);
+        $stmtOld->execute();
+        $oldRow = $stmtOld->get_result()->fetch_assoc();
+        $stmtOld->close();
+        if (!empty($oldRow['profile_image'])) {
+            $oldFile = $uploadDir . $oldRow['profile_image'];
+            if (is_file($oldFile)) {
+                @unlink($oldFile);
+            }
         }
     }
 }
 
-// ── Build query (include image only when a new one was uploaded) ──
-if ($profile_image_name !== null) {
-    $sql = "UPDATE admin SET
-                full_name        = ?,
-                title            = ?,
-                biography        = ?,
-                office_location  = ?,
-                school_phone     = ?,
-                school_email     = ?,
-                education_history= ?,
-                certifications   = ?,
-                years_experience = ?,
-                twitter_url      = ?,
-                linkedin_url     = ?,
-                responsibilities = ?,
-                leadership_goals = ?,
-                profile_image    = ?,
-                updated_at       = NOW()
-            WHERE id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param(
-        'ssssssssisssssi',
-        $full_name,
-        $title,
-        $biography,
-        $office_location,
-        $school_phone,
-        $school_email,
-        $education_history,
-        $certifications,
-        $years_experience,
-        $twitter_url,
-        $linkedin_url,
-        $responsibilities,
-        $leadership_goals,
-        $profile_image_name,
-        $admin_id
-    );
+// ── Build query based on user type ───────────────────────────
+if ($user_type === 'admin') {
+    // Admin query
+    if ($profile_image_name !== null) {
+        $sql = "UPDATE admin SET
+                    full_name        = ?,
+                    title            = ?,
+                    biography        = ?,
+                    office_location  = ?,
+                    school_phone     = ?,
+                    school_email     = ?,
+                    education_history= ?,
+                    certifications   = ?,
+                    years_experience = ?,
+                    twitter_url      = ?,
+                    linkedin_url     = ?,
+                    responsibilities = ?,
+                    leadership_goals = ?,
+                    principal_title  = ?,
+                    profile_image    = ?,
+                    updated_at       = NOW()
+                WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param(
+            'ssssssssissssssi',
+            $full_name,
+            $title,
+            $biography,
+            $office_location,
+            $school_phone,
+            $school_email,
+            $education_history,
+            $certifications,
+            $years_experience,
+            $twitter_url,
+            $linkedin_url,
+            $responsibilities,
+            $leadership_goals,
+            $principal_title,
+            $profile_image_name,
+            $user_id
+        );
+    } else {
+        $sql = "UPDATE admin SET
+                    full_name        = ?,
+                    title            = ?,
+                    biography        = ?,
+                    office_location  = ?,
+                    school_phone     = ?,
+                    school_email     = ?,
+                    education_history= ?,
+                    certifications   = ?,
+                    years_experience = ?,
+                    twitter_url      = ?,
+                    linkedin_url     = ?,
+                    responsibilities = ?,
+                    leadership_goals = ?,
+                    principal_title  = ?,
+                    updated_at       = NOW()
+                WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param(
+            'ssssssssisssssi',
+            $full_name,
+            $title,
+            $biography,
+            $office_location,
+            $school_phone,
+            $school_email,
+            $education_history,
+            $certifications,
+            $years_experience,
+            $twitter_url,
+            $linkedin_url,
+            $responsibilities,
+            $leadership_goals,
+            $principal_title,
+            $user_id
+        );
+    }
 } else {
-    $sql = "UPDATE admin SET
-                full_name        = ?,
-                title            = ?,
-                biography        = ?,
-                office_location  = ?,
-                school_phone     = ?,
-                school_email     = ?,
-                education_history= ?,
-                certifications   = ?,
-                years_experience = ?,
-                twitter_url      = ?,
-                linkedin_url     = ?,
-                responsibilities = ?,
-                leadership_goals = ?,
-                updated_at       = NOW()
-            WHERE id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param(
-        'ssssssssissssi',
-        $full_name,
-        $title,
-        $biography,
-        $office_location,
-        $school_phone,
-        $school_email,
-        $education_history,
-        $certifications,
-        $years_experience,
-        $twitter_url,
-        $linkedin_url,
-        $responsibilities,
-        $leadership_goals,
-        $admin_id
-    );
+    // Sub-admin query - update profile_picture_type when image is uploaded
+    if ($profile_image_name !== null) {
+        $sql = "UPDATE sub_admin SET
+                    full_name        = ?,
+                    profile_image    = ?,
+                    profile_picture_type = 'upload',
+                    updated_at       = NOW()
+                WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('ssi', $full_name, $profile_image_name, $user_id);
+    } else {
+        $sql = "UPDATE sub_admin SET
+                    full_name        = ?,
+                    updated_at       = NOW()
+                WHERE id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('si', $full_name, $user_id);
+    }
 }
 
 if ($stmt->execute()) {
@@ -189,8 +232,7 @@ if ($stmt->execute()) {
     }
     echo json_encode($response);
 } else {
-    error_log('update_admin_profile.php DB error: ' . $stmt->error);
-    echo json_encode(['success' => false, 'message' => 'Database error. Please try again.']);
+    echo json_encode(['success' => false, 'message' => 'Database update failed: ' . $stmt->error]);
 }
 
 $stmt->close();

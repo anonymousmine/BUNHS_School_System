@@ -178,20 +178,22 @@ function _nav_has_new(array $mods, string $key): bool
 }
 
 // ── 6. User data helper ────────────────────────────────────────
-function roleLabel($role)
-{
-    $map = [
-        'news_admin'         => 'News Admin',
-        'announcement_admin' => 'Announcement Admin',
-        'student_admin'      => 'Student Admin',
-        'teacher_admin'      => 'Teacher Admin',
-        'club_admin'         => 'Club Admin',
-        'super_sub_admin'    => 'Super Sub-Admin',
-        'forms_admin'        => 'Forms Admin',
-    ];
-    $roles = array_map('trim', explode(',', $role ?? ''));
-    $labels = array_map(fn($r) => $map[$r] ?? ucfirst(str_replace('_', ' ', $r)), $roles);
-    return implode(', ', $labels);
+if (!function_exists('roleLabel')) {
+    function roleLabel($role)
+    {
+        $map = [
+            'news_admin'         => 'News Admin',
+            'announcement_admin' => 'Announcement Admin',
+            'student_admin'      => 'Student Admin',
+            'teacher_admin'      => 'Teacher Admin',
+            'club_admin'         => 'Club Admin',
+            'super_sub_admin'    => 'Super Sub-Admin',
+            'forms_admin'        => 'Forms Admin',
+        ];
+        $roles = array_map('trim', explode(',', $role ?? ''));
+        $labels = array_map(fn($r) => $map[$r] ?? ucfirst(str_replace('_', ' ', $r)), $roles);
+        return implode(', ', $labels);
+    }
 }
 
 function _get_user_data(mysqli $conn): array
@@ -199,6 +201,7 @@ function _get_user_data(mysqli $conn): array
     $user_data = [
         'name' => $_SESSION['username'] ?? 'Admin',
         'photo' => 'assets/img/person/school head.jpg',
+        'photo_type' => 'default',
         'role' => 'Administrator',
         'user_type' => $_SESSION['user_type'] ?? 'admin',
         'principal_title' => ''
@@ -223,18 +226,26 @@ function _get_user_data(mysqli $conn): array
                 if ($admin) {
                     $user_data['name'] = $admin['full_name'] ?? $user_data['name'];
                     if (!empty($admin['profile_image'])) {
-                        $user_data['photo'] = 'uploads/admin_profiles/' . $admin['profile_image'];
+                        $photo_path = 'uploads/admin_profiles/' . $admin['profile_image'];
+                        // Check if file exists before using it
+                        if (file_exists(__DIR__ . '/../' . $photo_path)) {
+                            $user_data['photo'] = $photo_path;
+                        }
+                        // Also set profile_image for use in admin_profile.php
+                        $user_data['profile_image'] = $admin['profile_image'];
                     }
                     $user_data['principal_title'] = $admin['principal_title'] ?? '';
                     $user_data['role'] = !empty($user_data['principal_title']) 
                         ? $user_data['principal_title'] 
                         : 'Administrator';
+                    // Admins use 'upload' type for profile photos
+                    $user_data['photo_type'] = !empty($admin['profile_image']) ? 'upload' : 'default';
                 }
             }
         } elseif ($user_type === 'sub-admin') {
             // Fetch from sub_admin table
             $stmt = $conn->prepare(
-                "SELECT full_name, profile_image, role FROM sub_admin WHERE id = ? LIMIT 1"
+                "SELECT full_name, role, registration_method, profile_picture_url, profile_picture_type, profile_image FROM sub_admin WHERE id = ? LIMIT 1"
             );
             if ($stmt) {
                 $stmt->bind_param('i', $user_id);
@@ -245,9 +256,36 @@ function _get_user_data(mysqli $conn): array
                 
                 if ($sub_admin) {
                     $user_data['name'] = $sub_admin['full_name'] ?? $user_data['name'];
-                    if (!empty($sub_admin['profile_image'])) {
-                        $user_data['photo'] = 'uploads/sub_admin_profiles/' . $sub_admin['profile_image'];
+                    
+                    // Handle profile picture based on registration method and type
+                    $profile_type = $sub_admin['profile_picture_type'] ?? 'icon';
+                    $profile_url = $sub_admin['profile_picture_url'] ?? '';
+                    $profile_img = $sub_admin['profile_image'] ?? '';
+                    
+                    if ($profile_type === 'gmail' && !empty($profile_url)) {
+                        // User registered with Gmail and has a profile URL
+                        $user_data['photo'] = $profile_url;
+                        $user_data['photo_type'] = 'external';
+                    } elseif ($profile_type === 'upload' && !empty($profile_img)) {
+                        // User uploaded custom profile picture
+                        $photo_path = 'uploads/sub_admin_profiles/' . $profile_img;
+                        // Check if file exists before using it
+                        if (file_exists(__DIR__ . '/../' . $photo_path)) {
+                            $user_data['photo'] = $photo_path;
+                            $user_data['photo_type'] = 'upload';
+                        } else {
+                            // File doesn't exist, fallback to icon
+                            $user_data['photo'] = 'icon';
+                            $user_data['photo_type'] = 'icon';
+                        }
+                        // Also set profile_image for use in admin_profile.php
+                        $user_data['profile_image'] = $profile_img;
+                    } else {
+                        // Default to icon for phone registration or no profile picture
+                        $user_data['photo'] = 'icon';
+                        $user_data['photo_type'] = 'icon';
                     }
+                    
                     // Use roleLabel function to format role
                     $user_data['role'] = roleLabel($sub_admin['role'] ?? 'news_admin');
                 }
@@ -1085,9 +1123,15 @@ if ($_embed === 'json') {
                     data-dropdown="userDropdownPanel"
                     aria-haspopup="true" aria-expanded="false" title="User menu"
                     style="display: flex; align-items: center; gap: 10px; transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
-                    <img src="<?= $assetsBase . $current_user['photo'] ?>"
-                        alt="Profile picture"
-                        style="width: 36px; height: 36px; border-radius: 8px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <?php if (($current_user['photo_type'] ?? 'default') === 'icon'): ?>
+                        <div style="width: 36px; height: 36px; border-radius: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                            <i class="fa-solid fa-user" style="color: white; font-size: 16px;"></i>
+                        </div>
+                    <?php else: ?>
+                        <img src="<?= ($current_user['photo_type'] ?? 'default') === 'external' ? $current_user['photo'] : $assetsBase . $current_user['photo'] ?>"
+                            alt="Profile picture"
+                            style="width: 36px; height: 36px; border-radius: 8px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <?php endif; ?>
                     <div class="user-info">
                         <span class="user-name"><?= htmlspecialchars($current_user['name'], ENT_QUOTES, 'UTF-8') ?></span>
                         <span class="user-role"><?= htmlspecialchars($current_user['role'], ENT_QUOTES, 'UTF-8') ?></span>
@@ -1135,9 +1179,15 @@ if ($_embed === 'json') {
 
     <a href="<?= $adminBase ?>admin_profile.php" class="profile" tabindex="0"
        style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
-        <img src="<?= $assetsBase . $current_user['photo'] ?>" 
-             alt="Profile picture"
-             style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 3px 12px rgba(0,0,0,0.15);">
+        <?php if (($current_user['photo_type'] ?? 'default') === 'icon'): ?>
+            <div style="width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 3px 12px rgba(0,0,0,0.15);">
+                <i class="fa-solid fa-user" style="color: white; font-size: 20px;"></i>
+            </div>
+        <?php else: ?>
+            <img src="<?= ($current_user['photo_type'] ?? 'default') === 'external' ? $current_user['photo'] : $assetsBase . $current_user['photo'] ?>" 
+                 alt="Profile picture"
+                 style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 3px 12px rgba(0,0,0,0.15);">
+        <?php endif; ?>
         <div class="info">
             <h4 style="margin:0; font-size:14px; font-weight:600; color:#1e293b;"><?= htmlspecialchars($current_user['name'], ENT_QUOTES, 'UTF-8') ?></h4>
             <p style="margin:2px 0 0; font-size:12px; color:#64748b; font-weight:500;"><?= htmlspecialchars($current_user['role'], ENT_QUOTES, 'UTF-8') ?></p>
@@ -1622,15 +1672,34 @@ if ($_embed === 'json') {
             }
 
             body.innerHTML = list.map(function(m) {
-                return '<a class="msg-item ' + (m.unread > 0 ? 'unread' : '') + '" href="' + esc(_NAV_API.chatUrl) + '?conv=' + parseInt(m.conv_id) + '">' +
-                    '<div class="msg-avatar">' + esc(m.avatar_letter) + '</div>' +
+                var unreadClass = m.unread > 0 ? 'unread' : '';
+                var unreadBadge = m.unread > 0 ? '<span class="msg-badge">' + m.unread + '</span>' : '';
+                
+                // Enhanced message preview with sender info and better formatting
+                var messagePreview = m.last_message || '—';
+                if (messagePreview.length > 50) {
+                    messagePreview = messagePreview.substring(0, 50) + '...';
+                }
+                
+                // Determine sender type and format accordingly
+                var senderInfo = '';
+                if (m.sender_role === 'student') {
+                    senderInfo = '<span style="color: #8a9a5b; font-size: 11px;">Student • </span>';
+                } else if (m.sender_role === 'admin') {
+                    senderInfo = '<span style="color: #3b82f6; font-size: 11px;">Admin • </span>';
+                }
+
+                return '<a class="msg-item ' + unreadClass + '" href="' + esc(_NAV_API.chatUrl) + '?conv=' + parseInt(m.conv_id) + '">' +
+                    '<div class="msg-avatar" style="background: linear-gradient(135deg, #8a9a5b, #6d7a48);">' + esc(m.avatar_letter) + '</div>' +
                     '<div class="msg-info">' +
                     '<div class="msg-name">' +
+                    '<div style="display: flex; align-items: center; gap: 6px;">' +
                     esc(m.student_name) +
-                    (m.unread > 0 ? '<span class="msg-badge">' + m.unread + '</span>' : '') +
+                    unreadBadge +
                     '</div>' +
-                    '<div class="msg-preview">' + esc(m.last_message || '—') + '</div>' +
-                    '<div class="msg-time">' + esc(m.time_ago) + '</div>' +
+                    '<div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">' + senderInfo + esc(m.time_ago) + '</div>' +
+                    '</div>' +
+                    '<div class="msg-preview" style="margin-top: 4px; font-weight: 400;">' + esc(messagePreview) + '</div>' +
                     '</div>' +
                     '</a>';
             }).join('');

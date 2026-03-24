@@ -3,14 +3,12 @@
 /**
  * chatbox.php  (student-side)
  * Enhanced: file request system, club group chats, redesigned UI.
+ * UI Redesign: Deep Forest #102C26 header, improved chat visibility
  */
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+if (session_status() === PHP_SESSION_NONE) session_start();
 require_once '../session_config.php';
 
-// Auth guard — redirect to login if no active student session
 if (!isset($_SESSION['student_id'])) {
     $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
     header('Location: index.php');
@@ -74,7 +72,6 @@ try {
     }
 }
 
-// ── PROFILE DISPLAY MODE ──────────────────────────────────────────────────────
 $login_method   = isset($db_student['login_method']) ? $db_student['login_method'] : null;
 $phone_verified = !empty($db_student['phone_verified']);
 $email_verified = !empty($db_student['email_verified']);
@@ -98,30 +95,24 @@ if ($login_method === 'email' || ($email_verified && $student_email)) {
 
 $user_verified = ($email_verified || $phone_verified || !empty($_SESSION['dash_email_verified']));
 
-// ── PROFILE PICTURE ───────────────────────────────────────────────────────────
 $nav_profile_img  = 'assets/img/person/unknown.jpg';
 $nav_profile_type = 'icon';
-
 if ($profile_display_mode === 'email') {
     if ($profile_photo) {
-        $nav_profile_img  = htmlspecialchars($profile_photo, ENT_QUOTES, 'UTF-8');
+        $nav_profile_img = htmlspecialchars($profile_photo, ENT_QUOTES, 'UTF-8');
         $nav_profile_type = 'img';
     } elseif (!empty($_SESSION['google_avatar'])) {
-        $nav_profile_img  = htmlspecialchars($_SESSION['google_avatar'], ENT_QUOTES, 'UTF-8');
+        $nav_profile_img = htmlspecialchars($_SESSION['google_avatar'], ENT_QUOTES, 'UTF-8');
         $nav_profile_type = 'img';
     }
 }
 
 switch ($profile_display_mode) {
     case 'email':
-        $nav_display_label = $student_email
-            ? htmlspecialchars($student_email, ENT_QUOTES, 'UTF-8')
-            : htmlspecialchars($student_name, ENT_QUOTES, 'UTF-8');
+        $nav_display_label = $student_email ? htmlspecialchars($student_email, ENT_QUOTES, 'UTF-8') : htmlspecialchars($student_name, ENT_QUOTES, 'UTF-8');
         break;
     case 'phone':
-        $nav_display_label = $student_phone
-            ? htmlspecialchars($student_phone, ENT_QUOTES, 'UTF-8')
-            : htmlspecialchars($student_name, ENT_QUOTES, 'UTF-8');
+        $nav_display_label = $student_phone ? htmlspecialchars($student_phone, ENT_QUOTES, 'UTF-8') : htmlspecialchars($student_name, ENT_QUOTES, 'UTF-8');
         break;
     default:
         $nav_display_label = '';
@@ -137,31 +128,60 @@ switch ($profile_display_mode) {
     <title>Messages – BUNHS Student Portal</title>
     <link rel="stylesheet" href="../admin_account/admin_assets/cs/admin_style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 
     <style>
         /* ════════════════════════════════════════════
            ROOT VARIABLES
         ════════════════════════════════════════════ */
         :root {
-            --moss: #7a8f4e;
-            --moss-dark: #5c6b38;
-            --moss-light: #adbf72;
-            --moss-ultra: rgba(122, 143, 78, .12);
-            --moss-glow: rgba(122, 143, 78, .35);
+            /* Deep Forest Palette */
+            --forest: #102C26;
+            --forest-mid: #1a4a40;
+            --forest-light: #245c50;
+            --forest-pale: rgba(16, 44, 38, .08);
+            --forest-glow: rgba(16, 44, 38, .18);
+
+            /* Accent */
+            --accent: #3db88a;
+            --accent-soft: rgba(61, 184, 138, .12);
+            --accent-border: rgba(61, 184, 138, .3);
+
+            /* Legacy alias (used in older CSS) */
+            --moss: #3db88a;
+            --moss-dark: #2a9970;
+            --moss-ultra: rgba(61, 184, 138, .1);
+
+            /* Surface */
             --sidebar-w: 280px;
-            --bg: #f2f5f0;
+            --bg: #f0f4f2;
             --surface: #ffffff;
-            --border: #e4e9de;
-            --text: #1a2010;
-            --muted: #6b7c55;
-            --shadow-sm: 0 2px 8px rgba(0, 0, 0, .06);
-            --shadow-md: 0 6px 24px rgba(0, 0, 0, .09);
-            --shadow-lg: 0 16px 48px rgba(0, 0, 0, .12);
-            --radius: 14px;
-            --radius-sm: 8px;
-            --font: 'DM Sans', sans-serif;
-            --font-display: 'Syne', sans-serif;
+            --surface2: #f5f9f7;
+            --border: #dde8e4;
+            --border2: #c8d8d3;
+
+            /* Text */
+            --text: #0d1f1b;
+            --text-2: #3a5248;
+            --muted: #6b8c82;
+
+            /* Status */
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 4px rgba(16, 44, 38, .07);
+            --shadow-md: 0 4px 20px rgba(16, 44, 38, .10);
+            --shadow-lg: 0 12px 40px rgba(16, 44, 38, .14);
+
+            /* Shape */
+            --radius: 16px;
+            --radius-sm: 10px;
+
+            /* Typography */
+            --font: 'Plus Jakarta Sans', sans-serif;
+            --font-display: 'Outfit', sans-serif;
         }
 
         *,
@@ -175,14 +195,9 @@ switch ($profile_display_mode) {
         body {
             font-family: var(--font);
             background: var(--bg);
-            background-image:
-                radial-gradient(circle at 0% 0%, rgba(122, 143, 78, .06) 0%, transparent 50%),
-                radial-gradient(circle at 100% 100%, rgba(92, 107, 56, .05) 0%, transparent 50%);
             min-height: 100vh;
             color: var(--text);
         }
-
-        /* sidebar loaded from Student_nav.php */
 
         /* ════════════════════════════════════════════
            MAIN LAYOUT
@@ -195,49 +210,78 @@ switch ($profile_display_mode) {
             flex-direction: column;
         }
 
+        /* ════════════════════════════════════════════
+           PAGE HEADER — DEEP FOREST
+        ════════════════════════════════════════════ */
         .page-header {
+            background: var(--forest);
+            border-radius: var(--radius);
+            padding: 18px 24px;
+            margin-bottom: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            box-shadow: var(--shadow-md);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .page-header::before {
+            content: '';
+            position: absolute;
+            top: -50px;
+            right: -30px;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            background: rgba(61, 184, 138, .06);
+            pointer-events: none;
         }
 
         .page-header h1 {
             font-family: var(--font-display);
-            font-size: 24px;
-            font-weight: 800;
-            color: var(--text);
+            font-size: 22px;
+            font-weight: 700;
+            color: #fff;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
 
         .page-header h1 i {
-            color: var(--moss);
-            font-size: 20px;
+            width: 38px;
+            height: 38px;
+            background: rgba(255, 255, 255, .12);
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: var(--accent);
         }
 
         .page-header p {
-            color: var(--muted);
-            font-size: 13px;
+            color: rgba(255, 255, 255, .5);
+            font-size: 12.5px;
             margin-top: 2px;
+            padding-left: 50px;
         }
 
         .header-date {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 9px 14px;
-            background: var(--surface);
-            border-radius: 10px;
-            box-shadow: var(--shadow-sm);
-            color: var(--muted);
-            font-size: 13px;
-            border: 1px solid var(--border);
+            gap: 7px;
+            padding: 8px 14px;
+            background: rgba(255, 255, 255, .1);
+            border: 1px solid rgba(255, 255, 255, .15);
+            border-radius: var(--radius-sm);
+            color: rgba(255, 255, 255, .75);
+            font-size: 12.5px;
+            white-space: nowrap;
         }
 
         .header-date i {
-            color: var(--moss);
+            color: var(--accent);
         }
 
         /* ════════════════════════════════════════════
@@ -248,7 +292,7 @@ switch ($profile_display_mode) {
             grid-template-columns: 290px 1fr;
             gap: 18px;
             flex: 1;
-            height: calc(100vh - 136px);
+            height: calc(100vh - 148px);
             min-height: 0;
         }
 
@@ -264,22 +308,23 @@ switch ($profile_display_mode) {
         }
 
         .panel-header {
-            padding: 16px 18px 10px;
+            padding: 14px 18px 10px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
             justify-content: space-between;
+            background: var(--forest);
         }
 
         .panel-header h3 {
             font-family: var(--font-display);
-            font-size: 14px;
+            font-size: 13.5px;
             font-weight: 700;
-            color: var(--text);
+            color: #fff;
         }
 
         .panel-badge {
-            background: var(--moss);
+            background: var(--accent);
             color: #fff;
             font-size: 10px;
             font-weight: 700;
@@ -290,6 +335,7 @@ switch ($profile_display_mode) {
         .panel-search {
             padding: 10px 14px;
             border-bottom: 1px solid var(--border);
+            background: var(--surface2);
         }
 
         .panel-search input {
@@ -300,12 +346,13 @@ switch ($profile_display_mode) {
             font-size: 13px;
             outline: none;
             font-family: var(--font);
-            background: var(--bg);
+            background: var(--surface);
             transition: border-color .15s;
+            color: var(--text);
         }
 
         .panel-search input:focus {
-            border-color: var(--moss);
+            border-color: var(--forest);
         }
 
         .contact-list {
@@ -318,11 +365,10 @@ switch ($profile_display_mode) {
         }
 
         .contact-list::-webkit-scrollbar-thumb {
-            background: var(--border);
+            background: var(--border2);
             border-radius: 3px;
         }
 
-        /* Section label inside list */
         .conv-section-label {
             font-size: 10px;
             font-weight: 700;
@@ -330,6 +376,7 @@ switch ($profile_display_mode) {
             text-transform: uppercase;
             color: var(--muted);
             padding: 10px 18px 4px;
+            background: var(--surface2);
         }
 
         .conv-item {
@@ -338,21 +385,20 @@ switch ($profile_display_mode) {
             gap: 11px;
             padding: 12px 16px;
             cursor: pointer;
-            border-bottom: 1px solid #f5f8f2;
-            transition: background .15s;
+            border-bottom: 1px solid #f0f5f2;
+            transition: background .14s;
             position: relative;
         }
 
         .conv-item:hover {
-            background: var(--moss-ultra);
+            background: var(--accent-soft);
         }
 
         .conv-item.active {
-            background: var(--moss-ultra);
-            border-left: 3px solid var(--moss);
+            background: var(--forest-pale);
+            border-left: 3px solid var(--forest);
         }
 
-        /* Admin avatar */
         .conv-avatar {
             width: 42px;
             height: 42px;
@@ -367,13 +413,13 @@ switch ($profile_display_mode) {
         }
 
         .conv-avatar.admin-av {
-            background: linear-gradient(135deg, var(--moss), var(--moss-dark));
+            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
+            box-shadow: 0 3px 10px rgba(16, 44, 38, .2);
         }
 
-        /* Club avatar — distinct style */
         .conv-avatar.club-av {
-            background: linear-gradient(135deg, #2d6a4f, #1b4332);
-            border: 2px solid rgba(122, 143, 78, .4);
+            background: linear-gradient(135deg, #2d7a60, #1a4a38);
+            border: 2px solid rgba(61, 184, 138, .3);
             position: relative;
         }
 
@@ -382,9 +428,9 @@ switch ($profile_display_mode) {
             position: absolute;
             bottom: -2px;
             right: -2px;
-            width: 12px;
-            height: 12px;
-            background: var(--moss-light);
+            width: 11px;
+            height: 11px;
+            background: var(--accent);
             border-radius: 50%;
             border: 2px solid var(--surface);
         }
@@ -405,15 +451,15 @@ switch ($profile_display_mode) {
         }
 
         .club-tag {
-            background: var(--moss-ultra);
-            color: var(--moss);
+            background: var(--accent-soft);
+            color: var(--forest);
             font-size: 9px;
             font-weight: 700;
             letter-spacing: .5px;
             text-transform: uppercase;
             padding: 1px 6px;
             border-radius: 20px;
-            border: 1px solid rgba(122, 143, 78, .2);
+            border: 1px solid var(--accent-border);
         }
 
         .conv-preview {
@@ -426,13 +472,13 @@ switch ($profile_display_mode) {
 
         .conv-time {
             font-size: 10px;
-            color: #aaa;
+            color: #aab;
             white-space: nowrap;
             margin-left: 4px;
         }
 
         .conv-unread {
-            background: var(--moss);
+            background: var(--forest);
             color: #fff;
             font-size: 10px;
             font-weight: 700;
@@ -456,56 +502,56 @@ switch ($profile_display_mode) {
             overflow: hidden;
         }
 
-        /* Header */
+        /* Header — deep forest */
         .chat-header {
             padding: 14px 20px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
             gap: 13px;
-            background: linear-gradient(90deg, rgba(122, 143, 78, .04), transparent);
+            background: var(--forest);
         }
 
         .chat-header-avatar {
-            width: 44px;
-            height: 44px;
+            width: 42px;
+            height: 42px;
             border-radius: 11px;
-            background: linear-gradient(135deg, var(--moss), var(--moss-dark));
+            background: rgba(255, 255, 255, .15);
+            border: 2px solid rgba(255, 255, 255, .18);
             display: flex;
             align-items: center;
             justify-content: center;
             color: #fff;
             font-weight: 700;
-            font-size: 17px;
+            font-size: 16px;
         }
 
         .chat-header-info h3 {
             font-size: 15px;
             font-weight: 700;
-            color: var(--text);
+            color: #fff;
         }
 
         .online-dot {
             display: inline-block;
-            width: 8px;
-            height: 8px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
-            background: #22c55e;
+            background: var(--accent);
             margin-right: 5px;
         }
 
         .chat-header-status {
             font-size: 12px;
-            color: var(--muted);
+            color: rgba(255, 255, 255, .55);
             margin-top: 1px;
         }
 
-        /* Club header extra badge */
         .club-header-badge {
             margin-left: auto;
-            background: var(--moss-ultra);
-            color: var(--moss);
-            border: 1px solid rgba(122, 143, 78, .25);
+            background: rgba(255, 255, 255, .12);
+            color: rgba(255, 255, 255, .8);
+            border: 1px solid rgba(255, 255, 255, .2);
             padding: 4px 12px;
             border-radius: 20px;
             font-size: 11px;
@@ -523,7 +569,8 @@ switch ($profile_display_mode) {
             display: flex;
             flex-direction: column;
             gap: 12px;
-            background: #f6f9f2;
+            background: #f4f8f6;
+            background-image: radial-gradient(circle at 5% 10%, rgba(16, 44, 38, .025) 0%, transparent 40%);
         }
 
         .chat-messages::-webkit-scrollbar {
@@ -531,7 +578,7 @@ switch ($profile_display_mode) {
         }
 
         .chat-messages::-webkit-scrollbar-thumb {
-            background: var(--border);
+            background: var(--border2);
             border-radius: 4px;
         }
 
@@ -545,7 +592,7 @@ switch ($profile_display_mode) {
         }
 
         .date-sep span {
-            background: #f6f9f2;
+            background: #f4f8f6;
             padding: 0 12px;
             position: relative;
             z-index: 1;
@@ -565,7 +612,7 @@ switch ($profile_display_mode) {
         .msg-row {
             display: flex;
             gap: 9px;
-            max-width: 74%;
+            max-width: 76%;
             animation: bubbleIn .2s ease;
         }
 
@@ -598,11 +645,12 @@ switch ($profile_display_mode) {
             color: #fff;
             font-weight: 700;
             font-size: 12px;
-            background: linear-gradient(135deg, var(--moss), var(--moss-dark));
+            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
+            box-shadow: 0 2px 8px rgba(16, 44, 38, .2);
         }
 
         .msg-row.sent .msg-av {
-            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            background: linear-gradient(135deg, var(--accent), #2a9970);
         }
 
         .msg-bubble {
@@ -614,10 +662,11 @@ switch ($profile_display_mode) {
         }
 
         .msg-row.sent .msg-bubble {
-            background: linear-gradient(135deg, var(--moss), var(--moss-dark));
+            background: var(--forest);
             color: #fff;
             border-radius: 14px 14px 4px 14px;
             border: none;
+            box-shadow: 0 3px 12px rgba(16, 44, 38, .22);
         }
 
         .msg-text {
@@ -636,19 +685,19 @@ switch ($profile_display_mode) {
         }
 
         .msg-row.sent .msg-time {
-            color: rgba(255, 255, 255, .65);
+            color: rgba(255, 255, 255, .5);
             justify-content: flex-end;
         }
 
-        /* File request bubble — special styling */
+        /* File request bubble */
         .msg-bubble.file-req-bubble {
-            background: #fffdf5;
-            border: 1.5px solid #f0e09a;
+            background: #fffdf0;
+            border: 1.5px solid #ffe58a;
             border-radius: 14px 14px 14px 4px;
         }
 
         .msg-row.sent .msg-bubble.file-req-bubble {
-            background: linear-gradient(135deg, #5c6b38, var(--moss-dark));
+            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
             border: none;
         }
 
@@ -656,14 +705,14 @@ switch ($profile_display_mode) {
             display: flex;
             align-items: center;
             gap: 7px;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
         }
 
         .file-req-icon {
             width: 28px;
             height: 28px;
             border-radius: 7px;
-            background: linear-gradient(135deg, var(--moss), var(--moss-dark));
+            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
             display: flex;
             align-items: center;
             justify-content: center;
@@ -675,11 +724,11 @@ switch ($profile_display_mode) {
             font-size: 11px;
             font-weight: 700;
             letter-spacing: .3px;
-            color: var(--moss);
+            color: var(--forest);
         }
 
         .msg-row.sent .file-req-label {
-            color: rgba(255, 255, 255, .8);
+            color: rgba(255, 255, 255, .75);
         }
 
         .file-req-name {
@@ -693,7 +742,6 @@ switch ($profile_display_mode) {
             opacity: .75;
         }
 
-        /* Status pill */
         .req-status-pill {
             display: inline-flex;
             align-items: center;
@@ -720,14 +768,13 @@ switch ($profile_display_mode) {
             color: #7f1d1d;
         }
 
-        /* File download button (when approved) */
         .file-download-btn {
             display: inline-flex;
             align-items: center;
             gap: 7px;
             margin-top: 8px;
             padding: 7px 14px;
-            background: var(--moss);
+            background: var(--forest);
             color: #fff;
             border: none;
             border-radius: 8px;
@@ -739,9 +786,9 @@ switch ($profile_display_mode) {
         }
 
         .file-download-btn:hover {
-            background: var(--moss-dark);
+            background: var(--forest-mid);
             transform: translateY(-1px);
-            box-shadow: 0 4px 12px var(--moss-glow);
+            box-shadow: 0 4px 12px var(--forest-glow);
         }
 
         /* ════════════════════════════════════════════
@@ -760,13 +807,12 @@ switch ($profile_display_mode) {
             gap: 10px;
         }
 
-        /* File request button */
         .file-req-btn {
             width: 40px;
             height: 40px;
             border: 1.5px solid var(--border);
-            border-radius: 10px;
-            background: var(--bg);
+            border-radius: var(--radius-sm);
+            background: var(--surface2);
             color: var(--muted);
             font-size: 15px;
             cursor: pointer;
@@ -778,19 +824,13 @@ switch ($profile_display_mode) {
             position: relative;
         }
 
-        .file-req-btn:hover {
-            border-color: var(--moss);
-            color: var(--moss);
-            background: var(--moss-ultra);
-        }
-
+        .file-req-btn:hover,
         .file-req-btn.active {
-            border-color: var(--moss);
-            color: var(--moss);
-            background: var(--moss-ultra);
+            border-color: var(--forest);
+            color: var(--forest);
+            background: var(--forest-pale);
         }
 
-        /* Dropdown upward */
         .file-dropdown {
             position: absolute;
             bottom: calc(100% + 10px);
@@ -814,7 +854,7 @@ switch ($profile_display_mode) {
         }
 
         .file-dropdown-header {
-            padding: 12px 16px;
+            padding: 11px 16px;
             border-bottom: 1px solid var(--border);
             font-weight: 700;
             font-size: 12px;
@@ -823,10 +863,13 @@ switch ($profile_display_mode) {
             display: flex;
             align-items: center;
             gap: 7px;
+            background: var(--forest);
+            border-radius: var(--radius) var(--radius) 0 0;
+            color: #fff;
         }
 
         .file-dropdown-header i {
-            color: var(--moss);
+            color: var(--accent);
         }
 
         .file-dropdown-body {
@@ -839,7 +882,7 @@ switch ($profile_display_mode) {
         }
 
         .file-dropdown-body::-webkit-scrollbar-thumb {
-            background: var(--border);
+            background: var(--border2);
             border-radius: 3px;
         }
 
@@ -850,7 +893,7 @@ switch ($profile_display_mode) {
             padding: 11px 16px;
             cursor: pointer;
             transition: background .14s;
-            border-bottom: 1px solid #f5f8f2;
+            border-bottom: 1px solid #f0f5f2;
         }
 
         .file-dropdown-item:last-child {
@@ -858,7 +901,7 @@ switch ($profile_display_mode) {
         }
 
         .file-dropdown-item:hover {
-            background: var(--moss-ultra);
+            background: var(--accent-soft);
         }
 
         .file-dropdown-item-icon {
@@ -926,7 +969,6 @@ switch ($profile_display_mode) {
             opacity: .4;
         }
 
-        /* Reason input overlay (below message field) */
         .reason-bar {
             display: none;
             align-items: center;
@@ -943,7 +985,7 @@ switch ($profile_display_mode) {
         .reason-bar-label {
             font-size: 11px;
             font-weight: 700;
-            color: var(--moss);
+            color: var(--forest);
             white-space: nowrap;
         }
 
@@ -959,7 +1001,7 @@ switch ($profile_display_mode) {
         }
 
         .reason-bar input:focus {
-            border-color: var(--moss);
+            border-color: var(--forest);
         }
 
         .reason-cancel {
@@ -983,7 +1025,6 @@ switch ($profile_display_mode) {
             background: #fee2e2;
         }
 
-        /* Message text input */
         .msg-input {
             flex: 1;
             padding: 11px 16px;
@@ -993,21 +1034,23 @@ switch ($profile_display_mode) {
             font-family: var(--font);
             outline: none;
             transition: border-color .15s, box-shadow .15s;
+            color: var(--text);
+            background: var(--surface2);
         }
 
         .msg-input:focus {
-            border-color: var(--moss);
-            box-shadow: 0 0 0 3px rgba(122, 143, 78, .12);
+            border-color: var(--forest);
+            box-shadow: 0 0 0 3px rgba(16, 44, 38, .08);
+            background: var(--surface);
         }
 
-        /* Send button */
         .send-btn {
             height: 40px;
             padding: 0 18px;
-            background: linear-gradient(135deg, var(--moss), var(--moss-dark));
+            background: var(--forest);
             color: #fff;
             border: none;
-            border-radius: 10px;
+            border-radius: var(--radius-sm);
             font-size: 13.5px;
             font-weight: 600;
             font-family: var(--font);
@@ -1016,11 +1059,13 @@ switch ($profile_display_mode) {
             align-items: center;
             gap: 7px;
             transition: all .18s;
+            box-shadow: 0 3px 12px rgba(16, 44, 38, .22);
         }
 
         .send-btn:hover {
+            background: var(--forest-mid);
             transform: translateY(-2px);
-            box-shadow: 0 6px 18px var(--moss-glow);
+            box-shadow: 0 6px 18px rgba(16, 44, 38, .3);
         }
 
         .send-btn:disabled {
@@ -1053,6 +1098,7 @@ switch ($profile_display_mode) {
             transition: transform .3s ease;
             border-left: 4px solid transparent;
             font-size: 13.5px;
+            min-width: 260px;
         }
 
         .toast.show {
@@ -1092,14 +1138,14 @@ switch ($profile_display_mode) {
             font-size: 13.5px;
         }
 
-        .spin {
-            animation: spin .8s linear infinite;
-        }
-
         @keyframes spin {
             to {
                 transform: rotate(360deg);
             }
+        }
+
+        .spin {
+            animation: spin .8s linear infinite;
         }
 
         /* ════════════════════════════════════════════
@@ -1131,11 +1177,11 @@ switch ($profile_display_mode) {
     data-profile-label="<?php echo $nav_display_label; ?>"
     data-user-verified="<?php echo $user_verified ? '1' : '0'; ?>">
 
-    <!-- ── STUDENT NAV (loaded via JS fetch at bottom) ── -->
     <div id="nav-placeholder"></div>
 
-    <!-- ── Main content ── -->
     <main class="main-content">
+
+        <!-- ══ HEADER — DEEP FOREST ═══════════════════════════════ -->
         <header class="page-header">
             <div>
                 <h1><i class="fas fa-comments"></i> Messages</h1>
@@ -1148,7 +1194,7 @@ switch ($profile_display_mode) {
         </header>
 
         <div class="chat-wrap">
-            <!-- ── Left panel: contacts + clubs ── -->
+            <!-- ── Left panel ── -->
             <div class="chat-panel">
                 <div class="panel-header">
                     <h3>Conversations</h3>
@@ -1157,7 +1203,6 @@ switch ($profile_display_mode) {
                     <input type="text" id="convSearch" placeholder="Search chats…" oninput="filterConvs(this.value)">
                 </div>
                 <div class="contact-list" id="contactList">
-                    <!-- Admin contact (always present) -->
                     <div class="conv-section-label">Direct</div>
                     <div class="conv-item active" id="adminConvItem" onclick="openAdminChat()">
                         <div class="conv-avatar admin-av">AD</div>
@@ -1166,7 +1211,6 @@ switch ($profile_display_mode) {
                             <div class="conv-preview" id="adminPreview">Loading…</div>
                         </div>
                     </div>
-                    <!-- Club chats will be injected here -->
                     <div id="clubChatsSection"></div>
                 </div>
             </div>
@@ -1194,21 +1238,20 @@ switch ($profile_display_mode) {
                 </div>
 
                 <div class="chat-input-wrap">
-                    <!-- File dropdown (opens upward) -->
                     <div class="file-dropdown" id="fileDropdown">
                         <div class="file-dropdown-header">
                             <i class="fas fa-lock"></i> Request a Restricted File
                         </div>
                         <div class="file-dropdown-body" id="fileDropdownBody">
                             <div class="file-dropdown-empty">
-                                <i class="fas fa-spinner spin"></i>
-                                Loading files…
+                                <i class="fas fa-spinner spin"></i> Loading files…
                             </div>
                         </div>
                     </div>
 
                     <div class="input-row">
-                        <button class="file-req-btn" id="fileReqBtn" title="Request a restricted file" onclick="toggleFileDropdown()" style="display:none;">
+                        <button class="file-req-btn" id="fileReqBtn" title="Request a restricted file"
+                            onclick="toggleFileDropdown()" style="display:none;">
                             <i class="fas fa-paperclip"></i>
                         </button>
                         <input type="text" class="msg-input" id="msgInput"
@@ -1219,7 +1262,6 @@ switch ($profile_display_mode) {
                         </button>
                     </div>
 
-                    <!-- Reason bar (shown when a file is selected) -->
                     <div class="reason-bar" id="reasonBar">
                         <span class="reason-bar-label"><i class="fas fa-file-lock"></i> Reason:</span>
                         <input type="text" id="reasonInput"
@@ -1237,28 +1279,23 @@ switch ($profile_display_mode) {
     <div class="toast-zone" id="toastZone"></div>
 
     <script>
-        /* ════════════════════════════════════════════
-   CONFIG & STATE
-════════════════════════════════════════════ */
+        /* ════════ CONFIG & STATE ════════ */
         const API = '<?= htmlspecialchars($chatApiPath,    ENT_QUOTES, "UTF-8") ?>';
         const FILE_REQ_API = '<?= htmlspecialchars($fileRequestApi, ENT_QUOTES, "UTF-8") ?>';
         const CLUB_API = '<?= htmlspecialchars($clubChatApi,    ENT_QUOTES, "UTF-8") ?>';
         const STUDENT_INIT = '<?= $initials ?>';
 
-        let convId = 0; // admin conversation id
-        let activeChatId = 0; // currently open conv/club id
-        let activeMode = 'admin'; // 'admin' | 'club'
+        let convId = 0;
+        let activeChatId = 0;
+        let activeMode = 'admin';
         let pollTimer = null;
-        let selectedFile = null; // { id, title, file_type }
-        let allConvItems = [];
+        let selectedFile = null;
 
-        /* ════════════════════════════════════════════
-           INIT
-        ════════════════════════════════════════════ */
+        /* ════════ INIT ════════ */
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('currentDate').textContent =
                 new Date().toLocaleDateString('en-US', {
-                    weekday: 'long',
+                    weekday: 'short',
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric'
@@ -1271,9 +1308,7 @@ switch ($profile_display_mode) {
             });
         });
 
-        /* ════════════════════════════════════════════
-           ADMIN CHAT
-        ════════════════════════════════════════════ */
+        /* ════════ ADMIN CHAT ════════ */
         async function ensureAdminConv() {
             const fd = new FormData();
             fd.append('action', 'get_student_conv');
@@ -1289,13 +1324,12 @@ switch ($profile_display_mode) {
             activeMode = 'admin';
             activeChatId = convId;
 
-            // UI updates
             document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
             document.getElementById('adminConvItem').classList.add('active');
             document.getElementById('chatName').textContent = 'Admin Department';
             document.getElementById('chatAvatar').textContent = 'AD';
             document.getElementById('clubHeaderBadge').style.display = 'none';
-            document.getElementById('fileReqBtn').style.display = ''; // show file request btn
+            document.getElementById('fileReqBtn').style.display = '';
 
             clearInterval(pollTimer);
             loadAdminMessages();
@@ -1328,9 +1362,7 @@ switch ($profile_display_mode) {
             });
         }
 
-        /* ════════════════════════════════════════════
-           CLUB CHATS
-        ════════════════════════════════════════════ */
+        /* ════════ CLUB CHATS ════════ */
         async function loadClubChats() {
             const fd = new FormData();
             fd.append('action', 'get_student_clubs');
@@ -1344,39 +1376,30 @@ switch ($profile_display_mode) {
             const section = document.getElementById('clubChatsSection');
             section.innerHTML = `<div class="conv-section-label">Club Chats</div>` +
                 data.clubs.map(club => `
-            <div class="conv-item" id="club_${club.id}"
-                 onclick="openClubChat(${club.id}, '${esc(club.name)}', ${club.member_count})">
-                <div class="conv-avatar club-av">
-                    ${esc(club.name.charAt(0).toUpperCase())}
-                </div>
-                <div class="conv-info">
-                    <div class="conv-name">
-                        ${esc(club.name)}
-                        <span class="club-tag">Club</span>
+                <div class="conv-item" id="club_${club.id}"
+                     onclick="openClubChat(${club.id}, '${esc(club.name)}', ${club.member_count})">
+                    <div class="conv-avatar club-av">${esc(club.name.charAt(0).toUpperCase())}</div>
+                    <div class="conv-info">
+                        <div class="conv-name">${esc(club.name)} <span class="club-tag">Club</span></div>
+                        <div class="conv-preview">${esc(club.last_message || 'No messages yet')}</div>
                     </div>
-                    <div class="conv-preview">${esc(club.last_message || 'No messages yet')}</div>
-                </div>
-                <span class="conv-time">${esc(club.last_time || '')}</span>
-                ${club.unread > 0 ? `<span class="conv-unread">${club.unread}</span>` : ''}
-            </div>
-        `).join('');
+                    <span class="conv-time">${esc(club.last_time || '')}</span>
+                    ${club.unread > 0 ? `<span class="conv-unread">${club.unread}</span>` : ''}
+                </div>`).join('');
         }
 
         function openClubChat(clubId, clubName, memberCount) {
             activeMode = 'club';
             activeChatId = clubId;
-
             document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
             const el = document.getElementById('club_' + clubId);
             if (el) el.classList.add('active');
-
             document.getElementById('chatName').textContent = clubName;
             document.getElementById('chatAvatar').textContent = clubName.charAt(0).toUpperCase();
             document.getElementById('clubHeaderBadge').style.display = '';
             document.getElementById('clubMemberCount').textContent = memberCount + ' members';
-            document.getElementById('fileReqBtn').style.display = 'none'; // no file requests in club chat
+            document.getElementById('fileReqBtn').style.display = 'none';
             cancelFileRequest();
-
             clearInterval(pollTimer);
             loadClubMessages(clubId);
             pollTimer = setInterval(() => loadClubMessages(clubId), 5000);
@@ -1395,18 +1418,16 @@ switch ($profile_display_mode) {
             renderMessages(data.messages, 'club');
         }
 
-        /* ════════════════════════════════════════════
-           RENDER MESSAGES
-        ════════════════════════════════════════════ */
+        /* ════════ RENDER MESSAGES ════════ */
         function renderMessages(msgs, mode) {
             const box = document.getElementById('chatMessages');
             const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 60;
 
-            if (!msgs.length) {
-                box.innerHTML = `<div style="text-align:center;padding:48px;color:#aaa;">
-            <i class="fas fa-comments" style="font-size:36px;opacity:.25;display:block;margin-bottom:10px;"></i>
-            No messages yet. Say hello!
-        </div>`;
+            if (!msgs || !msgs.length) {
+                box.innerHTML = `<div style="text-align:center;padding:48px;color:var(--muted);">
+                    <i class="fas fa-comments" style="font-size:36px;opacity:.2;display:block;margin-bottom:10px;color:var(--forest);"></i>
+                    No messages yet. Say hello!
+                </div>`;
                 return;
             }
 
@@ -1424,27 +1445,23 @@ switch ($profile_display_mode) {
                     divider = `<div class="date-sep"><span>${formatDateLabel(msgDate)}</span></div>`;
                 }
 
-                /* Check if this is a file request message */
-                if (m.message_type === 'file_request') {
-                    return divider + buildFileReqBubble(m, isMine, init);
-                }
+                if (m.message_type === 'file_request') return divider + buildFileReqBubble(m, isMine, init);
 
                 return `${divider}
-        <div class="msg-row ${isMine ? 'sent' : ''}">
-            <div class="msg-av">${esc(init)}</div>
-            <div>
-                ${mode === 'club' && !isMine ? `<div style="font-size:11px;color:var(--muted);margin-bottom:3px;padding-left:2px;">${esc(m.sender_name)}</div>` : ''}
-                <div class="msg-bubble">
-                    <div class="msg-text">${esc(m.message)}</div>
-                </div>
-                <div class="msg-time"><i class="far fa-clock"></i>${esc(m.time_label)}</div>
-            </div>
-        </div>`;
+<div class="msg-row ${isMine ? 'sent' : ''}">
+    <div class="msg-av">${esc(init)}</div>
+    <div>
+        ${mode === 'club' && !isMine ? `<div style="font-size:11px;color:var(--muted);margin-bottom:3px;padding-left:2px;">${esc(m.sender_name)}</div>` : ''}
+        <div class="msg-bubble">
+            <div class="msg-text">${esc(m.message)}</div>
+        </div>
+        <div class="msg-time"><i class="far fa-clock"></i>${esc(m.time_label)}</div>
+    </div>
+</div>`;
             }).join('');
 
             if (atBottom) box.scrollTop = box.scrollHeight;
 
-            // Update preview
             if (mode === 'admin' && msgs.length) {
                 const last = msgs[msgs.length - 1];
                 document.getElementById('adminPreview').textContent = (last.message || '').substring(0, 45);
@@ -1473,40 +1490,35 @@ switch ($profile_display_mode) {
             const fileTypeIcon = getFileIcon(m.file_type || '');
 
             const downloadBtn = (m.request_status === 'approved' && m.download_url) ? `
-        <a href="${esc(m.download_url)}" class="file-download-btn" target="_blank">
-            <i class="fas fa-download"></i> Download File
-        </a>` : '';
+<a href="${esc(m.download_url)}" class="file-download-btn" target="_blank">
+    <i class="fas fa-download"></i> Download File
+</a>` : '';
 
             return `
-    <div class="msg-row ${isMine ? 'sent' : ''}">
-        <div class="msg-av">${esc(init)}</div>
-        <div>
-            <div class="msg-bubble file-req-bubble">
-                <div class="file-req-header">
-                    <div class="file-req-icon"><i class="fas ${fileTypeIcon}"></i></div>
-                    <span class="file-req-label">FILE REQUEST</span>
-                </div>
-                <div class="file-req-name">${esc(m.file_name)}</div>
-                <div class="file-req-reason">${esc(m.message)}</div>
-                <div><span class="req-status-pill ${s.cls}">
-                    <i class="fas ${s.icon}"></i>${s.label}
-                </span></div>
-                ${downloadBtn}
+<div class="msg-row ${isMine ? 'sent' : ''}">
+    <div class="msg-av">${esc(init)}</div>
+    <div>
+        <div class="msg-bubble file-req-bubble">
+            <div class="file-req-header">
+                <div class="file-req-icon"><i class="fas ${fileTypeIcon}"></i></div>
+                <span class="file-req-label">FILE REQUEST</span>
             </div>
-            <div class="msg-time"><i class="far fa-clock"></i>${esc(m.time_label)}</div>
+            <div class="file-req-name">${esc(m.file_name)}</div>
+            <div class="file-req-reason">${esc(m.message)}</div>
+            <div><span class="req-status-pill ${s.cls}"><i class="fas ${s.icon}"></i>${s.label}</span></div>
+            ${downloadBtn}
         </div>
-    </div>`;
+        <div class="msg-time"><i class="far fa-clock"></i>${esc(m.time_label)}</div>
+    </div>
+</div>`;
         }
 
-        /* ════════════════════════════════════════════
-           SEND MESSAGE
-        ════════════════════════════════════════════ */
+        /* ════════ SEND MESSAGE ════════ */
         async function sendMsg() {
             const msgInput = document.getElementById('msgInput');
             const reasonInput = document.getElementById('reasonInput');
             const sendBtn = document.getElementById('sendBtn');
 
-            /* File request mode */
             if (selectedFile) {
                 const reason = reasonInput.value.trim();
                 if (!reason) {
@@ -1522,7 +1534,6 @@ switch ($profile_display_mode) {
 
             const text = msgInput.value.trim();
             if (!text) return;
-
             sendBtn.disabled = true;
             msgInput.value = '';
 
@@ -1531,7 +1542,6 @@ switch ($profile_display_mode) {
                 fd.append('action', 'send_message');
                 fd.append('message', text);
                 if (convId) fd.append('conversation_id', convId);
-
                 const res = await fetch(API, {
                     method: 'POST',
                     body: fd
@@ -1550,7 +1560,6 @@ switch ($profile_display_mode) {
                 fd.append('action', 'send_club_message');
                 fd.append('club_id', activeChatId);
                 fd.append('message', text);
-
                 const res = await fetch(CLUB_API, {
                     method: 'POST',
                     body: fd
@@ -1572,13 +1581,11 @@ switch ($profile_display_mode) {
             fd.append('file_id', file.id);
             fd.append('reason', reason);
             fd.append('conversation_id', convId);
-
             const res = await fetch(FILE_REQ_API, {
                 method: 'POST',
                 body: fd
             });
             const data = await res.json();
-
             if (data.success) {
                 cancelFileRequest();
                 toast('File request sent! Waiting for admin approval.', 'success');
@@ -1588,9 +1595,7 @@ switch ($profile_display_mode) {
             }
         }
 
-        /* ════════════════════════════════════════════
-           RESTRICTED FILE DROPDOWN
-        ════════════════════════════════════════════ */
+        /* ════════ FILE DROPDOWN ════════ */
         async function loadRestrictedFiles() {
             const fd = new FormData();
             fd.append('action', 'get_restricted_files');
@@ -1600,26 +1605,20 @@ switch ($profile_display_mode) {
             });
             const data = await res.json();
             const body = document.getElementById('fileDropdownBody');
-
             if (!data.success || !data.files.length) {
-                body.innerHTML = `<div class="file-dropdown-empty">
-            <i class="fas fa-folder-open"></i>No restricted files available.</div>`;
+                body.innerHTML = `<div class="file-dropdown-empty"><i class="fas fa-folder-open"></i>No restricted files available.</div>`;
                 return;
             }
-
             body.innerHTML = data.files.map(f => `
-        <div class="file-dropdown-item" onclick="selectFile(${f.id}, '${esc(f.title)}', '${esc(f.file_type)}')">
-            <div class="file-dropdown-item-icon ${getFileIconClass(f.file_type)}">
-                <i class="fas ${getFileIcon(f.file_type)}"></i>
-            </div>
-            <div>
-                <div class="file-dropdown-item-name">${esc(f.title)}</div>
-                <div class="file-dropdown-item-cat">
-                    <i class="fas fa-tag"></i>${esc(f.category)}
+            <div class="file-dropdown-item" onclick="selectFile(${f.id}, '${esc(f.title)}', '${esc(f.file_type)}')">
+                <div class="file-dropdown-item-icon ${getFileIconClass(f.file_type)}">
+                    <i class="fas ${getFileIcon(f.file_type)}"></i>
                 </div>
-            </div>
-        </div>
-    `).join('');
+                <div>
+                    <div class="file-dropdown-item-name">${esc(f.title)}</div>
+                    <div class="file-dropdown-item-cat"><i class="fas fa-tag"></i>${esc(f.category)}</div>
+                </div>
+            </div>`).join('');
         }
 
         function toggleFileDropdown() {
@@ -1627,8 +1626,6 @@ switch ($profile_display_mode) {
             const btn = document.getElementById('fileReqBtn');
             dd.classList.toggle('open');
             btn.classList.toggle('active');
-
-            // Close on outside click
             if (dd.classList.contains('open')) {
                 setTimeout(() => {
                     document.addEventListener('click', closeDropdownOutside, {
@@ -1653,20 +1650,14 @@ switch ($profile_display_mode) {
                 title,
                 file_type: fileType
             };
-            const dd = document.getElementById('fileDropdown');
-            const btn = document.getElementById('fileReqBtn');
-            dd.classList.remove('open');
-            btn.classList.remove('active');
-
-            // Pre-fill message input with file name tag
+            document.getElementById('fileDropdown').classList.remove('open');
+            document.getElementById('fileReqBtn').classList.remove('active');
             const msgInput = document.getElementById('msgInput');
             msgInput.value = `📄 Requesting: ${title}`;
             msgInput.disabled = true;
-
-            // Show reason bar
             document.getElementById('reasonBar').classList.add('show');
             document.getElementById('reasonInput').focus();
-            btn.style.color = 'var(--moss)';
+            document.getElementById('fileReqBtn').style.color = 'var(--forest)';
         }
 
         function cancelFileRequest() {
@@ -1677,9 +1668,7 @@ switch ($profile_display_mode) {
             document.getElementById('reasonBar').classList.remove('show');
         }
 
-        /* ════════════════════════════════════════════
-           SEARCH FILTER
-        ════════════════════════════════════════════ */
+        /* ════════ SEARCH FILTER ════════ */
         function filterConvs(q) {
             q = q.toLowerCase();
             document.querySelectorAll('.conv-item').forEach(el => {
@@ -1688,17 +1677,12 @@ switch ($profile_display_mode) {
             });
         }
 
-        /* ════════════════════════════════════════════
-           HELPERS
-        ════════════════════════════════════════════ */
+        /* ════════ HELPERS ════════ */
         function esc(s) {
             if (s == null) return '';
             return String(s)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         function formatDateLabel(d) {
@@ -1735,8 +1719,7 @@ switch ($profile_display_mode) {
             const zone = document.getElementById('toastZone');
             const t = document.createElement('div');
             t.className = `toast ${type}`;
-            t.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i>
-                   <span>${msg}</span>`;
+            t.innerHTML = `<i class="fas ${type==='success'?'fa-check-circle':'fa-exclamation-circle'}"></i><span>${msg}</span>`;
             zone.appendChild(t);
             requestAnimationFrame(() => t.classList.add('show'));
             setTimeout(() => {
@@ -1745,19 +1728,12 @@ switch ($profile_display_mode) {
             }, 3500);
         }
     </script>
-    <!-- ══ STUDENT NAV LOADER ══════════════════════════════════════════════
-         Fetches Student_nav.php, resolves all data-nav-href links relative
-         to the current page directory, then injects into #nav-placeholder.
-    ══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- ══ STUDENT NAV LOADER ══ -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             var placeholder = document.getElementById('nav-placeholder');
-            if (!placeholder) {
-                console.warn('[NavLoader] #nav-placeholder not found');
-                return;
-            }
-
-            // Compute the directory of the current page so relative links resolve correctly
+            if (!placeholder) return;
             var pageDir = window.location.pathname.replace(/\/[^\/]*$/, '/');
 
             fetch('Student_nav.php')
@@ -1768,8 +1744,6 @@ switch ($profile_display_mode) {
                 .then(function(html) {
                     var tmp = document.createElement('div');
                     tmp.innerHTML = html;
-
-                    // ── Resolve data-nav-href → real href using current page directory ──
                     tmp.querySelectorAll('[data-nav-href]').forEach(function(el) {
                         var rel = el.getAttribute('data-nav-href');
                         if (rel.startsWith('../')) {
@@ -1780,41 +1754,25 @@ switch ($profile_display_mode) {
                         }
                         el.removeAttribute('data-nav-href');
                     });
-
-                    // ── Resolve relative image src paths ──
                     tmp.querySelectorAll('img[src]').forEach(function(img) {
                         var src = img.getAttribute('src');
-                        if (src && !src.startsWith('/') && !src.startsWith('http')) {
-                            img.setAttribute('src', pageDir + src);
-                        }
+                        if (src && !src.startsWith('/') && !src.startsWith('http')) img.setAttribute('src', pageDir + src);
                     });
-
-                    // ── Move <style> tags into <head> ──
                     tmp.querySelectorAll('style').forEach(function(styleEl) {
                         document.head.appendChild(styleEl.cloneNode(true));
                         styleEl.remove();
                     });
-
-                    // ── Insert markup before placeholder then remove it ──
-                    while (tmp.firstChild) {
-                        placeholder.parentNode.insertBefore(tmp.firstChild, placeholder);
-                    }
+                    while (tmp.firstChild) placeholder.parentNode.insertBefore(tmp.firstChild, placeholder);
                     placeholder.remove();
-
-                    // ── Re-execute <script> tags (innerHTML does not run them) ──
                     tmp.querySelectorAll('script').forEach(function(oldScript) {
                         var newScript = document.createElement('script');
                         newScript.textContent = oldScript.textContent;
                         document.body.appendChild(newScript);
                     });
-
-                    // ── Populate student name & grade from body data attributes ──
                     var nameEl = document.getElementById('navStudentName');
                     var gradeEl = document.getElementById('navGradeLevel');
                     if (nameEl && document.body.dataset.studentName) nameEl.textContent = document.body.dataset.studentName;
                     if (gradeEl && document.body.dataset.gradeLevel) gradeEl.textContent = document.body.dataset.gradeLevel;
-
-                    // ── Boot the profile chip (avatar + label) ────────────────────
                     (function waitForStudentNav(attempts) {
                         if (window.StudentNav && typeof window.StudentNav.bootProfileFromBody === 'function') {
                             window.StudentNav.bootProfileFromBody();
@@ -1824,18 +1782,14 @@ switch ($profile_display_mode) {
                             }, 60);
                         }
                     })(20);
-
-                    // ── Highlight the current page link ──
                     var current = window.location.pathname.split('/').pop() || 'chatbox.php';
                     document.querySelectorAll('.sidebar .menu-item').forEach(function(item) {
                         var href = (item.getAttribute('href') || '').split('/').pop();
                         item.classList.toggle('active', href === current);
                     });
-
-                    console.log('[NavLoader] Student_nav.php loaded — base dir: ' + pageDir);
                 })
                 .catch(function(err) {
-                    console.error('[NavLoader] Failed to load Student_nav.php:', err);
+                    console.error('[NavLoader] Failed:', err);
                 });
         });
     </script>

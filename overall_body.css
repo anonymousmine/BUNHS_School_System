@@ -1,0 +1,36 @@
+/* Overall Body Styles - Extracted from admin_dashboard.php */
+
+body {
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  display: flex;
+  background: var(--light-color);
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* CSS Variables for Body Styles */
+:root {
+  --primary-color: #8a9a5b;
+  --secondary-color: #10b981;
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --danger-color: #ef4444;
+  --info-color: #3b82f6;
+  --dark-color: #1f2937;
+  --light-color: #f9fafb;
+  --border-color: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --sidebar-width: 240px;
+  --topbar-height: 72px;
+  --radius: 12px;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
