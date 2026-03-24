@@ -5,7 +5,9 @@
 require_once '../session_config.php';
 
 // Redirect to login if not authenticated
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_type'], ['admin', 'sub-admin'])) {
+$is_logged_in = (isset($_SESSION['user_id']) && in_array($_SESSION['user_type'] ?? '', ['admin', 'sub-admin']))
+    || isset($_SESSION['admin_id']);
+if (!$is_logged_in) {
     header('Location: ../index.php');
     exit;
 }
@@ -15,21 +17,71 @@ include '../db_connection.php';   // Provides $conn (mysqli)
 
 $admin_id = (int) $_SESSION['user_id'];
 
-// ── Fetch admin row ───────────────────────────
-$stmt = $conn->prepare(
-    "SELECT * FROM admin WHERE id = ? LIMIT 1"
-);
-$stmt->bind_param('i', $admin_id);
-$stmt->execute();
-$result = $stmt->get_result();
-$admin  = $result->fetch_assoc();
-$stmt->close();
+// ── Fetch user data (admin or sub-admin) ───────────────────────────
+$user_type = $_SESSION['user_type'] ?? 'admin';
+$user_data = null;
 
-if (!$admin) {
-    // Admin record not found – log out for safety
-    session_destroy();
-    header('Location: ../index.php');
-    exit;
+if ($user_type === 'admin') {
+    // Fetch from admin table
+    $stmt = $conn->prepare(
+        "SELECT * FROM admin WHERE id = ? LIMIT 1"
+    );
+    $stmt->bind_param('i', $admin_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user_data = $result->fetch_assoc();
+    $stmt->close();
+
+    if (!$user_data) {
+        // Admin record not found – log out for safety
+        session_destroy();
+        header('Location: ../index.php');
+        exit;
+    }
+
+    // Auto-create new columns if not exist for admin table
+    $conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS principal_title ENUM('Principal I','Principal II','Principal III','Principal IV') DEFAULT 'Principal I'");
+    $conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS mission TEXT DEFAULT NULL");
+    $conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS vision TEXT DEFAULT NULL");
+    $conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS core_values TEXT DEFAULT NULL");
+
+    // Re-fetch admin after potential schema change
+    $stmt2 = $conn->prepare("SELECT * FROM admin WHERE id = ? LIMIT 1");
+    $stmt2->bind_param('i', $admin_id);
+    $stmt2->execute();
+    $user_data = $stmt2->get_result()->fetch_assoc();
+    $stmt2->close();
+} elseif ($user_type === 'sub-admin') {
+    // Fetch from sub_admin table
+    $stmt = $conn->prepare(
+        "SELECT * FROM sub_admin WHERE id = ? LIMIT 1"
+    );
+    $stmt->bind_param('i', $admin_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user_data = $result->fetch_assoc();
+    $stmt->close();
+
+    if (!$user_data) {
+        // Sub-admin record not found – log out for safety
+        session_destroy();
+        header('Location: ../index.php');
+        exit;
+    }
+
+    // Auto-create new columns if not exist for sub_admin table
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS mission TEXT DEFAULT NULL");
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS vision TEXT DEFAULT NULL");
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS core_values TEXT DEFAULT NULL");
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS full_name VARCHAR(255) DEFAULT NULL");
+    $conn->query("ALTER TABLE sub_admin ADD COLUMN IF NOT EXISTS profile_image VARCHAR(255) DEFAULT NULL");
+
+    // Re-fetch sub_admin after potential schema change
+    $stmt2 = $conn->prepare("SELECT * FROM sub_admin WHERE id = ? LIMIT 1");
+    $stmt2->bind_param('i', $admin_id);
+    $stmt2->execute();
+    $user_data = $stmt2->get_result()->fetch_assoc();
+    $stmt2->close();
 }
 
 // ── Helpers ───────────────────────────────────
@@ -60,59 +112,55 @@ function tagItems(string $text): string
     return $out;
 }
 
-// ── Auto-create new columns if not exist ──────
-$conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS principal_title ENUM('Principal I','Principal II','Principal III','Principal IV') DEFAULT 'Principal I'");
-$conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS mission TEXT DEFAULT NULL");
-$conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS vision TEXT DEFAULT NULL");
-$conn->query("ALTER TABLE admin ADD COLUMN IF NOT EXISTS core_values TEXT DEFAULT NULL");
-$conn->query("CREATE TABLE IF NOT EXISTS school_settings (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    setting_key VARCHAR(100) NOT NULL UNIQUE,
-    setting_value TEXT NOT NULL DEFAULT '',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-)");
-$conn->query("INSERT IGNORE INTO school_settings (setting_key,setting_value) VALUES
-    ('impact_subtitle','At Buyoan National High School, measurable excellence means more than just numbers.'),
-    ('school_founded_year','2017')");
-
-// Re-fetch admin after potential schema change
-$stmt2 = $conn->prepare("SELECT * FROM admin WHERE id = ? LIMIT 1");
-$stmt2->bind_param('i', $admin_id);
-$stmt2->execute();
-$admin = $stmt2->get_result()->fetch_assoc();
-$stmt2->close();
-
 // ── Derived display values ────────────────────
-$full_name    = $admin['full_name']    ?? 'Administrator';
-$title        = $admin['title']        ?? 'School Administrator';
-$principal_title = $admin['principal_title'] ?? 'Principal I';
-$office       = $admin['office_location'] ?? '';
-$school_phone = $admin['school_phone'] ?? '';
-$school_email = $admin['school_email'] ?? '';
-$biography    = $admin['biography']    ?? '';
-$education    = $admin['education_history'] ?? '';
-$certs        = $admin['certifications']    ?? '';
-$years_exp    = (int) ($admin['years_experience'] ?? 0);
-$twitter_url  = $admin['twitter_url']  ?? '';
-$linkedin_url = $admin['linkedin_url'] ?? '';
-$responsibilities = $admin['responsibilities'] ?? '';
-$goals        = $admin['leadership_goals'] ?? '';
-$profile_img  = $admin['profile_image'] ?? '';
-$mission      = $admin['mission']      ?? '';
-$vision       = $admin['vision']       ?? '';
-$core_values  = $admin['core_values']  ?? '';
+$full_name    = $user_data['full_name'] ?? $user_data['username'] ?? 'Administrator';
+$title        = $user_data['title'] ?? 'School Administrator';
+$principal_title = $user_data['principal_title'] ?? '';
+$office       = $user_data['office_location'] ?? '';
+$school_phone = $user_data['school_phone'] ?? '';
+$school_email = $user_data['school_email'] ?? $user_data['email'] ?? '';
+$biography    = $user_data['biography'] ?? '';
+$education    = $user_data['education_history'] ?? '';
+$certs        = $user_data['certifications'] ?? '';
+$years_exp    = (int) ($user_data['years_experience'] ?? 0);
+$twitter_url  = $user_data['twitter_url'] ?? '';
+$linkedin_url = $user_data['linkedin_url'] ?? '';
+$responsibilities = $user_data['responsibilities'] ?? '';
+$goals        = $user_data['leadership_goals'] ?? '';
+$profile_img  = $user_data['profile_image'] ?? '';
+$mission      = $user_data['mission'] ?? '';
+$vision       = $user_data['vision'] ?? '';
+$core_values  = $user_data['core_values'] ?? '';
+
+// Role-specific data
+$user_role = 'Administrator';
+if ($user_type === 'admin' && !empty($principal_title)) {
+    $user_role = $principal_title;
+} elseif ($user_type === 'sub-admin') {
+    // Use roleLabel function for sub-admin roles
+    $role_map = [
+        'news_admin'         => 'News Admin',
+        'announcement_admin' => 'Announcement Admin',
+        'student_admin'      => 'Student Admin',
+        'teacher_admin'      => 'Teacher Admin',
+        'club_admin'         => 'Club Admin',
+        'super_sub_admin'    => 'Super Sub-Admin',
+        'forms_admin'        => 'Forms Admin',
+    ];
+    $user_role = $role_map[$user_data['role'] ?? 'news_admin'] ?? 'Sub-Admin';
+}
 
 // Private fields
-$personal_mobile = $admin['personal_mobile'] ?? '';
-$personal_email  = $admin['personal_email']  ?? '';
-$date_of_birth   = $admin['date_of_birth']   ?? '';
-$place_of_birth  = $admin['place_of_birth']  ?? '';
-$home_address    = $admin['home_address']    ?? '';
-$government_id   = $admin['government_id']   ?? '';
-$emerg_name      = $admin['emergency_contact_name']  ?? '';
-$emerg_phone     = $admin['emergency_contact_phone'] ?? '';
-$emerg_rel       = $admin['emergency_relationship']  ?? '';
-$bank_account    = $admin['bank_account']    ?? '';
+$personal_mobile = $user_data['personal_mobile'] ?? '';
+$personal_email  = $user_data['personal_email']  ?? '';
+$date_of_birth   = $user_data['date_of_birth']   ?? '';
+$place_of_birth  = $user_data['place_of_birth']  ?? '';
+$home_address    = $user_data['home_address']    ?? '';
+$government_id   = $user_data['government_id']   ?? '';
+$emerg_name      = $user_data['emergency_contact_name']  ?? '';
+$emerg_phone     = $user_data['emergency_contact_phone'] ?? '';
+$emerg_rel       = $user_data['emergency_relationship']  ?? '';
+$bank_account    = $user_data['bank_account']    ?? '';
 
 // Avatar: initials fallback or uploaded image
 $initials = strtoupper(
@@ -121,8 +169,10 @@ $initials = strtoupper(
         array_slice(explode(' ', $full_name), 0, 2)
     ))
 );
+
+$profile_path = $user_type === 'admin' ? 'uploads/admin_profiles/' : 'uploads/sub_admin_profiles/';
 $avatarStyle = $profile_img
-    ? 'background-image:url(' . h('uploads/admin_profiles/' . $profile_img) . ');background-size:cover;background-position:center;'
+    ? 'background-image:url(' . h($profile_path . $profile_img) . ');background-size:cover;background-position:center;'
     : '';
 $avatarContent = $profile_img ? '' : h($initials);
 
@@ -242,13 +292,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
             min-height: 100vh;
         }
 
-        /* PAGE CONTENT (hidden until navigation loads) */
+        /* Main layout — .main is opened by admin_nav.php */
+        .main {
+            margin-left: 240px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            min-width: 0;
+        }
+
+        /* PAGE CONTENT — appended into .main by JS, fills it edge-to-edge */
         .page-content {
             padding: 28px 32px 48px;
             flex: 1;
-            margin-left: 0;
-            width: calc(100vw - 260px);
-            max-width: 100%;
+            width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
         }
 
         .breadcrumb {
@@ -1386,16 +1446,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
                 margin-left: 0;
             }
 
-            .grid-2 {
-                grid-template-columns: 1fr;
-            }
-
-            .stats-strip {
-                grid-template-columns: 1fr 1fr;
-            }
-
             .page-content {
                 padding: 22px 20px 40px;
+                width: 100%;
             }
         }
 
@@ -1524,375 +1577,361 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
 </head>
 
 <body>
+    <?php include 'admin_nav.php'; ?>
 
-    <!-- Navigation loaded dynamically via admin_nav.php -->
-    <div id="navigation-container">
-        <div class="dashboard-loading">
-            <div class="spinner"></div>
-            <p>Loading...</p>
+    <main class="page-content" id="profile-content">
+
+        <nav class="breadcrumb">
+            <a href="admin_dashboard.php">Home</a>
+            <i class="fas fa-chevron-right"></i>
+            <span>Admin Profile</span>
+        </nav>
+
+        <!-- Hero -->
+        <div class="hero-card">
+            <div class="hero-banner">
+                <div class="hero-banner-accent"></div>
+                <div class="hero-banner-accent2"></div>
+            </div>
+            <div class="hero-body">
+                <div class="hero-left">
+                    <div class="hero-avatar-wrap">
+                        <div class="hero-avatar" id="heroAvatar" style="<?php echo $avatarStyle; ?>"><?php echo $avatarContent; ?></div>
+                    </div>
+                    <div class="hero-info">
+                        <div class="hero-name" id="heroName"><?php echo h($full_name); ?></div>
+                        <div class="hero-role" id="heroRole"><?php echo h($user_role); ?></div>
+                        <div class="hero-chips">
+                            <?php if ($office): ?><span class="chip"><i class="fas fa-map-marker-alt"></i> <?php echo h($office); ?></span><?php endif; ?>
+                            <?php if ($school_phone): ?><span class="chip"><i class="fas fa-phone"></i> <?php echo h($school_phone); ?></span><?php endif; ?>
+                            <?php if ($school_email): ?><span class="chip"><i class="fas fa-envelope"></i> <?php echo h($school_email); ?></span><?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="hero-actions">
+                    <button class="btn btn-ghost" onclick="openPrivateModal()"><i class="fas fa-lock"></i> Private Info</button>
+                    <button class="btn btn-primary" onclick="openEditModal()"><i class="fas fa-edit"></i> Edit Profile</button>
+                </div>
+            </div>
         </div>
-    </div>
 
-    <!-- ════════════════════════════════════════════════════
-     MAIN
-════════════════════════════════════════════════════ -->
-    <div class="main">
-
-        <!-- PAGE CONTENT (hidden until navigation loads) -->
-        <main class="page-content" id="profile-content" style="display:none;">
-
-            <nav class="breadcrumb">
-                <a href="admin_dashboard.php">Home</a>
-                <i class="fas fa-chevron-right"></i>
-                <span>Admin Profile</span>
-            </nav>
-
-            <!-- Hero -->
-            <div class="hero-card">
-                <div class="hero-banner">
-                    <div class="hero-banner-accent"></div>
-                    <div class="hero-banner-accent2"></div>
-                </div>
-                <div class="hero-body">
-                    <div class="hero-left">
-                        <div class="hero-avatar-wrap">
-                            <div class="hero-avatar" id="heroAvatar" style="<?php echo $avatarStyle; ?>"><?php echo $avatarContent; ?></div>
-                        </div>
-                        <div class="hero-info">
-                            <div class="hero-name" id="heroName"><?php echo h($full_name); ?></div>
-                            <div class="hero-role" id="heroRole"><?php echo h($title); ?></div>
-                            <div class="hero-chips">
-                                <?php if ($office): ?><span class="chip"><i class="fas fa-map-marker-alt"></i> <?php echo h($office); ?></span><?php endif; ?>
-                                <?php if ($school_phone): ?><span class="chip"><i class="fas fa-phone"></i> <?php echo h($school_phone); ?></span><?php endif; ?>
-                                <?php if ($school_email): ?><span class="chip"><i class="fas fa-envelope"></i> <?php echo h($school_email); ?></span><?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="hero-actions">
-                        <button class="btn btn-ghost" onclick="openPrivateModal()"><i class="fas fa-lock"></i> Private Info</button>
-                        <button class="btn btn-primary" onclick="openEditModal()"><i class="fas fa-edit"></i> Edit Profile</button>
-                    </div>
+        <!-- Stats -->
+        <div class="stats-strip">
+            <div class="stat-card">
+                <div class="stat-icon green"><i class="fas fa-briefcase"></i></div>
+                <div>
+                    <div class="stat-value"><?php echo $years_exp > 0 ? h($years_exp) . '+' : '—'; ?></div>
+                    <div class="stat-label">Years of Experience</div>
                 </div>
             </div>
-
-            <!-- Stats -->
-            <div class="stats-strip">
-                <div class="stat-card">
-                    <div class="stat-icon green"><i class="fas fa-briefcase"></i></div>
-                    <div>
-                        <div class="stat-value"><?php echo $years_exp > 0 ? h($years_exp) . '+' : '—'; ?></div>
-                        <div class="stat-label">Years of Experience</div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon amber"><i class="fas fa-certificate"></i></div>
-                    <div>
-                        <div class="stat-value"><?php echo $cert_count ?: '—'; ?></div>
-                        <div class="stat-label">Certifications</div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon blue"><i class="fas fa-tasks"></i></div>
-                    <div>
-                        <div class="stat-value"><?php echo $resp_count ?: '—'; ?></div>
-                        <div class="stat-label">Key Responsibilities</div>
-                    </div>
+            <div class="stat-card">
+                <div class="stat-icon amber"><i class="fas fa-certificate"></i></div>
+                <div>
+                    <div class="stat-value"><?php echo $cert_count ?: '—'; ?></div>
+                    <div class="stat-label">Certifications</div>
                 </div>
             </div>
-
-            <!-- Grid -->
-            <div class="grid-2">
-
-                <!-- Contact -->
-                <div class="section-card">
-                    <div class="section-head">
-                        <h3 class="section-title"><i class="fas fa-address-card"></i> Contact Information</h3>
-                    </div>
-                    <div class="section-body">
-                        <div class="info-list">
-                            <div class="info-row"><span class="info-label">Full Name</span><span class="info-value"><?php echo h($full_name); ?></span></div>
-                            <div class="info-row"><span class="info-label">Title</span><span class="info-value"><?php echo h($title); ?></span></div>
-                            <div class="info-row"><span class="info-label">Office</span><span class="info-value"><?php echo $office ? h($office) : '<span class="muted">Not provided</span>'; ?></span></div>
-                            <div class="info-row"><span class="info-label">School Phone</span><span class="info-value"><?php echo $school_phone ? h($school_phone) : '<span class="muted">Not provided</span>'; ?></span></div>
-                            <div class="info-row"><span class="info-label">School Email</span><span class="info-value"><?php echo $school_email ? '<a href="mailto:' . h($school_email) . '">' . h($school_email) . '</a>' : '<span class="muted">Not provided</span>'; ?></span></div>
-                            <div class="info-row">
-                                <span class="info-label">Social</span>
-                                <span class="info-value">
-                                    <div style="display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap;">
-                                        <?php if ($twitter_url): ?>
-                                            <a class="social-link twitter" href="<?php echo h($twitter_url); ?>" target="_blank"><i class="fab fa-twitter"></i> Twitter</a>
-                                        <?php endif; ?>
-                                        <?php if ($linkedin_url): ?>
-                                            <a class="social-link linkedin" href="<?php echo h($linkedin_url); ?>" target="_blank"><i class="fab fa-linkedin"></i> LinkedIn</a>
-                                        <?php endif; ?>
-                                        <?php if (!$twitter_url && !$linkedin_url): ?><span class="info-value muted">Not provided</span><?php endif; ?>
-                                    </div>
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+            <div class="stat-card">
+                <div class="stat-icon blue"><i class="fas fa-tasks"></i></div>
+                <div>
+                    <div class="stat-value"><?php echo $resp_count ?: '—'; ?></div>
+                    <div class="stat-label">Key Responsibilities</div>
                 </div>
+            </div>
+        </div>
 
-                <!-- Education -->
-                <div class="section-card">
-                    <div class="section-head">
-                        <h3 class="section-title"><i class="fas fa-graduation-cap"></i> Education &amp; Credentials</h3>
-                    </div>
-                    <div class="section-body">
-                        <div class="sub-heading"><i class="fas fa-university"></i> Educational History</div>
-                        <ul class="bullet-list">
-                            <?php echo $education ? listItems($education) : '<li class="info-value muted">Not provided</li>'; ?>
-                        </ul>
-                        <div class="sub-heading" style="margin-top:14px;"><i class="fas fa-certificate"></i> Certifications</div>
-                        <div class="tag-cloud">
-                            <?php echo $certs ? tagItems($certs) : '<span class="info-value muted">Not provided</span>'; ?>
-                        </div>
-                        <div class="exp-bar-wrap">
-                            <div class="exp-bar-label"><span>Career Experience</span><span><?php echo $years_exp > 0 ? h($years_exp) . '+ years' : '—'; ?></span></div>
-                            <div class="exp-bar">
-                                <div class="exp-bar-fill" style="width:<?php echo min(100, $years_exp * 3); ?>%"></div>
-                            </div>
-                        </div>
-                    </div>
+        <!-- Grid -->
+        <div class="grid-2">
+
+            <!-- Contact -->
+            <div class="section-card">
+                <div class="section-head">
+                    <h3 class="section-title"><i class="fas fa-address-card"></i> Contact Information</h3>
                 </div>
-
-                <!-- Biography -->
-                <div class="section-card full">
-                    <div class="section-head">
-                        <h3 class="section-title"><i class="fas fa-align-left"></i> Biography</h3>
-                    </div>
-                    <div class="section-body">
-                        <p class="bio-text" id="biographyDisplay"><?php echo $biography ? h($biography) : '<span class="info-value muted">No biography provided.</span>'; ?></p>
-                    </div>
-                </div>
-
-                <!-- Responsibilities -->
-                <div class="section-card">
-                    <div class="section-head">
-                        <h3 class="section-title"><i class="fas fa-list-check"></i> Key Responsibilities</h3>
-                    </div>
-                    <div class="section-body">
-                        <ul class="bullet-list" id="responsibilitiesDisplay">
-                            <?php echo $responsibilities ? listItems($responsibilities) : '<li class="info-value muted">Not provided</li>'; ?>
-                        </ul>
-                    </div>
-                </div>
-
-                <!-- Goals -->
-                <div class="section-card">
-                    <div class="section-head">
-                        <h3 class="section-title"><i class="fas fa-bullseye"></i> Leadership Goals</h3>
-                    </div>
-                    <div class="section-body">
-                        <ul class="bullet-list" id="goalsDisplay">
-                            <?php echo $goals ? listItems($goals) : '<li class="info-value muted">Not provided</li>'; ?>
-                        </ul>
-                    </div>
-                </div>
-
-                <!-- Mission / Vision / Core Values -->
-                <div class="section-card full">
-                    <div class="section-head">
-                        <h3 class="section-title"><i class="fas fa-landmark"></i> Mission, Vision &amp; Core Values</h3>
-                        <button class="btn btn-primary" onclick="openMVCModal()"><i class="fas fa-edit"></i> Edit</button>
-                    </div>
-                    <div class="section-body">
-                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
-                            <div>
-                                <div class="sub-heading"><i class="fas fa-bullseye"></i> Mission</div>
-                                <p style="font-size:13.5px;color:var(--text-secondary);line-height:1.7;" id="missionDisplay">
-                                    <?php echo $mission ? nl2br(h($mission)) : '<span class="info-value muted">Not provided</span>'; ?>
-                                </p>
-                            </div>
-                            <div>
-                                <div class="sub-heading"><i class="fas fa-eye"></i> Vision</div>
-                                <p style="font-size:13.5px;color:var(--text-secondary);line-height:1.7;" id="visionDisplay">
-                                    <?php echo $vision ? nl2br(h($vision)) : '<span class="info-value muted">Not provided</span>'; ?>
-                                </p>
-                            </div>
-                            <div>
-                                <div class="sub-heading"><i class="fas fa-heart"></i> Core Values</div>
-                                <div class="tag-cloud" id="coreValuesDisplay">
-                                    <?php echo $core_values ? tagItems($core_values) : '<span class="info-value muted">Not provided</span>'; ?>
+                <div class="section-body">
+                    <div class="info-list">
+                        <div class="info-row"><span class="info-label">Full Name</span><span class="info-value"><?php echo h($full_name); ?></span></div>
+                        <div class="info-row"><span class="info-label">Title</span><span class="info-value"><?php echo h($title); ?></span></div>
+                        <div class="info-row"><span class="info-label">Office</span><span class="info-value"><?php echo $office ? h($office) : '<span class="muted">Not provided</span>'; ?></span></div>
+                        <div class="info-row"><span class="info-label">School Phone</span><span class="info-value"><?php echo $school_phone ? h($school_phone) : '<span class="muted">Not provided</span>'; ?></span></div>
+                        <div class="info-row"><span class="info-label">School Email</span><span class="info-value"><?php echo $school_email ? '<a href="mailto:' . h($school_email) . '">' . h($school_email) . '</a>' : '<span class="muted">Not provided</span>'; ?></span></div>
+                        <div class="info-row">
+                            <span class="info-label">Social</span>
+                            <span class="info-value">
+                                <div style="display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap;">
+                                    <?php if ($twitter_url): ?>
+                                        <a class="social-link twitter" href="<?php echo h($twitter_url); ?>" target="_blank"><i class="fab fa-twitter"></i> Twitter</a>
+                                    <?php endif; ?>
+                                    <?php if ($linkedin_url): ?>
+                                        <a class="social-link linkedin" href="<?php echo h($linkedin_url); ?>" target="_blank"><i class="fab fa-linkedin"></i> LinkedIn</a>
+                                    <?php endif; ?>
+                                    <?php if (!$twitter_url && !$linkedin_url): ?><span class="info-value muted">Not provided</span><?php endif; ?>
                                 </div>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Education -->
+            <div class="section-card">
+                <div class="section-head">
+                    <h3 class="section-title"><i class="fas fa-graduation-cap"></i> Education &amp; Credentials</h3>
+                </div>
+                <div class="section-body">
+                    <div class="sub-heading"><i class="fas fa-university"></i> Educational History</div>
+                    <ul class="bullet-list">
+                        <?php echo $education ? listItems($education) : '<li class="info-value muted">Not provided</li>'; ?>
+                    </ul>
+                    <div class="sub-heading" style="margin-top:14px;"><i class="fas fa-certificate"></i> Certifications</div>
+                    <div class="tag-cloud">
+                        <?php echo $certs ? tagItems($certs) : '<span class="info-value muted">Not provided</span>'; ?>
+                    </div>
+                    <div class="exp-bar-wrap">
+                        <div class="exp-bar-label"><span>Career Experience</span><span><?php echo $years_exp > 0 ? h($years_exp) . '+ years' : '—'; ?></span></div>
+                        <div class="exp-bar">
+                            <div class="exp-bar-fill" style="width:<?php echo min(100, $years_exp * 3); ?>%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Biography -->
+            <div class="section-card full">
+                <div class="section-head">
+                    <h3 class="section-title"><i class="fas fa-align-left"></i> Biography</h3>
+                </div>
+                <div class="section-body">
+                    <p class="bio-text" id="biographyDisplay"><?php echo $biography ? h($biography) : '<span class="info-value muted">No biography provided.</span>'; ?></p>
+                </div>
+            </div>
+
+            <!-- Responsibilities -->
+            <div class="section-card">
+                <div class="section-head">
+                    <h3 class="section-title"><i class="fas fa-list-check"></i> Key Responsibilities</h3>
+                </div>
+                <div class="section-body">
+                    <ul class="bullet-list" id="responsibilitiesDisplay">
+                        <?php echo $responsibilities ? listItems($responsibilities) : '<li class="info-value muted">Not provided</li>'; ?>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Goals -->
+            <div class="section-card">
+                <div class="section-head">
+                    <h3 class="section-title"><i class="fas fa-bullseye"></i> Leadership Goals</h3>
+                </div>
+                <div class="section-body">
+                    <ul class="bullet-list" id="goalsDisplay">
+                        <?php echo $goals ? listItems($goals) : '<li class="info-value muted">Not provided</li>'; ?>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Mission / Vision / Core Values -->
+            <div class="section-card full">
+                <div class="section-head">
+                    <h3 class="section-title"><i class="fas fa-landmark"></i> Mission, Vision &amp; Core Values</h3>
+                    <button class="btn btn-primary" onclick="openMVCModal()"><i class="fas fa-edit"></i> Edit</button>
+                </div>
+                <div class="section-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+                        <div>
+                            <div class="sub-heading"><i class="fas fa-bullseye"></i> Mission</div>
+                            <p style="font-size:13.5px;color:var(--text-secondary);line-height:1.7;" id="missionDisplay">
+                                <?php echo $mission ? nl2br(h($mission)) : '<span class="info-value muted">Not provided</span>'; ?>
+                            </p>
+                        </div>
+                        <div>
+                            <div class="sub-heading"><i class="fas fa-eye"></i> Vision</div>
+                            <p style="font-size:13.5px;color:var(--text-secondary);line-height:1.7;" id="visionDisplay">
+                                <?php echo $vision ? nl2br(h($vision)) : '<span class="info-value muted">Not provided</span>'; ?>
+                            </p>
+                        </div>
+                        <div>
+                            <div class="sub-heading"><i class="fas fa-heart"></i> Core Values</div>
+                            <div class="tag-cloud" id="coreValuesDisplay">
+                                <?php echo $core_values ? tagItems($core_values) : '<span class="info-value muted">Not provided</span>'; ?>
                             </div>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- Principal Title display -->
-                <div class="section-card">
-                    <div class="section-head">
-                        <h3 class="section-title"><i class="fas fa-user-tie"></i> Principal Information</h3>
-                    </div>
-                    <div class="section-body">
-                        <div class="info-list">
-                            <div class="info-row">
-                                <span class="info-label">Full Name</span>
-                                <span class="info-value"><?php echo h($full_name); ?></span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Principal Title</span>
-                                <span class="info-value" id="principalTitleDisplay">
-                                    <span class="chip"><i class="fas fa-medal"></i> <?php echo h($principal_title); ?></span>
-                                </span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Responsibilities</span>
-                                <span class="info-value" style="text-align:left;max-width:400px;">
-                                    <?php echo $responsibilities ? nl2br(h($responsibilities)) : '<span class="muted">Not provided</span>'; ?>
-                                </span>
-                            </div>
+            <!-- Principal Title display -->
+            <div class="section-card">
+                <div class="section-head">
+                    <h3 class="section-title"><i class="fas fa-user-tie"></i> Principal Information</h3>
+                </div>
+                <div class="section-body">
+                    <div class="info-list">
+                        <div class="info-row">
+                            <span class="info-label">Full Name</span>
+                            <span class="info-value"><?php echo h($full_name); ?></span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Principal Title</span>
+                            <span class="info-value" id="principalTitleDisplay">
+                                <span class="chip"><i class="fas fa-medal"></i> <?php echo h($principal_title); ?></span>
+                            </span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Responsibilities</span>
+                            <span class="info-value" style="text-align:left;max-width:400px;">
+                                <?php echo $responsibilities ? nl2br(h($responsibilities)) : '<span class="muted">Not provided</span>'; ?>
+                            </span>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- Private -->
-                <div class="section-card private full">
-                    <div class="section-head">
-                        <h3 class="section-title">
-                            <i class="fas fa-shield-alt"></i>
-                            Private Administrative Information
-                            <span class="private-badge"><i class="fas fa-lock"></i> Restricted</span>
-                        </h3>
-                        <button class="btn btn-danger-ghost" onclick="openPrivateModal()"><i class="fas fa-edit"></i> Edit Private Info</button>
+            <!-- Private -->
+            <div class="section-card private full">
+                <div class="section-head">
+                    <h3 class="section-title">
+                        <i class="fas fa-shield-alt"></i>
+                        Private Administrative Information
+                        <span class="private-badge"><i class="fas fa-lock"></i> Restricted</span>
+                    </h3>
+                    <button class="btn btn-danger-ghost" onclick="openPrivateModal()"><i class="fas fa-edit"></i> Edit Private Info</button>
+                </div>
+                <div class="section-body">
+                    <div class="private-notice">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        This section contains sensitive personal information. Access is restricted to the administrator only. All data is encrypted and stored securely in compliance with data protection regulations.
                     </div>
-                    <div class="section-body">
-                        <div class="private-notice">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            This section contains sensitive personal information. Access is restricted to the administrator only. All data is encrypted and stored securely in compliance with data protection regulations.
-                        </div>
 
-                        <div class="sub-heading"><i class="fas fa-user"></i> Personal Details</div>
-                        <div class="info-list">
-                            <div class="info-row"><span class="info-label">Personal Mobile</span><span class="info-value <?php echo $personal_mobile ? '' : 'muted'; ?>"><?php echo $personal_mobile ? h($personal_mobile) : 'Not provided'; ?></span></div>
-                            <div class="info-row"><span class="info-label">Personal Email</span><span class="info-value <?php echo $personal_email ? '' : 'muted'; ?>"><?php echo $personal_email ? h($personal_email) : 'Not provided'; ?></span></div>
-                            <div class="info-row"><span class="info-label">Date of Birth</span><span class="info-value <?php echo $date_of_birth ? '' : 'muted'; ?>"><?php echo $date_of_birth ? h(date('F j, Y', strtotime($date_of_birth))) : 'Not provided'; ?></span></div>
-                            <div class="info-row"><span class="info-label">Place of Birth</span><span class="info-value <?php echo $place_of_birth ? '' : 'muted'; ?>"><?php echo $place_of_birth ? h($place_of_birth) : 'Not provided'; ?></span></div>
-                            <div class="info-row"><span class="info-label">Home Address</span><span class="info-value <?php echo $home_address ? '' : 'muted'; ?>"><?php echo $home_address ? h($home_address) : 'Not provided'; ?></span></div>
-                            <div class="info-row"><span class="info-label">Gov. ID / SSN</span><span class="info-value <?php echo $government_id ? '' : 'muted'; ?>"><?php echo $government_id ? '••••••••' : 'Not provided'; ?></span></div>
-                        </div>
+                    <div class="sub-heading"><i class="fas fa-user"></i> Personal Details</div>
+                    <div class="info-list">
+                        <div class="info-row"><span class="info-label">Personal Mobile</span><span class="info-value <?php echo $personal_mobile ? '' : 'muted'; ?>"><?php echo $personal_mobile ? h($personal_mobile) : 'Not provided'; ?></span></div>
+                        <div class="info-row"><span class="info-label">Personal Email</span><span class="info-value <?php echo $personal_email ? '' : 'muted'; ?>"><?php echo $personal_email ? h($personal_email) : 'Not provided'; ?></span></div>
+                        <div class="info-row"><span class="info-label">Date of Birth</span><span class="info-value <?php echo $date_of_birth ? '' : 'muted'; ?>"><?php echo $date_of_birth ? h(date('F j, Y', strtotime($date_of_birth))) : 'Not provided'; ?></span></div>
+                        <div class="info-row"><span class="info-label">Place of Birth</span><span class="info-value <?php echo $place_of_birth ? '' : 'muted'; ?>"><?php echo $place_of_birth ? h($place_of_birth) : 'Not provided'; ?></span></div>
+                        <div class="info-row"><span class="info-label">Home Address</span><span class="info-value <?php echo $home_address ? '' : 'muted'; ?>"><?php echo $home_address ? h($home_address) : 'Not provided'; ?></span></div>
+                        <div class="info-row"><span class="info-label">Gov. ID / SSN</span><span class="info-value <?php echo $government_id ? '' : 'muted'; ?>"><?php echo $government_id ? '••••••••' : 'Not provided'; ?></span></div>
+                    </div>
 
-                        <div class="sub-heading"><i class="fas fa-phone-alt"></i> Emergency Contact</div>
-                        <div class="info-list">
-                            <div class="info-row"><span class="info-label">Contact Name</span><span class="info-value <?php echo $emerg_name ? '' : 'muted'; ?>"><?php echo $emerg_name ? h($emerg_name) : 'Not provided'; ?></span></div>
-                            <div class="info-row"><span class="info-label">Phone</span><span class="info-value <?php echo $emerg_phone ? '' : 'muted'; ?>"><?php echo $emerg_phone ? h($emerg_phone) : 'Not provided'; ?></span></div>
-                            <div class="info-row"><span class="info-label">Relationship</span><span class="info-value <?php echo $emerg_rel ? '' : 'muted'; ?>"><?php echo $emerg_rel ? h($emerg_rel) : 'Not provided'; ?></span></div>
-                        </div>
+                    <div class="sub-heading"><i class="fas fa-phone-alt"></i> Emergency Contact</div>
+                    <div class="info-list">
+                        <div class="info-row"><span class="info-label">Contact Name</span><span class="info-value <?php echo $emerg_name ? '' : 'muted'; ?>"><?php echo $emerg_name ? h($emerg_name) : 'Not provided'; ?></span></div>
+                        <div class="info-row"><span class="info-label">Phone</span><span class="info-value <?php echo $emerg_phone ? '' : 'muted'; ?>"><?php echo $emerg_phone ? h($emerg_phone) : 'Not provided'; ?></span></div>
+                        <div class="info-row"><span class="info-label">Relationship</span><span class="info-value <?php echo $emerg_rel ? '' : 'muted'; ?>"><?php echo $emerg_rel ? h($emerg_rel) : 'Not provided'; ?></span></div>
+                    </div>
 
-                        <div class="sub-heading"><i class="fas fa-university"></i> Financial</div>
-                        <div class="info-list">
-                            <div class="info-row"><span class="info-label">Bank Account</span><span class="info-value <?php echo $bank_account ? '' : 'muted'; ?>"><?php echo $bank_account ? '••••' . substr($bank_account, -4) : 'Not provided'; ?></span></div>
-                        </div>
+                    <div class="sub-heading"><i class="fas fa-university"></i> Financial</div>
+                    <div class="info-list">
+                        <div class="info-row"><span class="info-label">Bank Account</span><span class="info-value <?php echo $bank_account ? '' : 'muted'; ?>"><?php echo $bank_account ? '••••' . substr($bank_account, -4) : 'Not provided'; ?></span></div>
                     </div>
                 </div>
+            </div>
 
-            </div><!-- /grid-2 -->
+        </div><!-- /grid-2 -->
 
-            <!-- ══════════════════════════════════════════════
+        <!-- ══════════════════════════════════════════════
                  HOMEPAGE CARDS EDITOR
             ══════════════════════════════════════════════ -->
 
-            <section id="homepage-cards-editor" style="margin-top:32px;">
-                <div class="section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
-                    <div style="background:#eef4e8;border-radius:10px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;">
-                        <i class="fas fa-th-large" style="color:#3b975e;font-size:18px;"></i>
-                    </div>
-                    <div>
-                        <h3 style="margin:0;font-size:18px;font-weight:700;">Homepage Cards Editor</h3>
-                        <p style="margin:0;font-size:13px;color:#6c757d;">Edit the info cards and feature cards displayed on the public homepage.</p>
-                    </div>
+        <section id="homepage-cards-editor" style="margin-top:32px;">
+            <div class="section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
+                <div style="background:#eef4e8;border-radius:10px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;">
+                    <i class="fas fa-th-large" style="color:#3b975e;font-size:18px;"></i>
                 </div>
+                <div>
+                    <h3 style="margin:0;font-size:18px;font-weight:700;">Homepage Cards Editor</h3>
+                    <p style="margin:0;font-size:13px;color:#6c757d;">Edit the info cards and feature cards displayed on the public homepage.</p>
+                </div>
+            </div>
 
-                <div id="hpc-save-msg" style="display:none;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;"></div>
+            <div id="hpc-save-msg" style="display:none;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;"></div>
 
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px;">
-                    <?php foreach ($hpc_rows as $hpc): ?>
-                        <div class="card" style="border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.07);overflow:hidden;">
-                            <!-- Card preview header -->
-                            <div style="height:120px;background:#f3f6f0;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">
-                                <?php if (!empty($hpc['image'])): ?>
-                                    <img src="../<?php echo htmlspecialchars($hpc['image']); ?>" id="hpc-preview-<?php echo $hpc['id']; ?>"
-                                        style="width:100%;height:120px;object-fit:cover;" alt="">
-                                <?php else: ?>
-                                    <i class="fas <?php echo htmlspecialchars($hpc['icon'] ?: 'fa-image'); ?>"
-                                        id="hpc-preview-<?php echo $hpc['id']; ?>-icon"
-                                        style="font-size:40px;color:#b0c9a8;"></i>
-                                <?php endif; ?>
-                                <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.45);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;">
-                                    <?php echo htmlspecialchars($hpc['card_key']); ?>
-                                </span>
-                            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px;">
+                <?php foreach ($hpc_rows as $hpc): ?>
+                    <div class="card" style="border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.07);overflow:hidden;">
+                        <!-- Card preview header -->
+                        <div style="height:120px;background:#f3f6f0;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">
+                            <?php if (!empty($hpc['image'])): ?>
+                                <img src="../<?php echo htmlspecialchars($hpc['image']); ?>" id="hpc-preview-<?php echo $hpc['id']; ?>"
+                                    style="width:100%;height:120px;object-fit:cover;" alt="">
+                            <?php else: ?>
+                                <i class="fas <?php echo htmlspecialchars($hpc['icon'] ?: 'fa-image'); ?>"
+                                    id="hpc-preview-<?php echo $hpc['id']; ?>-icon"
+                                    style="font-size:40px;color:#b0c9a8;"></i>
+                            <?php endif; ?>
+                            <span style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.45);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;">
+                                <?php echo htmlspecialchars($hpc['card_key']); ?>
+                            </span>
+                        </div>
 
-                            <!-- Edit form -->
-                            <div style="padding:16px;">
-                                <form class="hpc-form" data-id="<?php echo $hpc['id']; ?>" enctype="multipart/form-data">
-                                    <input type="hidden" name="_hpc_action" value="save_homepage_card">
-                                    <input type="hidden" name="_ajax" value="1">
-                                    <input type="hidden" name="hpc_id" value="<?php echo $hpc['id']; ?>">
+                        <!-- Edit form -->
+                        <div style="padding:16px;">
+                            <form class="hpc-form" data-id="<?php echo $hpc['id']; ?>" enctype="multipart/form-data">
+                                <input type="hidden" name="_hpc_action" value="save_homepage_card">
+                                <input type="hidden" name="_ajax" value="1">
+                                <input type="hidden" name="hpc_id" value="<?php echo $hpc['id']; ?>">
 
-                                    <div style="margin-bottom:10px;">
-                                        <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">Title</label>
-                                        <input type="text" name="hpc_title" value="<?php echo htmlspecialchars($hpc['title']); ?>"
-                                            style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;"
-                                            placeholder="Card title">
-                                    </div>
+                                <div style="margin-bottom:10px;">
+                                    <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">Title</label>
+                                    <input type="text" name="hpc_title" value="<?php echo htmlspecialchars($hpc['title']); ?>"
+                                        style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;"
+                                        placeholder="Card title">
+                                </div>
 
-                                    <div style="margin-bottom:10px;">
-                                        <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">Description</label>
-                                        <textarea name="hpc_desc" rows="3"
-                                            style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;resize:vertical;"
-                                            placeholder="Card description"><?php echo htmlspecialchars($hpc['description']); ?></textarea>
-                                    </div>
+                                <div style="margin-bottom:10px;">
+                                    <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">Description</label>
+                                    <textarea name="hpc_desc" rows="3"
+                                        style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;resize:vertical;"
+                                        placeholder="Card description"><?php echo htmlspecialchars($hpc['description']); ?></textarea>
+                                </div>
 
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
-                                        <div>
-                                            <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">
-                                                <i class="fas fa-icons"></i> Icon <span style="color:#999;font-weight:400;">(FontAwesome)</span>
-                                            </label>
-                                            <input type="text" name="hpc_icon" value="<?php echo htmlspecialchars($hpc['icon']); ?>"
-                                                style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;"
-                                                placeholder="fa-trophy">
-                                        </div>
-                                        <div>
-                                            <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">
-                                                <i class="fas fa-link"></i> Image Path
-                                            </label>
-                                            <input type="text" name="hpc_image" value="<?php echo htmlspecialchars($hpc['image']); ?>"
-                                                style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;"
-                                                placeholder="assets/img/...">
-                                        </div>
-                                    </div>
-
-                                    <div style="margin-bottom:12px;">
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+                                    <div>
                                         <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">
-                                            <i class="fas fa-upload"></i> Upload New Image
+                                            <i class="fas fa-icons"></i> Icon <span style="color:#999;font-weight:400;">(FontAwesome)</span>
                                         </label>
-                                        <input type="file" name="hpc_image_file" accept="image/*"
-                                            style="font-size:12px;width:100%;"
-                                            onchange="previewHpcImage(this, <?php echo $hpc['id']; ?>)">
+                                        <input type="text" name="hpc_icon" value="<?php echo htmlspecialchars($hpc['icon']); ?>"
+                                            style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;"
+                                            placeholder="fa-trophy">
                                     </div>
+                                    <div>
+                                        <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">
+                                            <i class="fas fa-link"></i> Image Path
+                                        </label>
+                                        <input type="text" name="hpc_image" value="<?php echo htmlspecialchars($hpc['image']); ?>"
+                                            style="width:100%;padding:8px 10px;border:1px solid #dde3d5;border-radius:8px;font-size:13px;"
+                                            placeholder="assets/img/...">
+                                    </div>
+                                </div>
 
-                                    <button type="submit"
-                                        style="width:100%;padding:9px;background:#3b975e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s;"
-                                        onmouseover="this.style.background='#2d7a4e'" onmouseout="this.style.background='#3b975e'">
-                                        <i class="fas fa-save"></i> Save Card
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                    <?php if (empty($hpc_rows)): ?>
-                        <div style="grid-column:1/-1;text-align:center;padding:40px;color:#999;">
-                            <i class="fas fa-th-large" style="font-size:40px;display:block;margin-bottom:12px;color:#ddd;"></i>
-                            Homepage cards table is empty. Run the <code>index.php</code> page once to auto-create the defaults.
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </section>
+                                <div style="margin-bottom:12px;">
+                                    <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">
+                                        <i class="fas fa-upload"></i> Upload New Image
+                                    </label>
+                                    <input type="file" name="hpc_image_file" accept="image/*"
+                                        style="font-size:12px;width:100%;"
+                                        onchange="previewHpcImage(this, <?php echo $hpc['id']; ?>)">
+                                </div>
 
-        </main><!-- end #profile-content -->
-    </div><!-- /main -->
+                                <button type="submit"
+                                    style="width:100%;padding:9px;background:#3b975e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s;"
+                                    onmouseover="this.style.background='#2d7a4e'" onmouseout="this.style.background='#3b975e'">
+                                    <i class="fas fa-save"></i> Save Card
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+                <?php if (empty($hpc_rows)): ?>
+                    <div style="grid-column:1/-1;text-align:center;padding:40px;color:#999;">
+                        <i class="fas fa-th-large" style="font-size:40px;display:block;margin-bottom:12px;color:#ddd;"></i>
+                        Homepage cards table is empty. Run the <code>index.php</code> page once to auto-create the defaults.
+                    </div>
+                <?php endif; ?>
+            </div>
+        </section>
+
+    </main><!-- end #profile-content -->
 
 
     <!-- ════════════════════════════════════════════════════
@@ -2465,6 +2504,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
                 });
             });
         });
+    </script>
+
+    <script>
+        // Move page-content into .main (opened by admin_nav.php) — same pattern as admin_dashboard.php
+        (function() {
+            var mainDiv = document.querySelector('.main');
+            var pageContent = document.querySelector('.page-content');
+            if (mainDiv && pageContent && !mainDiv.contains(pageContent)) {
+                mainDiv.appendChild(pageContent);
+            }
+        })();
     </script>
 </body>
 

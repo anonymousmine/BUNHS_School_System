@@ -1,4 +1,5 @@
 <?php
+
 /**
  * notification_api.php
  * AJAX endpoint for the bell-icon notification dropdown.
@@ -7,7 +8,9 @@
 
 require_once '../session_config.php';
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_type'], ['admin', 'sub-admin'])) {
+$_notif_auth = (isset($_SESSION['user_id']) && in_array($_SESSION['user_type'] ?? '', ['admin', 'sub-admin']))
+    || isset($_SESSION['admin_id']);
+if (!$_notif_auth) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
     exit;
@@ -43,7 +46,7 @@ if ($action === 'fetch') {
         $row['sub_admin_email'] = htmlspecialchars($row['sub_admin_email'], ENT_QUOTES, 'UTF-8');
         $row['role']            = htmlspecialchars($row['role'],            ENT_QUOTES, 'UTF-8');
         $row['edited_module']   = htmlspecialchars($row['edited_module'],   ENT_QUOTES, 'UTF-8');
-        $row['edit_description']= htmlspecialchars($row['edit_description'],ENT_QUOTES, 'UTF-8');
+        $row['edit_description'] = htmlspecialchars($row['edit_description'], ENT_QUOTES, 'UTF-8');
     }
     unset($row);
 

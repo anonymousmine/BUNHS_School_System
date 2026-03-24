@@ -87,7 +87,7 @@ $_counts = [
 ];
 $_new_modules = [];
 
-if (isset($conn) && $conn instanceof mysqli) {
+if (isset($conn) && $conn instanceof mysqli && $conn->ping()) {
 
     // Helper: run a COUNT query safely — returns 0 if table doesn't exist
     $__safe_count = function (string $sql) use ($conn): int {
@@ -135,7 +135,7 @@ if (isset($conn) && $conn instanceof mysqli) {
     if ($r) $_counts['finance'] = (float)($r->fetch_assoc()['total'] ?? 0);
 
     // Auto-clear "NEW" badge for current module
-    if ($_active_module) {
+    if ($_active_module && $conn->ping()) {
         $stmt = $conn->prepare(
             "UPDATE admin_notifications SET is_read = 1
              WHERE edited_module = ? AND is_read = 0"
@@ -148,12 +148,14 @@ if (isset($conn) && $conn instanceof mysqli) {
     }
 
     // Which modules still have unread notifications?
-    $r = $conn->query(
-        "SELECT DISTINCT edited_module FROM admin_notifications WHERE is_read = 0"
-    );
-    if ($r) {
-        while ($row = $r->fetch_assoc()) {
-            $_new_modules[] = strtolower($row['edited_module']);
+    if ($conn->ping()) {
+        $r = $conn->query(
+            "SELECT DISTINCT edited_module FROM admin_notifications WHERE is_read = 0"
+        );
+        if ($r) {
+            while ($row = $r->fetch_assoc()) {
+                $_new_modules[] = strtolower($row['edited_module']);
+            }
         }
     }
 }
@@ -174,6 +176,90 @@ function _nav_has_new(array $mods, string $key): bool
 {
     return in_array(strtolower($key), $mods, true);
 }
+
+// ── 6. User data helper ────────────────────────────────────────
+function roleLabel($role)
+{
+    $map = [
+        'news_admin'         => 'News Admin',
+        'announcement_admin' => 'Announcement Admin',
+        'student_admin'      => 'Student Admin',
+        'teacher_admin'      => 'Teacher Admin',
+        'club_admin'         => 'Club Admin',
+        'super_sub_admin'    => 'Super Sub-Admin',
+        'forms_admin'        => 'Forms Admin',
+    ];
+    $roles = array_map('trim', explode(',', $role ?? ''));
+    $labels = array_map(fn($r) => $map[$r] ?? ucfirst(str_replace('_', ' ', $r)), $roles);
+    return implode(', ', $labels);
+}
+
+function _get_user_data(mysqli $conn): array
+{
+    $user_data = [
+        'name' => $_SESSION['username'] ?? 'Admin',
+        'photo' => 'assets/img/person/school head.jpg',
+        'role' => 'Administrator',
+        'user_type' => $_SESSION['user_type'] ?? 'admin',
+        'principal_title' => ''
+    ];
+    
+    $user_id = (int)($_SESSION['user_id'] ?? 0);
+    $user_type = $_SESSION['user_type'] ?? 'admin';
+    
+    if ($user_id > 0 && $conn->ping()) {
+        if ($user_type === 'admin') {
+            // Fetch from admin table
+            $stmt = $conn->prepare(
+                "SELECT full_name, profile_image, principal_title FROM admin WHERE id = ? LIMIT 1"
+            );
+            if ($stmt) {
+                $stmt->bind_param('i', $user_id);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $admin = $result->fetch_assoc();
+                $stmt->close();
+                
+                if ($admin) {
+                    $user_data['name'] = $admin['full_name'] ?? $user_data['name'];
+                    if (!empty($admin['profile_image'])) {
+                        $user_data['photo'] = 'uploads/admin_profiles/' . $admin['profile_image'];
+                    }
+                    $user_data['principal_title'] = $admin['principal_title'] ?? '';
+                    $user_data['role'] = !empty($user_data['principal_title']) 
+                        ? $user_data['principal_title'] 
+                        : 'Administrator';
+                }
+            }
+        } elseif ($user_type === 'sub-admin') {
+            // Fetch from sub_admin table
+            $stmt = $conn->prepare(
+                "SELECT full_name, profile_image, role FROM sub_admin WHERE id = ? LIMIT 1"
+            );
+            if ($stmt) {
+                $stmt->bind_param('i', $user_id);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $sub_admin = $result->fetch_assoc();
+                $stmt->close();
+                
+                if ($sub_admin) {
+                    $user_data['name'] = $sub_admin['full_name'] ?? $user_data['name'];
+                    if (!empty($sub_admin['profile_image'])) {
+                        $user_data['photo'] = 'uploads/sub_admin_profiles/' . $sub_admin['profile_image'];
+                    }
+                    // Use roleLabel function to format role
+                    $user_data['role'] = roleLabel($sub_admin['role'] ?? 'news_admin');
+                }
+            }
+        }
+    }
+    
+    return $user_data;
+}
+
+// Get user data for use in navigation
+$current_user = _get_user_data($conn);
 ?>
 
 <?php
@@ -997,16 +1083,14 @@ if ($_embed === 'json') {
             <div class="dropdown-wrapper" id="userWrapper">
                 <button class="user" id="userBtn"
                     data-dropdown="userDropdownPanel"
-                    aria-haspopup="true" aria-expanded="false" title="User menu">
-                    <img src="<?= $assetsBase ?>assets/img/person/school head.jpg"
-                        alt="Profile picture">
+                    aria-haspopup="true" aria-expanded="false" title="User menu"
+                    style="display: flex; align-items: center; gap: 10px; transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
+                    <img src="<?= $assetsBase . $current_user['photo'] ?>"
+                        alt="Profile picture"
+                        style="width: 36px; height: 36px; border-radius: 8px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                     <div class="user-info">
-                        <span class="user-name">
-                            <?= htmlspecialchars($_SESSION['username'] ?? 'Admin', ENT_QUOTES, 'UTF-8') ?>
-                        </span>
-                        <span class="user-role">
-                            <?= htmlspecialchars(ucfirst($_SESSION['user_type'] ?? 'Admin'), ENT_QUOTES, 'UTF-8') ?>
-                        </span>
+                        <span class="user-name"><?= htmlspecialchars($current_user['name'], ENT_QUOTES, 'UTF-8') ?></span>
+                        <span class="user-role"><?= htmlspecialchars($current_user['role'], ENT_QUOTES, 'UTF-8') ?></span>
                     </div>
                     <i class="fas fa-chevron-down"></i>
                 </button>
@@ -1014,7 +1098,10 @@ if ($_embed === 'json') {
                     <div style="padding:16px 16px 8px;">
                         <p style="font-size:13px;color:#64748b;">Signed in as</p>
                         <p style="font-weight:700;font-size:14px;color:#1e293b;">
-                            <?= htmlspecialchars($_SESSION['username'] ?? 'Admin', ENT_QUOTES, 'UTF-8') ?>
+                            <?= htmlspecialchars($current_user['name'], ENT_QUOTES, 'UTF-8') ?>
+                        </p>
+                        <p style="font-size:12px;color:#8a9a5b;margin-top:2px;">
+                            <?= htmlspecialchars($current_user['role'], ENT_QUOTES, 'UTF-8') ?>
                         </p>
                     </div>
                     <div class="user-menu-divider"></div>
@@ -1046,11 +1133,14 @@ if ($_embed === 'json') {
         <h2>Buyoan National High School</h2>
     </div>
 
-    <a href="<?= $adminBase ?>admin_profile.php" class="profile" tabindex="0">
-        <img src="<?= $assetsBase ?>assets/img/person/school head.jpg" alt="Profile picture">
+    <a href="<?= $adminBase ?>admin_profile.php" class="profile" tabindex="0"
+       style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
+        <img src="<?= $assetsBase . $current_user['photo'] ?>" 
+             alt="Profile picture"
+             style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 3px 12px rgba(0,0,0,0.15);">
         <div class="info">
-            <h4><?= htmlspecialchars($_SESSION['username'] ?? 'Admin', ENT_QUOTES, 'UTF-8') ?></h4>
-            <p><?= htmlspecialchars(ucfirst($_SESSION['user_type'] ?? 'Administrator'), ENT_QUOTES, 'UTF-8') ?></p>
+            <h4 style="margin:0; font-size:14px; font-weight:600; color:#1e293b;"><?= htmlspecialchars($current_user['name'], ENT_QUOTES, 'UTF-8') ?></h4>
+            <p style="margin:2px 0 0; font-size:12px; color:#64748b; font-weight:500;"><?= htmlspecialchars($current_user['role'], ENT_QUOTES, 'UTF-8') ?></p>
         </div>
         <i class="fas fa-chevron-right profile-arrow"></i>
     </a>
@@ -1713,9 +1803,20 @@ if ($_embed === 'json') {
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
             initAdminNav();
+            initializeNavigation();
         });
+
+        // Initialize Navigation Functionality (fix dropdown paths)
+        function initializeNavigation() {
+            // The dropdown items are already correctly set by PHP using $adminBase
+            // No JavaScript path fixing needed for the main navigation
+            // This function is kept for compatibility but doesn't need to modify hrefs
+            console.log('Navigation initialized - PHP paths are already correct');
+        }
+
     } else {
         /* DOM already ready (e.g. script injected after load) */
         initAdminNav();
+        initializeNavigation();
     }
 </script>

@@ -8,7 +8,10 @@
 
 require_once '../session_config.php';
 
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_type'], ['admin', 'sub-admin'])) {
+if (
+    !(isset($_SESSION['user_id']) && in_array($_SESSION['user_type'] ?? '', ['admin', 'sub-admin']))
+    && !isset($_SESSION['admin_id'])
+) {
     header('Location: ../index.php');
     exit;
 }
@@ -953,8 +956,13 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
 </head>
 
 <body>
-    <!-- Navigation Container (loads admin_nav.php) -->
-    <div id="navigation-container"></div>
+    <?php include 'admin_nav.php'; ?>
+    <script>
+        // Initialize navigation functionality after include
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
+        }
+    </script>
 
     <!-- Chat Page Content -->
     <section class="page-content" id="chatbox-content" style="display: none;">
@@ -1328,17 +1336,16 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
             fd.append('request_id', requestId);
             fd.append('decision', action);
 
-            const res = await fetch(FILE_REQ_API, {
+            const res = await fetch(API, { // Use main API endpoint
                 method: 'POST',
                 body: fd
             });
             const data = await res.json();
 
             if (data.success) {
-                toast(action === 'approve' ?
-                    'File request approved. Student notified.' :
-                    'File request rejected. Student notified.', 'success');
+                toast(`${action === 'approve' ? '✅ Approved' : '❌ Rejected'}: ${data.student_name || 'Request'}`, 'success');
                 await loadMessages();
+                await refreshConvList(); // Refresh conversation list too
             } else {
                 toast(data.message || 'Action failed.', 'error');
             }
@@ -1485,19 +1492,10 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
                 mainDiv.appendChild(pageContent);
             }
 
-            // Fix dropdown item paths
-            const currentPath = window.location.pathname;
-            const isInSubfolder = currentPath.includes('/announcements/');
-            const pathPrefix = isInSubfolder ? '../announcements/' : 'announcements/';
-
-            document.querySelectorAll('.dropdown-item[data-page]').forEach(item => {
-                const page = item.getAttribute('data-page');
-                if (page) item.href = pathPrefix + page;
-            });
-
-            // Initialize dropdowns after navigation is loaded
-            if (typeof window.initializeNavigationDropdowns === 'function') {
-                window.initializeNavigationDropdowns();
+            // Initialize Navigation Functionality (already handled by admin_nav.php)
+            // No need for dropdown path fixing since PHP handles it correctly
+            if (typeof initializeNavigation === 'function') {
+                initializeNavigation();
             }
 
             // Mobile hamburger sidebar toggle

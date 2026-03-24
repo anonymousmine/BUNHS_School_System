@@ -835,7 +835,13 @@ include '../db_connection.php';
 </head>
 
 <body>
-    <div id="navigation-container"></div>
+    <?php include 'admin_nav.php'; ?>
+    <script>
+        // Initialize navigation functionality after include
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
+        }
+    </script>
 
     <main class="main page-content" id="main-content" style="display: none; margin-left: 0; width: calc(100vw - 260px); max-width: 100%; padding: 0 20px; overflow-x: hidden;">
         <div class="page-title">

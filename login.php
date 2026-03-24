@@ -5,69 +5,125 @@
 //  Only the PHP handler block changes; the HTML below it is untouched.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-session_start();
-
-// Redirect already-authenticated admins
-if (isset($_SESSION['admin_id'])) {
-    header('Location: admin_account/admin_dashboard.php');
-    exit;
-}
+// Use shared session config so cookie settings match all admin pages
+require_once __DIR__ . '/session_config.php';
 
 // Load caching layer — must come BEFORE any credential lookup
 require_once __DIR__ . '/cache_helper.php';
 
+// Redirect already-authenticated admins (handles both session formats)
+if (
+    isset($_SESSION['admin_id'])
+    || (isset($_SESSION['user_id']) && in_array($_SESSION['user_type'] ?? '', ['admin', 'sub-admin']))
+) {
+    header('Location: admin_account/admin_dashboard.php');
+    exit;
+}
+
 $login_error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
-    include __DIR__ . '/db_connection.php';   // provides $conn (mysqli)
-
-    $username = trim($_POST['username'] ?? '');
-    $password = trim($_POST['password'] ?? '');
-
-    if ($username === '' || $password === '') {
-        $login_error = 'Please enter both username and password.';
+    // CSRF validation
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
+        $login_error = 'Security validation failed. Please try again.';
+        sleep(1);
     } else {
+        include __DIR__ . '/db_connection.php';   // provides $conn (mysqli)
 
-        $admin     = null;
-        $cache_key = "admin:{$username}";
+        $username = trim($_POST['username'] ?? '');
+        $password = trim($_POST['password'] ?? '');
 
-        // ── 1. Try cache first ────────────────────────────────────────────────
-        $cached = cache_get($cache_key);
-
-        if ($cached !== false) {
-            // CACHE HIT — credential row already in shared memory
-            $admin = $cached;
+        if ($username === '' || $password === '') {
+            $login_error = 'Please enter both username and password.';
         } else {
-            // CACHE MISS — hit the database and store the result
-            $stmt = $conn->prepare(
-                "SELECT id, password FROM `admin` WHERE username = ? LIMIT 1"
-            );
-            if ($stmt) {
-                $stmt->bind_param('s', $username);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                $row    = $result->fetch_assoc();
-                $stmt->close();
+            $admin     = null;
+            $cache_key = "admin:{$username}";
 
-                if ($row) {
-                    $admin = $row;
-                    // Store in APCu so the next login for this admin skips DB
-                    cache_set($cache_key, $admin, CACHE_TTL_CREDENTIALS);
+            // ── 1. Try cache first ────────────────────────────────────────────────
+            $cached = cache_get($cache_key);
+
+            if ($cached !== false) {
+                $admin = $cached;
+            } else {
+                // ── CACHE MISS — detect the real table & password column ──────────
+                // Check 'admin' BEFORE 'admins' — real data is in `admin` table.
+                $admin_table = null;
+                foreach (['admin', 'admins'] as $_t) {
+                    try {
+                        $tc = $conn->query("SHOW TABLES LIKE '{$_t}'");
+                        if ($tc && $tc->num_rows > 0) {
+                            $admin_table = $_t;
+                            break;
+                        }
+                    } catch (Throwable $e) { /* continue */
+                    }
+                }
+
+                if ($admin_table) {
+                    // Detect password column
+                    $pw_col = 'password';
+                    try {
+                        $pw_check = $conn->query("SHOW COLUMNS FROM `{$admin_table}` LIKE 'password_hash'");
+                        if ($pw_check && $pw_check->num_rows > 0) $pw_col = 'password_hash';
+                    } catch (Throwable $e) { /* default to 'password' */
+                    }
+
+                    $stmt = $conn->prepare(
+                        "SELECT id, {$pw_col} AS password FROM `{$admin_table}` WHERE username = ? LIMIT 1"
+                    );
+                    // Fetch id, password, and email for admin or sub_admin
+                    if ($admin_table === 'admin') {
+                        $stmt = $conn->prepare(
+                            "SELECT id, {$pw_col} AS password, school_email AS email 
+         FROM `admin` WHERE username = ? LIMIT 1"
+                        );
+                    } else {
+                        $stmt = $conn->prepare(
+                            "SELECT id, {$pw_col} AS password, email 
+         FROM `sub_admin` WHERE username = ? LIMIT 1"
+                        );
+                    }
+
+                    if ($stmt) {
+                        $stmt->bind_param('s', $username);
+                        $stmt->execute();
+                        $row = $stmt->get_result()->fetch_assoc();
+                        $stmt->close();
+                        if ($row && !empty($row['password'])) {
+                            $admin = $row;
+                            cache_set($cache_key, $admin, CACHE_TTL_CREDENTIALS);
+                        }
+                    }
                 }
             }
-        }
 
-        // ── 2. Verify password — ALWAYS, even on cache hit ───────────────────
-        // The cache only eliminates the SELECT.  The bcrypt check always runs.
-        if ($admin && password_verify($password, $admin['password'])) {
-            session_regenerate_id(true);
-            $_SESSION['admin_id']       = $admin['id'];
-            $_SESSION['admin_username'] = $username;
-            header('Location: admin_account/admin_dashboard.php');
-            exit;
-        } else {
-            $login_error = 'Invalid username or password. Please try again.';
+            // ── 2. Verify password — ALWAYS runs, even on cache hit ──────────────
+            if ($admin && password_verify($password, $admin['password'])) {
+                // Generate OTP
+                $otp = random_int(100000, 999999);
+
+                // Store OTP and user info temporarily
+                $_SESSION['pending_otp']   = $otp;
+                $_SESSION['pending_user']  = [
+                    'id'       => $admin['id'],
+                    'username' => $username,
+                    'email'    => $admin['email'] // comes from school_email (admin) or email (sub_admin)
+                ];
+
+                // Send OTP to email
+                $to      = $admin['email'];
+                $subject = "Your Admin Login Verification Code";
+                $message = "Hello {$username},\n\nYour verification code is: {$otp}\n\n";
+                $headers = "From: no-reply@bunhs.edu.ph";
+
+                mail($to, $subject, $message, $headers);
+
+                // Redirect to OTP verification page
+                header('Location: veifrify_otp.php');
+                exit;
+            } else {
+                $login_error = 'Invalid username or password. Please try again.';
+            }
         }
     }
 }
@@ -91,11 +147,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900&family=Raleway:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900&display=swap" rel="stylesheet">
 
-    <!-- Vendor CSS Files -->
-    <link href="assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-    <link href="assets/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
-    <link href="assets/vendor/swiper/swiper-bundle.min.css" rel="stylesheet">
-    <link href="assets/vendor/glightbox/css/glightbox.min.css" rel="stylesheet">
+    <!-- Vendor CSS Files (CDN) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
     <!-- Main CSS File -->
     <link href="assets/css/main.css" rel="stylesheet">
@@ -112,6 +166,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <form id="loginForm" method="POST" action="login.php">
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+
 
                 <?php if ($login_error): ?>
                     <div class="alert alert-danger" style="
@@ -139,7 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
 
             <div class="forgot-password">
-                <a href="#">Forgot your password?</a>
+                <a href="admin_account/forgot_password.php">Forgot your password?</a>
             </div>
 
             <div class="signup-link">
@@ -148,15 +204,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 
-    <!-- Vendor JS Files -->
-    <script src="assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="assets/vendor/php-email-form/validate.js"></script>
-    <script src="assets/vendor/swiper/swiper-bundle.min.js"></script>
-    <script src="assets/vendor/purecounter/purecounter_vanilla.js"></script>
-    <script src="assets/vendor/glightbox/js/glightbox.min.js"></script>
-
-    <!-- Main JS File -->
-    <script src="assets/js/main.js"></script>
+    <!-- Vendor JS Files (CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
         document.getElementById('loginForm').addEventListener('submit', function(e) {

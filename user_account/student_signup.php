@@ -60,7 +60,7 @@ $conn->query("ALTER TABLE students ADD COLUMN IF NOT EXISTS linked_student_id VA
 define('SC_SMTP_HOST', 'smtp.gmail.com');
 define('SC_SMTP_PORT', 587);
 define('SC_SMTP_USER', 'bunhs.deped@gmail.com');
-define('SC_SMTP_PASS', 'msqncrybbxlxhmbn');
+define('SC_SMTP_PASS', 'svhiovmxalojxzxg');
 define('SC_SMTP_FROM', 'bunhs.deped@gmail.com');
 define('SC_SMTP_NAME', 'Buyoan National High School');
 define('SC_OTP_EXPIRY',   300);  // 5 min

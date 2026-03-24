@@ -1,445 +1,474 @@
 <?php
-// ─────────────────────────────────────────────────────────────
-//  login_otp.php  –  Login OTP Handler (AJAX endpoint)
-// ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//  login_otp.php — OTP Login Handler
+//  Sends a 6-digit verification code to the user's registered email before
+//  granting access to admin_dashboard.php.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// Suppress warnings/notices so they never corrupt the JSON response
-error_reporting(0);
-ini_set('display_errors', 0);
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
 
-// Send JSON header first — before any include that might output something
+const REQUIRE_OTP = true;    // OTP verification required before dashboard access
+
+// ── SMTP config (same credentials as signup.php) ─────────────────────────────
+define('LOT_SMTP_HOST',      'smtp.gmail.com');
+define('LOT_SMTP_PORT',      587);
+define('LOT_SMTP_USER',      'bunhs.deped@gmail.com');
+define('LOT_SMTP_PASS',      'svhiovmxalojxzxg');
+define('LOT_SMTP_FROM',      'bunhs.deped@gmail.com');
+define('LOT_SMTP_FROM_NAME', 'Buyoan National High School');
+
+ob_start();  // capture ANY stray output (warnings, notices, BOM) before JSON
+
+require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/session_config.php';
+require_once __DIR__ . '/db_connection.php';
+
+ob_clean();  // discard everything captured above
+
 header('Content-Type: application/json');
 
-// Secure session configuration (must match index.php)
-ini_set('session.cookie_httponly', 1);
-ini_set('session.cookie_secure', 0); // Set to 1 on HTTPS/production only
-ini_set('session.cookie_samesite', 'Strict');
-ini_set('session.use_only_cookies', 1);
-session_start();
-
-// Include DB connection
-include 'db_connection.php';
-
-// ── Load OTP delivery helpers from signup.php ────────────────
-// We reuse sendEmailOTP() and sendSmsOTP() defined there.
-// To avoid re-including the whole file we inline lightweight versions here.
-
-define('SMTP_HOST_L',     'smtp.gmail.com');
-define('SMTP_PORT_L',     587);
-define('SMTP_USER_L',     'bunhs.deped@gmail.com');       // ← same as signup.php
-define('SMTP_PASS_L',     'msqncrybbxlxhmbn');    // ← same as signup.php
-define('SMTP_FROM_L',     'bunhs.deped@gmail.com');
-define('SMTP_FROM_NAME_L', 'Buyoan National High School');
-
-define('SEMAPHORE_KEY_L',    'YOUR_SEMAPHORE_API_KEY');  // ← same as signup.php
-define('SEMAPHORE_SENDER_L', 'BUNHS');
-
-define('LOGIN_OTP_EXPIRY',       300);   // 5 minutes
-define('LOGIN_MAX_OTP_ATTEMPTS', 5);
-define('LOGIN_MAX_RESEND',       3);
-define('MAX_LOGIN_ATTEMPTS',     5);
-define('LOCKOUT_TIME',           900);   // 15 min
-
-// ──────────────────────────────────────────────
-//  HELPERS
-// ──────────────────────────────────────────────
-
-function sanitize($v)
+// ── send() — always clears buffer, always outputs clean JSON ──────────────────
+function send(array $d): void
 {
-    return htmlspecialchars(trim($v), ENT_QUOTES, 'UTF-8');
-}
-function genOTP()
-{
-    return str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    if (ob_get_level()) ob_clean();
+    echo json_encode($d);
+    exit;
 }
 
-function getIP()
-{
-    foreach (['HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $k) {
-        if (!empty($_SERVER[$k])) return $_SERVER[$k];
+// ── CSRF guard ────────────────────────────────────────────────────────────────
+$action = $_POST['action'] ?? '';
+$csrf   = $_POST['csrf_token'] ?? '';
+$sess_csrf = $_SESSION['csrf_token'] ?? '';
+
+if ($action === 'login_verify_credentials') {
+    if (empty($sess_csrf) || empty($csrf) || !hash_equals($sess_csrf, $csrf)) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        send(['success' => false, 'message' => 'Security validation failed. Please hard-refresh (Ctrl+Shift+R) and try again.']);
     }
-    return '0.0.0.0';
 }
 
-function isRateLimited($ip)
+// ── Send OTP via Gmail (PHPMailer preferred, native mail() fallback) ──────────
+function sendLoginOTP(string $to, string $otp, string $name, string $role): array
 {
-    $attempts = $_SESSION['login_attempts'][$ip] ?? [];
-    $recent = array_filter($attempts, fn($t) => $t > time() - LOCKOUT_TIME);
-    return count($recent) >= MAX_LOGIN_ATTEMPTS;
+    $role_label = $role === 'admin' ? 'Admin' : 'Sub-Admin';
+    $safe_name  = htmlspecialchars($name, ENT_QUOTES, 'UTF-8');
+
+    $html_body = "
+    <div style='font-family:Arial,sans-serif;max-width:480px;margin:0 auto;'>
+      <div style='background:#1a3a2a;padding:28px 32px 20px;border-radius:12px 12px 0 0;text-align:center;'>
+        <h2 style='color:#fff;margin:0;font-size:20px;'>Buyoan National High School</h2>
+        <p style='color:rgba(255,255,255,.6);margin:4px 0 0;font-size:13px;'>{$role_label} Login Verification</p>
+      </div>
+      <div style='background:#fff;padding:32px;border:1px solid #e0e0e0;border-top:none;'>
+        <p style='color:#333;font-size:14px;margin:0 0 18px;'>Hello <strong>{$safe_name}</strong>,</p>
+        <p style='color:#555;font-size:14px;margin:0 0 20px;'>Your 6-digit login verification code is:</p>
+        <div style='background:#f4faf7;border:2px solid #2d6a4f;border-radius:10px;padding:20px;text-align:center;margin-bottom:20px;'>
+          <span style='font-size:36px;font-weight:800;letter-spacing:10px;color:#1a3a2a;'>{$otp}</span>
+        </div>
+        <p style='color:#888;font-size:12px;margin:0;'>This code expires in 5 minutes. Do not share it with anyone.</p>
+      </div>
+      <div style='background:#f8f5f0;padding:16px 32px;border-radius:0 0 12px 12px;text-align:center;'>
+        <p style='color:#aaa;font-size:11px;margin:0;'>Buyoan National High School &bull; Official System</p>
+      </div>
+    </div>";
+
+    // ── PATH A: PHPMailer via Gmail SMTP (optimized) ────────────────────────
+    if (class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+        $mail = new PHPMailer(true);
+        try {
+            // Optimize SMTP connection for faster sending
+            $mail->isSMTP();
+            $mail->Host       = LOT_SMTP_HOST;
+            $mail->SMTPAuth   = true;
+            $mail->Username   = LOT_SMTP_USER;
+            $mail->Password   = LOT_SMTP_PASS;
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->Port       = LOT_SMTP_PORT;
+            
+            // Add timeout and connection optimizations
+            $mail->Timeout    = 10; // 10 second timeout
+            $mail->SMTPKeepAlive = true; // Keep connection alive
+            $mail->SMTPAutoTLS = true; // Auto TLS detection
+            
+            // Set from and recipient
+            $mail->setFrom(LOT_SMTP_FROM, LOT_SMTP_FROM_NAME);
+            $mail->addAddress($to, $name);
+            $mail->isHTML(true);
+            $mail->Subject = 'Your BUNHS Login Verification Code';
+            $mail->Body    = $html_body;
+            
+            // Send with error handling
+            $start_time = microtime(true);
+            $result = $mail->send();
+            $send_time = round((microtime(true) - $start_time) * 1000, 2);
+            
+            error_log("[login_otp] PHPMailer sent OTP to {$to} in {$send_time}ms");
+            return ['success' => true, 'send_time' => $send_time];
+            
+        } catch (Exception $e) {
+            $error_msg = $mail->ErrorInfo ?? $e->getMessage();
+            error_log('[login_otp] PHPMailer SMTP error: ' . $error_msg . ' — falling back to mail()');
+            // Fall through to native mail() below
+        }
+    } else {
+        error_log("[login_otp] PHPMailer not installed — using native mail() fallback");
+    }
+
+    // ── PATH B: Native mail() fallback (optimized) ─────────────────────────────────
+    $headers  = "From: Buyoan National High School <" . LOT_SMTP_FROM . ">\r\n";
+    $headers .= "Reply-To: " . LOT_SMTP_FROM . "\r\n";
+    $headers .= "MIME-Version: 1.0\r\n";
+    $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
+    $headers .= "X-Mailer: PHP/" . phpversion() . "\r\n";
+    $headers .= "X-Priority: 1\r\n"; // High priority for faster delivery
+
+    // Track send time for native mail
+    $start_time = microtime(true);
+    $sent = @mail($to, 'Your BUNHS Login Verification Code', $html_body, $headers);
+    $send_time = round((microtime(true) - $start_time) * 1000, 2);
+
+    // ── Always log OTP with timing for debugging ────────────────────────────────────────
+    // Find log at: C:\xampp\php\logs\php_error_log or C:\xampp\apache\logs\error.log
+    error_log("[login_otp] OTP for {$to} ({$role_label}): {$otp} | mail()=" . ($sent ? 'queued in ' . $send_time . 'ms' : 'FAILED'));
+
+    if ($sent) {
+        return ['success' => true, 'method' => 'native_mail', 'send_time' => $send_time];
+    }
+
+    // ── PATH C: Both failed — return dev_otp so caller can include it in response ──
+    error_log("[login_otp] Both PHPMailer and native mail() failed for {$to}");
+    return ['success' => false, 'dev_otp' => $otp, 'error' => 'All email methods failed'];
 }
 
-function recordAttempt($ip)
+// ── Column existence helper ───────────────────────────────────────────────────
+function col_exists(mysqli $c, string $table, string $col): bool
 {
-    $_SESSION['login_attempts'][$ip][] = time();
-}
-
-function maskEmail($email)
-{
-    [$user, $domain] = explode('@', $email, 2);
-    return substr($user, 0, 2) . str_repeat('*', max(1, strlen($user) - 2)) . '@' . $domain;
-}
-
-function maskPhone($phone)
-{
-    $clean = preg_replace('/\D/', '', $phone);
-    return substr($clean, 0, 4) . str_repeat('*', max(0, strlen($clean) - 7)) . substr($clean, -3);
-}
-
-function sendLoginEmail($to, $otp)
-{
-    $autoload = __DIR__ . '/vendor/autoload.php';
-    if (!file_exists($autoload)) return false;
-
-    require_once $autoload;
-
-    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
     try {
-        $mail->isSMTP();
-        $mail->Host       = SMTP_HOST_L;
-        $mail->SMTPAuth   = true;
-        $mail->Username   = SMTP_USER_L;
-        $mail->Password   = SMTP_PASS_L;
-        $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
-        $mail->Port       = SMTP_PORT_L;
-        $mail->setFrom(SMTP_FROM_L, SMTP_FROM_NAME_L);
-        $mail->addAddress($to);
-        $mail->isHTML(true);
-        $mail->Subject = 'Buyoan National High School Login Code';
-        $mail->Body    = '
-            <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:30px;
-                        border:1px solid #e0e0e0;border-radius:12px;">
-                <h2 style="color:#1a73e8;text-align:center;">Login Verification Code</h2>
-                <p style="color:#555;text-align:center;">Use this code to sign in to your account.</p>
-                <div style="background:#f1f3f4;border-radius:8px;padding:20px;text-align:center;
-                            letter-spacing:10px;font-size:36px;font-weight:bold;color:#202124;
-                            margin:24px 0;">' . $otp . '</div>
-                <p style="color:#888;font-size:13px;text-align:center;">
-                    Expires in <strong>5 minutes</strong>. Never share this code.
-                </p>
-            </div>';
-        $mail->AltBody = "Your BUNHS login code: $otp (expires in 5 minutes)";
-        $mail->send();
-        return true;
-    } catch (\Exception $e) {
-        error_log('Login mail error: ' . $mail->ErrorInfo);
+        $r = $c->query("SHOW COLUMNS FROM `{$table}` LIKE '{$col}'");
+        return $r && $r->num_rows > 0;
+    } catch (Throwable $e) {
         return false;
     }
 }
 
-function sendLoginSMS($phone, $otp)
+// ── Find admin table ─────────────────────────────────────────────────────────
+// Check 'admin' BEFORE 'admins' — real data is in `admin` (has school_email).
+// Both tables may exist; picking the wrong one causes "Unknown column" errors.
+function find_admin_table(mysqli $c): ?string
 {
-    $clean = preg_replace('/\D/', '', $phone);
-    if (substr($clean, 0, 1) === '0') $clean = '63' . substr($clean, 1);
-
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL            => 'https://semaphore.co/api/v4/messages',
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => http_build_query([
-            'apikey'     => SEMAPHORE_KEY_L,
-            'number'     => $clean,
-            'message'    => "Your BUNHS login code is: $otp\nExpires in 5 minutes.",
-            'sendername' => SEMAPHORE_SENDER_L,
-        ]),
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 15,
-    ]);
-    $resp = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    // curl_close() is a no-op since PHP 8.0 and deprecated in PHP 8.4 — omitted
-    return $code === 200;
-}
-
-function sendLoginOTP($user_data, $otp)
-{
-    if (!empty($user_data['email'])) return sendLoginEmail($user_data['email'], $otp);
-    if (!empty($user_data['phone'])) return sendLoginSMS($user_data['phone'], $otp);
-    return false;
-}
-
-function logAttempt($username, $success)
-{
-    if (!is_dir('logs')) mkdir('logs', 0755, true);
-    file_put_contents(
-        'logs/login_attempts.log',
-        sprintf(
-            "[%s] IP: %s | User: %s | Success: %s\n",
-            date('Y-m-d H:i:s'),
-            getIP(),
-            htmlspecialchars($username),
-            $success ? 'Yes' : 'No'
-        ),
-        FILE_APPEND | LOCK_EX
-    );
-}
-
-// ──────────────────────────────────────────────
-//  MAIN ROUTER
-// ──────────────────────────────────────────────
-
-$action = $_POST['action'] ?? '';
-
-if ($action === 'login_verify_credentials') {
-    // ── Step 1: Check username + password ────────────────────
-    $username = sanitize($_POST['username'] ?? '');
-    $password = $_POST['password']           ?? '';
-    $ip       = getIP();
-
-    if (isRateLimited($ip)) {
-        echo json_encode(['success' => false, 'message' => 'Too many failed attempts. Try again in 15 minutes.']);
-        exit;
+    foreach (['admin', 'admins'] as $t) {
+        try {
+            $r = $c->query("SHOW TABLES LIKE '{$t}'");
+            if ($r && $r->num_rows > 0) return $t;
+        } catch (Throwable $e) { /* continue */
+        }
     }
+    return null;
+}
 
-    if (empty($username) || empty($password)) {
-        echo json_encode(['success' => false, 'message' => 'Please enter both username and password.']);
-        exit;
+// ── Find sub_admin table ─────────────────────────────────────────────────────
+function find_subadmin_table(mysqli $c): ?string
+{
+    foreach (['sub_admin', 'sub-admin'] as $t) {
+        try {
+            $r = $c->query("SHOW TABLES LIKE '{$t}'");
+            if ($r && $r->num_rows > 0) return $t;
+        } catch (Throwable $e) { /* continue */
+        }
     }
+    return null;
+}
 
-    $user_data  = null;
-    $user_type  = '';
+// ── Fetch a user row from a table by username ─────────────────────────────────
+function fetch_user(mysqli $c, string $table, string $username, string $extra_where = ''): ?array
+{
+    try {
+        if (in_array($table, ['admin', 'admins', 'sub_admin', 'sub-admin'])) {
+            // Admin tables always use standard username + password/password_hash
+            $pw_col  = col_exists($c, $table, 'password_hash') ? 'password_hash' : 'password';
+            // Detect whichever email column exists (admins uses school_email, sub_admin uses email)
+            $em_col  = '';
+            if (col_exists($c, $table, 'email'))        $em_col = ', email';
+            elseif (col_exists($c, $table, 'school_email')) $em_col = ', school_email AS email';
+            $ph_col  = col_exists($c, $table, 'phone')         ? ', phone'        : '';
+            $where   = $extra_where ? "username = ? AND {$extra_where}" : 'username = ?';
+            $stmt    = $c->prepare("SELECT id, `{$pw_col}` AS pw, username{$em_col}{$ph_col} FROM `{$table}` WHERE {$where} LIMIT 1");
+        } else {
+            // Student tables — detect actual column names dynamically
+            $id_col   = null;
+            $pw_col   = null;
+            $user_col = null;
+            foreach (['id', 'student_id', 'student_number', 'lrn'] as $col)
+                if (!$id_col   && col_exists($c, $table, $col)) $id_col   = $col;
+            foreach (['password_hash', 'password', 'pw'] as $col)
+                if (!$pw_col   && col_exists($c, $table, $col)) $pw_col   = $col;
+            foreach (['username', 'email', 'student_email'] as $col)
+                if (!$user_col && col_exists($c, $table, $col)) $user_col = $col;
 
-    // Check admin table
-    $stmt = $conn->prepare("SELECT id, password, personal_email AS email, personal_mobile AS phone FROM `admin` WHERE username = ? LIMIT 1");
-    if ($stmt) {
+            if (!$id_col || !$pw_col || !$user_col) {
+                error_log("[login_otp] Table `{$table}` missing required columns (id={$id_col}, pw={$pw_col}, user={$user_col})");
+                return null;
+            }
+            $where = $extra_where ? "{$user_col} = ? AND {$extra_where}" : "{$user_col} = ?";
+            $stmt  = $c->prepare("SELECT `{$id_col}` AS id, `{$pw_col}` AS pw, `{$user_col}` AS username FROM `{$table}` WHERE {$where} LIMIT 1");
+        }
+
+        if (!$stmt) return null;
         $stmt->bind_param('s', $username);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
-        if ($row) {
-            $user_data = $row;
-            $user_type = 'admin';
-        }
         $stmt->close();
+        return $row ?: null;
+    } catch (Throwable $e) {
+        error_log("[login_otp] fetch_user error on table `{$table}`: " . $e->getMessage());
+        return null;
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ACTION: login_verify_credentials
+// ══════════════════════════════════════════════════════════════════════════════
+if ($action === 'login_verify_credentials') {
+
+    $username = trim($_POST['username'] ?? '');
+    $password = trim($_POST['password'] ?? '');
+
+    if ($username === '' || $password === '') {
+        send(['success' => false, 'message' => 'Please enter both username and password.']);
     }
 
-    // Check sub_admin table
-    if (!$user_data) {
-        $stmt = $conn->prepare(
-            "SELECT id, password, email, phone FROM `sub_admin` WHERE username = ? AND status = 'approved' LIMIT 1"
-        );
-        if ($stmt) {
-            $stmt->bind_param('s', $username);
-            $stmt->execute();
-            $row = $stmt->get_result()->fetch_assoc();
-            if ($row) {
-                $user_data = $row;
-                $user_type = 'sub-admin';
+    $user      = null;
+    $user_role = null;
+
+    // 1. Admin table
+    $admin_table = find_admin_table($conn);
+    error_log("[login_otp] admin_table detected: " . ($admin_table ?? 'NONE'));
+    if ($admin_table) {
+        $row = fetch_user($conn, $admin_table, $username);
+        error_log("[login_otp] admin row found: " . ($row ? 'YES (id=' . $row['id'] . ')' : 'NO'));
+        if ($row && !empty($row['pw'])) {
+            $pw_match = password_verify($password, $row['pw']);
+            error_log("[login_otp] admin password_verify: " . ($pw_match ? 'MATCH' : 'FAIL') . " | hash_len=" . strlen($row['pw']));
+            if ($pw_match) {
+                $user      = $row;
+                $user_role = 'admin';
             }
-            $stmt->close();
         }
     }
 
-    // Check students table — email or student_id, must have a password set
-    if (!$user_data) {
-        $stmt = $conn->prepare(
-            "SELECT id, password, email,
-                    COALESCE(phone, phone_number, '') AS phone,
-                    first_name, last_name, grade_level
-             FROM students
-             WHERE (email = ? OR student_id = ?)
-               AND password IS NOT NULL
-             LIMIT 1"
-        );
-        if ($stmt) {
-            $stmt->bind_param('ss', $username, $username);
-            $stmt->execute();
-            $row = $stmt->get_result()->fetch_assoc();
-            if ($row) { $user_data = $row; $user_type = 'student'; }
-            $stmt->close();
-        }
-    }
-
-    // ── Password check — handles bcrypt AND plain text (legacy accounts) ──
-    $password_ok = false;
-    if ($user_data) {
-        $stored = $user_data['password'] ?? '';
-        if (strlen($stored) >= 60 && str_starts_with($stored, '$2')) {
-            // Proper bcrypt hash
-            $password_ok = password_verify($password, $stored);
-        } else {
-            // Plain text (stored before hashing was implemented) — compare directly
-            // then immediately upgrade to bcrypt so next login uses the hash
-            $password_ok = ($password === $stored);
-            if ($password_ok && $user_type === 'student') {
-                $new_hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
-                $up = $conn->prepare("UPDATE students SET password = ? WHERE id = ? LIMIT 1");
-                if ($up) {
-                    $up->bind_param('si', $new_hash, $user_data['id']);
-                    $up->execute();
-                    $up->close();
+    // 2. Sub-admin table
+    if (!$user) {
+        $sa_table = find_subadmin_table($conn);
+        error_log("[login_otp] subadmin_table detected: " . ($sa_table ?? 'NONE'));
+        if ($sa_table) {
+            $row = fetch_user($conn, $sa_table, $username, "status = 'approved'");
+            error_log("[login_otp] subadmin row found: " . ($row ? 'YES' : 'NO'));
+            if ($row) {
+                error_log("[login_otp] subadmin password hash length: " . strlen($row['pw']));
+                error_log("[login_otp] subadmin password empty check: " . (!empty($row['pw']) ? 'PASS' : 'FAIL'));
+                $pw_verify = password_verify($password, $row['pw']);
+                error_log("[login_otp] subadmin password_verify: " . ($pw_verify ? 'MATCH' : 'FAIL'));
+                if ($row && !empty($row['pw']) && $pw_verify) {
+                    $user      = $row;
+                    $user_role = 'sub-admin';
+                    error_log("[login_otp] sub-admin authentication SUCCESS");
+                } else {
+                    error_log("[login_otp] sub-admin authentication FAILED - conditions not met");
                 }
             }
         }
     }
 
-    if ($password_ok) {
-        // Generate OTP
-        $otp = genOTP();
-        $_SESSION['login_otp_data'] = [
-            'otp'          => $otp,
-            'otp_expires'  => time() + LOGIN_OTP_EXPIRY,
-            'otp_attempts' => 0,
-            'resend_count' => 0,
-            'user_id'      => $user_data['id'],
-            'username'     => $username,
-            'user_type'    => $user_type,
-            'email'        => $user_data['email'] ?? '',
-            'phone'        => $user_data['phone'] ?? '',
-            'student_name' => isset($user_data['first_name'])
-                                ? trim($user_data['first_name'] . ' ' . $user_data['last_name'])
-                                : '',
-            'grade_level'  => $user_data['grade_level'] ?? '',
-        ];
-
-        $sent = sendLoginOTP($user_data, $otp);
-        if (!$sent) {
-            // ── DEV MODE: PHPMailer/SMS not configured yet ────────────
-            // OTP is returned in the JSON response for local testing.
-            // ⚠️ REMOVE the dev_otp line before going to production!
-            error_log("=== DEV LOGIN OTP for [{$username}]: {$otp} ===");
-            $sent = true;
-            // ─────────────────────────────────────────────────────────
-            // unset($_SESSION['login_otp_data']);
-            // logAttempt($username, false);
-            // echo json_encode(['success' => false, 'message' => 'Failed to send verification code. Please contact support.']);
-            // exit;
+    // 3. Students table (only query if the table actually exists)
+    if (!$user) {
+        try {
+            $st_check = $conn->query("SHOW TABLES LIKE 'students'");
+            if ($st_check && $st_check->num_rows > 0) {
+                $row = fetch_user($conn, 'students', $username);
+                if ($row && !empty($row['pw']) && password_verify($password, $row['pw'])) {
+                    $user      = $row;
+                    $user_role = 'student';
+                }
+            }
+        } catch (Throwable $e) { /* students table doesn't exist — skip */
         }
-
-        // Build masked contact for UI
-        $masked = !empty($user_data['email'])
-            ? maskEmail($user_data['email'])
-            : maskPhone($user_data['phone']);
-
-        logAttempt($username, true);
-        unset($_SESSION['login_attempts'][$ip]);
-
-        // ⚠️ DEV ONLY — remove 'dev_otp' before going to production!
-        echo json_encode([
-            'success'        => true,
-            'masked_contact' => $masked,
-            'dev_otp'        => $otp,  // ⚠️ REMOVE IN PRODUCTION
-        ]);
-    } else {
-        recordAttempt($ip);
-        logAttempt($username, false);
-        sleep(1);
-        echo json_encode(['success' => false, 'message' => 'Invalid username or password.']);
     }
-    exit;
+
+    error_log("[login_otp] final user_role: " . ($user_role ?? 'NULL — login failed'));
+
+    if (!$user) {
+        send(['success' => false, 'message' => 'Invalid username or password. Please try again.']);
+    }
+
+    // ── CREDENTIALS VALID ─────────────────────────────────────────────────────
+
+    // ── OTP VERIFICATION REQUIRED ────────────────────────────────────────────
+    $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+    $_SESSION['otp_pending'] = [
+        'otp'       => password_hash($otp, PASSWORD_DEFAULT),
+        'user_id'   => (int) $user['id'],
+        'username'  => $user['username'],
+        'user_type' => $user_role,
+        'email'     => $user['email'] ?? '',
+        'expires'   => time() + 300,
+    ];
+
+    // ── Get email — try all possible column names with direct queries ───────────
+    $contact_email = $user['email'] ?? '';
+    $display_name  = $user['username'];
+
+    if (empty($contact_email)) {
+        // Use a single UNION query to try all possible email column names at once.
+        // This avoids SHOW COLUMNS (which can fail due to XAMPP permissions).
+        $uid = (int) $user['id'];
+        $tbl = ($user_role === 'sub-admin') ? ($sa_table ?? $admin_table) : $admin_table;
+
+        if ($tbl) {
+            // Try each email column with try/catch — @ suppressor does NOT work
+            // under XAMPP's strict mysqli error mode (MYSQLI_REPORT_STRICT).
+            foreach (['school_email', 'email', 'admin_email', 'contact_email'] as $_c) {
+                try {
+                    $r = $conn->query("SELECT `{$_c}` AS em FROM `{$tbl}` WHERE id = {$uid} LIMIT 1");
+                    if ($r && ($row_em = $r->fetch_assoc()) && !empty($row_em['em'])) {
+                        $contact_email = $row_em['em'];
+                        error_log("[login_otp] email found in `{$tbl}`.`{$_c}`: {$contact_email}");
+                        break;
+                    }
+                } catch (Throwable $e) {
+                    // Column doesn't exist — try the next one
+                }
+            }
+        }
+    }
+
+    error_log("[login_otp] contact_email resolved: " . ($contact_email ?: 'NONE'));
+
+    // ── SEND OTP IMMEDIATELY (no delays) ───────────────────────────────────
+    $mail_start = microtime(true);
+    $mail_result = sendLoginOTP($contact_email, $otp, $display_name, $user_role);
+    $mail_time = round((microtime(true) - $mail_start) * 1000, 2);
+    
+    error_log("[login_otp] OTP send completed for {$contact_email} in {$mail_time}ms");
+    
+    // ── RETURN RESPONSE ────────────────────────────────────────────────────────
+    if ($mail_result['success']) {
+        $response = [
+            'success' => true,
+            'message' => 'OTP sent to your registered email',
+            'masked_contact' => $masked ?: 'your registered email',
+            'send_time' => $mail_result['send_time'] ?? $mail_time,
+            'method' => $mail_result['method'] ?? 'unknown'
+        ];
+    } else {
+        // If email sending failed, return OTP for development
+        $response = [
+            'success' => false,
+            'message' => 'Email service unavailable. Please use the code below.',
+            'dev_otp' => $otp,
+            'error' => $mail_result['error'] ?? 'Email sending failed',
+            'send_time' => $mail_time
+        ];
+    }
+    
+    $total_time = round((microtime(true) - $start_time) * 1000, 2);
+    error_log("[login_otp] Total OTP process time: {$total_time}ms for {$username}");
+    
+    send($response);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  ACTION: login_verify_otp
+// ══════════════════════════════════════════════════════════════════════════════
 if ($action === 'login_verify_otp') {
-    // ── Step 2: Verify login OTP ──────────────────────────────
+
+    if (!isset($_SESSION['otp_pending'])) {
+        send(['success' => false, 'message' => 'Session expired. Please log in again.']);
+    }
+
+    $pending   = $_SESSION['otp_pending'];
     $otp_input = trim($_POST['otp'] ?? '');
 
-    if (empty($_SESSION['login_otp_data'])) {
-        echo json_encode(['success' => false, 'message' => 'Session expired. Please log in again.']);
-        exit;
+    if (time() > $pending['expires']) {
+        unset($_SESSION['otp_pending']);
+        send(['success' => false, 'message' => 'OTP expired. Please log in again.']);
     }
 
-    $d = &$_SESSION['login_otp_data'];
-
-    if ($d['otp_attempts'] >= LOGIN_MAX_OTP_ATTEMPTS) {
-        unset($_SESSION['login_otp_data']);
-        echo json_encode(['success' => false, 'message' => 'Too many failed attempts. Please log in again.']);
-        exit;
+    if (!password_verify($otp_input, $pending['otp'])) {
+        send(['success' => false, 'message' => 'Invalid OTP. Please try again.']);
     }
 
-    if (time() > $d['otp_expires']) {
-        unset($_SESSION['login_otp_data']);
-        echo json_encode(['success' => false, 'message' => 'Code expired. Please log in again.']);
-        exit;
-    }
-
-    if (!preg_match('/^\d{6}$/', $otp_input) || $otp_input !== $d['otp']) {
-        $d['otp_attempts']++;
-        $rem = LOGIN_MAX_OTP_ATTEMPTS - $d['otp_attempts'];
-        echo json_encode(['success' => false, 'message' => "Invalid code. $rem attempt(s) remaining."]);
-        exit;
-    }
-
-    // ✅ OTP correct — create authenticated session
     session_regenerate_id(true);
+    unset($_SESSION['otp_pending']);
 
-    if ($d['user_type'] === 'student') {
-        // Student session — matches what Dashboard.php expects
-        $_SESSION['student_id']   = $d['user_id'];
-        $_SESSION['student_name'] = $d['student_name'];
-        $_SESSION['grade_level']  = $d['grade_level'];
-        $_SESSION['user_type']    = 'student';
-        $_SESSION['login_method'] = !empty($d['email']) ? 'email' : 'phone';
-    } else {
-        // Admin / sub-admin session
-        $_SESSION['user_id']   = $d['user_id'];
-        $_SESSION['username']  = $d['username'];
-        $_SESSION['user_type'] = $d['user_type'];
-    }
-
+    $_SESSION['user_id']    = $pending['user_id'];
+    $_SESSION['username']   = $pending['username'];
+    $_SESSION['user_type']  = $pending['user_type'];
     $_SESSION['login_time'] = time();
-    unset($_SESSION['login_otp_data']);
 
-    logAttempt($d['username'], true);
-    echo json_encode(['success' => true, 'user_type' => $d['user_type']]);
-    exit;
-}
-
-if ($action === 'login_resend_otp') {
-    // ── Resend login OTP ──────────────────────────────────────
-    if (empty($_SESSION['login_otp_data'])) {
-        echo json_encode(['success' => false, 'message' => 'Session expired. Please log in again.']);
-        exit;
-    }
-    $d = &$_SESSION['login_otp_data'];
-
-    if ($d['resend_count'] >= LOGIN_MAX_RESEND) {
-        echo json_encode(['success' => false, 'message' => 'Maximum resend limit reached. Please log in again.']);
-        exit;
-    }
-
-    $otp = genOTP();
-    $d['otp']          = $otp;
-    $d['otp_expires']  = time() + LOGIN_OTP_EXPIRY;
-    $d['otp_attempts'] = 0;
-    $d['resend_count']++;
-
-    $sent = sendLoginOTP($d, $otp);
-    $rem  = LOGIN_MAX_RESEND - $d['resend_count'];
-
-    if ($sent) {
-        echo json_encode(['success' => true, 'message' => "New code sent. ($rem resend(s) remaining.)"]);
+    if (in_array($pending['user_type'], ['admin', 'sub-admin'])) {
+        $_SESSION['admin_id']       = $pending['user_id'];
+        $_SESSION['admin_username'] = $pending['username'];
     } else {
-        echo json_encode(['success' => false, 'message' => 'Failed to resend code. Please try again.']);
+        $_SESSION['student_id'] = $pending['user_id'];
     }
-    exit;
+
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    send(['success' => true, 'user_type' => $pending['user_type']]);
 }
 
-// ── DEBUG — remove after testing ────────────────────────────
-// Visit: POST login_otp.php action=debug_student&email=YOUR_EMAIL
-if ($action === 'debug_student') {
-    $email = trim($_POST['email'] ?? '');
-    if (empty($email)) { echo json_encode(['error' => 'No email provided']); exit; }
+// ══════════════════════════════════════════════════════════════════════════════
+//  ACTION: login_resend_otp
+// ══════════════════════════════════════════════════════════════════════════════
+if ($action === 'login_resend_otp') {
+    if (!isset($_SESSION['otp_pending'])) {
+        send(['success' => false, 'message' => 'Session expired. Please log in again.']);
+    }
+    $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    $_SESSION['otp_pending']['otp']     = password_hash($otp, PASSWORD_DEFAULT);
+    $_SESSION['otp_pending']['expires'] = time() + 300;
+    $contact_email = $_SESSION['otp_pending']['email'] ?? '';
+    $display_name  = $_SESSION['otp_pending']['username'] ?? 'User';
+    $user_role_r   = $_SESSION['otp_pending']['user_type'] ?? 'admin';
+    $uid_r         = $_SESSION['otp_pending']['user_id']  ?? 0;
 
-    // Check if password column exists
-    $col_check = $conn->query("SHOW COLUMNS FROM students LIKE 'password'");
-    $password_col_exists = ($col_check && $col_check->num_rows > 0);
+    // If email not in session, look it up again from DB
+    if (empty($contact_email) && $uid_r) {
+        $r_table = in_array($user_role_r, ['admin']) ? find_admin_table($conn) : find_subadmin_table($conn);
+        if ($r_table) {
+            foreach (['school_email', 'email', 'admin_email'] as $_ecol) {
+                try {
+                    $eq = $conn->prepare("SELECT `{$_ecol}` AS em FROM `{$r_table}` WHERE id = ? LIMIT 1");
+                    if ($eq) {
+                        $eq->bind_param('i', $uid_r);
+                        $eq->execute();
+                        $er2 = $eq->get_result()->fetch_assoc();
+                        $eq->close();
+                        if (!empty($er2['em'])) {
+                            $contact_email = $er2['em'];
+                            break;
+                        }
+                    }
+                } catch (Throwable $e) {
+                    // Column doesn't exist — try next
+                }
+            }
+        }
+    }
 
-    // Find the student row
-    $stmt = $conn->prepare("SELECT id, email, student_id, first_name, last_name, password FROM students WHERE email = ? LIMIT 1");
-    $stmt->bind_param('s', $email);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
+    if (!empty($contact_email)) {
+        sendLoginOTP($contact_email, $otp, $display_name, $user_role_r);
+        [$u, $d] = explode('@', $contact_email, 2);
+        $masked  = substr($u, 0, 2) . str_repeat('*', max(1, strlen($u) - 2)) . '@' . $d;
+        // Update session with resolved email for future resends
+        $_SESSION['otp_pending']['email'] = $contact_email;
+    } else {
+        error_log("[login_otp] Resend — no email found for '{$display_name}' — OTP: {$otp}");
+        $masked = 'your registered email';
+    }
 
-    echo json_encode([
-        'password_column_exists' => $password_col_exists,
-        'student_found'          => $row ? true : false,
-        'student_id_field'       => $row['id'] ?? null,
-        'student_id_col'         => $row['student_id'] ?? null,
-        'name'                   => $row ? ($row['first_name'] . ' ' . $row['last_name']) : null,
-        'has_password'           => $row ? (!empty($row['password'])) : null,
-        'password_length'        => $row ? strlen($row['password'] ?? '') : null,
-    ]);
-    exit;
+    send(['success' => true, 'masked_contact' => $masked]);
 }
 
-// Unknown action
-echo json_encode(['success' => false, 'message' => 'Invalid request.']);
+send(['success' => false, 'message' => 'Unknown action.']);

@@ -1,4 +1,5 @@
 <?php
+
 /**
  * session_config.php
  * Include this ONCE at the top of every page BEFORE session_start().
@@ -7,7 +8,7 @@
  */
 if (session_status() === PHP_SESSION_NONE) {
     $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+        || (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
 
     session_set_cookie_params([
         'lifetime' => 0,                        // until browser closes
@@ -19,4 +20,9 @@ if (session_status() === PHP_SESSION_NONE) {
     ]);
 
     session_start();
+
+    // Generate CSRF token if not set
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
 }

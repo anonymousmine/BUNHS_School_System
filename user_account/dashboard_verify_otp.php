@@ -1,4 +1,5 @@
 <?php
+
 /**
  * dashboard_verify_otp.php
  * ─────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ if (!isset($_SESSION['student_id'])) {
 define('DV_SMTP_HOST',     'smtp.gmail.com');
 define('DV_SMTP_PORT',     587);
 define('DV_SMTP_USER',     'bunhs.deped@gmail.com');
-define('DV_SMTP_PASS',     'msqncrybbxlxhmbn');          // Gmail App Password
+define('DV_SMTP_PASS',     'svhiovmxalojxzxg');          // Gmail App Password
 define('DV_SMTP_FROM',     'bunhs.deped@gmail.com');
 define('DV_SMTP_FROM_NAME', 'Buyoan National High School');
 

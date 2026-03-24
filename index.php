@@ -34,6 +34,11 @@ try {
 
 require __DIR__ . '/vendor/autoload.php';
 
+// ─── CSRF TOKEN — generate once per session, used by all login/signup forms ──
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 // ─── AUTO-CREATE SUPPORT TABLES ──────────────────────────────────────────────
 $conn->query("CREATE TABLE IF NOT EXISTS school_announcements (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -363,115 +368,39 @@ if ($cached_settings === false) {
 }
 
 // ── CACHE BLOCK 3: Homepage cards ─────────────────────────────────────────────
-foreach (['leadership', 'cultural', 'innovation', 'cert_card1', 'cert_card2', 'cert_card3'] as $_ck) {
-    $_var        = 'card_' . $_ck;
+$_empty_card = ['title' => '', 'description' => '', 'icon' => '', 'image' => ''];
+foreach (['leadership', 'cultural', 'innovation'] as $_ck) {
+    $_var         = 'card_' . $_ck;
     $_cached_card = cache_get("card:{$_ck}");
     if ($_cached_card === false) {
         $_cached_card = get_card($conn, $_ck);
         cache_set("card:{$_ck}", $_cached_card, CACHE_TTL_CARD);
     }
-    $$_var = $_cached_card;
+    $$_var = $_cached_card ?: $_empty_card;
+}
+// cert_card1/2/3 use their own variable names (not card_ prefix) — fix naming to match HTML
+foreach (['cert_card1', 'cert_card2', 'cert_card3'] as $_ck) {
+    $_cached_card = cache_get("card:{$_ck}");
+    if ($_cached_card === false) {
+        $_cached_card = get_card($conn, $_ck);
+        cache_set("card:{$_ck}", $_cached_card, CACHE_TTL_CARD);
+    }
+    $$_ck = $_cached_card ?: $_empty_card;   // sets $cert_card1, $cert_card2, $cert_card3
 }
 // Variables now available: $card_leadership, $card_cultural, $card_innovation,
 //                          $cert_card1, $cert_card2, $cert_card3
 
 // ── CACHE BLOCK 4: Login handler ──────────────────────────────────────────────
+// DISABLED: Login is now handled via OTP system (login_otp.php) to ensure proper verification
+// The old direct login handler was bypassing OTP verification for admin users
 $login_error = '';
+// Old login handler commented out to prevent OTP bypass
+/*
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['password'])) {
-    $username  = sanitizeInput($_POST['username']);
-    $password  = $_POST['password'];
-    $client_ip = getClientIP();
-
-    if (isRateLimited($client_ip)) {
-        $login_error = 'Too many failed attempts. Please try again later.';
-        logLoginAttempt($username, $client_ip, false);
-    } elseif (empty($username) || empty($password)) {
-        $login_error = 'Please fill in all fields.';
-        recordLoginAttempt($client_ip);
-        logLoginAttempt($username, $client_ip, false);
-    } elseif (strlen($username) > 50 || strlen($password) > 255) {
-        $login_error = 'Invalid input length.';
-        recordLoginAttempt($client_ip);
-        logLoginAttempt($username, $client_ip, false);
-    } else {
-        $user_found = false;
-        $user_data  = null;
-        $user_type  = '';
-
-        // Try admin cache first
-        $cached_admin = cache_get("admin:{$username}");
-        if ($cached_admin !== false) {
-            $user_data  = $cached_admin;
-            $user_type  = 'admin';
-            $user_found = true;
-        } else {
-            $stmt = $conn->prepare("SELECT id, password FROM admin WHERE username = ?");
-            if ($stmt) {
-                $stmt->bind_param("s", $username);
-                if ($stmt->execute()) {
-                    $result = $stmt->get_result();
-                    if ($result->num_rows === 1) {
-                        $user_data  = $result->fetch_assoc();
-                        $user_type  = 'admin';
-                        $user_found = true;
-                        cache_set("admin:{$username}", $user_data, CACHE_TTL_CREDENTIALS);
-                    }
-                }
-                $stmt->close();
-            }
-        }
-
-        // Try sub-admin cache if admin not found
-        if (!$user_found) {
-            $cached_sub = cache_get("subadmin:{$username}");
-            if ($cached_sub !== false && ($cached_sub['status'] ?? '') === 'approved') {
-                $user_data  = $cached_sub;
-                $user_type  = 'sub-admin';
-                $user_found = true;
-            } else {
-                $stmt = $conn->prepare("SELECT id, password, status FROM `sub_admin` WHERE username = ? AND status = 'approved'");
-                if ($stmt) {
-                    $stmt->bind_param("s", $username);
-                    if ($stmt->execute()) {
-                        $result = $stmt->get_result();
-                        if ($result->num_rows === 1) {
-                            $user_data  = $result->fetch_assoc();
-                            $user_type  = 'sub-admin';
-                            $user_found = true;
-                            cache_set("subadmin:{$username}", $user_data, CACHE_TTL_CREDENTIALS);
-                        }
-                    }
-                    $stmt->close();
-                }
-            }
-        }
-
-        // password_verify() always runs — cache never bypasses this
-        if ($user_found && password_verify($password, $user_data['password'])) {
-            session_regenerate_id(true);
-            $_SESSION['user_id']    = $user_data['id'];
-            $_SESSION['username']   = $username;
-            $_SESSION['user_type']  = $user_type;
-            $_SESSION['login_time'] = time();
-            unset($_SESSION['login_attempts'][$client_ip]);
-            logLoginAttempt($username, $client_ip, true);
-            header('Location: admin_account/admin_dashboard.php');
-            exit();
-        } else {
-            $login_error = 'Invalid username or password.';
-            recordLoginAttempt($client_ip);
-            logLoginAttempt($username, $client_ip, false);
-        }
-    }
-
-    if (
-        !empty($login_error)
-        && $login_error !== 'Invalid request. Please try again.'
-        && $login_error !== 'Too many failed attempts. Please try again later.'
-    ) {
-        sleep(1);
-    }
+    // This handler was interfering with OTP verification
+    // All logins now go through login_otp.php with proper OTP verification
 }
+*/
 
 $conn->close();
 ?>
@@ -490,10 +419,10 @@ $conn->close();
     <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Raleway:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
 
-    <link href="assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-    <link href="assets/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
-    <link href="assets/vendor/swiper/swiper-bundle.min.css" rel="stylesheet">
-    <link href="assets/vendor/glightbox/css/glightbox.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/glightbox/dist/css/glightbox.min.css" rel="stylesheet">
     <link href="assets/css/main.css" rel="stylesheet">
     <link rel="shortcut icon" href="assets/img/logo.jpg" type="image/x-icon">
 
@@ -1356,11 +1285,11 @@ $conn->close();
     <div id="preloader"></div>
 
     <!-- Vendor JS -->
-    <script src="assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="assets/vendor/php-email-form/validate.js"></script>
-    <script src="assets/vendor/swiper/swiper-bundle.min.js"></script>
-    <script src="assets/vendor/purecounter/purecounter_vanilla.js"></script>
-    <script src="assets/vendor/glightbox/js/glightbox.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- validate.js removed — not needed for this page -->
+    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@srexi/purecounterjs/dist/purecounter_vanilla.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/glightbox/dist/js/glightbox.min.js"></script>
     <script src="assets/js/main.js"></script>
 
     <!-- Navigation -->
@@ -1397,6 +1326,59 @@ $conn->close();
             .then(r => r.text())
             .then(html => {
                 document.body.insertAdjacentHTML('beforeend', html);
+
+                // ── FIX: define password-strength helpers as globals ──────────
+                // modals.php is loaded via fetch/insertAdjacentHTML, so its
+                // <script> tags never execute. We define these here instead so
+                // the oninput="bmCheckPwStrength(...)" attributes work correctly.
+                window.bmCheckPwStrength = function(pw) {
+                    const wrap = document.getElementById('pwStrengthWrap');
+                    const lbl = document.getElementById('pwStrengthLabel');
+                    const bars = ['pws1', 'pws2', 'pws3', 'pws4'].map(id => document.getElementById(id));
+                    if (!wrap) return;
+                    if (!pw) {
+                        wrap.style.display = 'none';
+                        return;
+                    }
+                    wrap.style.display = 'block';
+                    let score = 0;
+                    if (pw.length >= 8) score++;
+                    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+                    if (/[0-9]/.test(pw)) score++;
+                    if (/[\W_]/.test(pw)) score++;
+                    const colors = ['#e53935', '#fb8c00', '#fdd835', '#2d6a4f'];
+                    const labels = ['Weak', 'Fair', 'Good', 'Strong'];
+                    bars.forEach((b, i) => {
+                        if (b) b.style.background = i < score ? colors[score - 1] : '#dde8e2';
+                    });
+                    if (lbl) {
+                        lbl.textContent = labels[score - 1] || '';
+                        lbl.style.color = colors[score - 1] || 'var(--bunhs-muted)';
+                    }
+                    const cp = document.getElementById('signupConfirmPassword');
+                    if (cp && cp.value) window.bmCheckPwMatch();
+                };
+                window.bmCheckPwMatch = function() {
+                    const pw = document.getElementById('signupPassword');
+                    const cp = document.getElementById('signupConfirmPassword');
+                    const hint = document.getElementById('pwMatchHint');
+                    if (!cp || !hint) return;
+                    if (!cp.value) {
+                        hint.style.display = 'none';
+                        return;
+                    }
+                    hint.style.display = 'block';
+                    if (pw && pw.value === cp.value) {
+                        hint.textContent = '✓ Passwords match';
+                        hint.style.color = '#2d6a4f';
+                    } else {
+                        hint.textContent = '✗ Passwords do not match';
+                        hint.style.color = '#e53935';
+                    }
+                };
+                const _cpEl = document.getElementById('signupConfirmPassword');
+                if (_cpEl) _cpEl.addEventListener('input', window.bmCheckPwMatch);
+                // ─────────────────────────────────────────────────────────────
 
                 document.querySelectorAll('.btn-login, [data-open-login]').forEach(btn => {
                     btn.addEventListener('click', e => {
@@ -1567,6 +1549,7 @@ $conn->close();
                         }).then(r => r.json()).then(d => {
                             setLoad('loginSubmitBtn', false);
                             if (d.success) {
+                                // Always show OTP step — no bypass
                                 document.getElementById('loginStep1').style.display = 'none';
                                 document.getElementById('loginStep2').style.display = 'block';
                                 if (d.masked_contact) document.getElementById('loginOtpSubtitle').textContent = 'Code sent to ' + d.masked_contact;
@@ -1699,14 +1682,70 @@ $conn->close();
                     document.getElementById('signupForm').addEventListener('submit', e => {
                         e.preventDefault();
                         hideErr('signupErrBox');
+                        document.getElementById('emailWarning').style.display = 'none';
+
+                        // ── Client-side validation ────────────────────────────
+                        const fn = document.getElementById('firstName').value.trim();
+                        const ln = document.getElementById('lastName').value.trim();
+                        const mi = document.getElementById('middleInitial') ? document.getElementById('middleInitial').value.trim() : '';
+                        const un = document.getElementById('signupUsername').value.trim();
                         const pw = document.getElementById('signupPassword').value;
                         const cp = document.getElementById('signupConfirmPassword').value;
+                        const mth = document.querySelector('input[name="contact_method"]:checked').value;
+                        const em = document.getElementById('email').value.trim();
+                        const ph = document.getElementById('phone').value.trim();
+                        const agr = document.getElementById('terms').checked;
+
+                        if (!fn || !ln) {
+                            showErr('signupErrBox', 'signupErrTxt', 'First and last name are required.');
+                            return;
+                        }
+                        if (!/^[A-Za-z\s\-]+$/.test(fn) || !/^[A-Za-z\s\-]+$/.test(ln)) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Names must contain letters only.');
+                            return;
+                        }
+                        if (mi && !/^[A-Z]{1,2}\.?$/.test(mi)) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Middle initial must be 1–2 letters (e.g. A. or AB).');
+                            return;
+                        }
+                        if (!un || un.length < 3) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Username must be at least 3 characters.');
+                            return;
+                        }
+                        if (!/^[A-Za-z0-9_\-\.]+$/.test(un)) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Username may only contain letters, numbers, _ - .');
+                            return;
+                        }
+                        if (!pw || pw.length < 8) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Password must be at least 8 characters.');
+                            return;
+                        }
+                        if (!/[A-Z]/.test(pw) || !/[a-z]/.test(pw) || !/[0-9]/.test(pw) || !/[\W_]/.test(pw)) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Password must include uppercase, lowercase, a number and a special character.');
+                            return;
+                        }
                         if (pw !== cp) {
                             showErr('signupErrBox', 'signupErrTxt', 'Passwords do not match.');
                             return;
                         }
+                        if (mth === 'email' && !em) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Please enter your email address.');
+                            return;
+                        }
+                        if (mth === 'phone' && !/^09\d{9}$/.test(ph)) {
+                            showErr('signupErrBox', 'signupErrTxt', 'Please enter a valid phone number (09XXXXXXXXX).');
+                            return;
+                        }
+                        if (!agr) {
+                            showErr('signupErrBox', 'signupErrTxt', 'You must agree to the Terms of Service.');
+                            return;
+                        }
+
                         setLoad('signupSubmitBtn', true);
                         const fd = new FormData(e.target);
+                        // Ensure terms value is sent even if browser quirks drop unchecked
+                        if (agr) fd.set('terms', '1');
+
                         fetch('signup.php', {
                             method: 'POST',
                             body: fd
@@ -1717,9 +1756,9 @@ $conn->close();
                                 document.getElementById('otpFormContainer').style.display = 'block';
                                 document.getElementById('spill1').classList.remove('active');
                                 document.getElementById('spill2').classList.add('active');
-                                const mth = document.querySelector('input[name="contact_method"]:checked').value;
-                                const dst = mth === 'email' ? document.getElementById('email').value : document.getElementById('phone').value;
+                                const dst = mth === 'email' ? em : ph;
                                 document.getElementById('otpSubtitle').textContent = 'Code sent to: ' + dst;
+                                if (d.dev_otp) console.log('[DEV] Sub-admin signup OTP:', d.dev_otp);
                                 mmss('otpCountdown', 'signupTimer', 300);
                                 const rb = document.getElementById('resendOtpBtn');
                                 rb.disabled = true;
@@ -1731,7 +1770,7 @@ $conn->close();
                                 });
                                 document.querySelector('#signupOtpBoxes .bm-otp-box').focus();
                             } else {
-                                if (d.message === 'this email is already used') {
+                                if (d.message && d.message.toLowerCase().includes('email')) {
                                     const w = document.getElementById('emailWarning');
                                     w.textContent = d.message;
                                     w.style.display = 'block';
@@ -1741,7 +1780,7 @@ $conn->close();
                             }
                         }).catch(() => {
                             setLoad('signupSubmitBtn', false);
-                            showErr('signupErrBox', 'signupErrTxt', 'Connection error.');
+                            showErr('signupErrBox', 'signupErrTxt', 'Connection error. Please try again.');
                         });
                     });
 
@@ -1764,8 +1803,22 @@ $conn->close();
                         }).then(r => r.json()).then(d => {
                             setLoad('otpVerifyBtn', false);
                             if (d.success) {
+                                // Sub-admin accounts are PENDING — do NOT redirect to Dashboard.
+                                // Close the modal and show a friendly approval-pending notice.
                                 bootstrap.Modal.getInstance(document.getElementById('signupModal')).hide();
-                                window.location.href = 'user_account/Dashboard.php';
+                                // Show a toast / inline banner so the user knows what happened
+                                const msg = d.message || 'Account created! Awaiting admin approval.';
+                                // Re-use the page-level toast helper if available, otherwise alert
+                                if (typeof toast === 'function') {
+                                    toast(msg, 'success');
+                                } else {
+                                    // Inject a non-blocking green banner at the top of the page
+                                    const banner = document.createElement('div');
+                                    banner.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:99999;background:#1a3a2a;color:#fff;padding:14px 28px;border-radius:12px;font-family:"DM Sans",sans-serif;font-size:14px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.25);display:flex;align-items:center;gap:10px;max-width:520px;text-align:center;';
+                                    banner.innerHTML = '<i class="fas fa-check-circle" style="color:#52b788;font-size:18px;flex-shrink:0;"></i><span>' + msg + '</span>';
+                                    document.body.appendChild(banner);
+                                    setTimeout(() => banner.remove(), 7000);
+                                }
                             } else {
                                 shakeOtp('signupOtpBoxes');
                                 showErr('otpErrBox', 'otpErrTxt', d.message || 'Invalid code.');
@@ -2275,6 +2328,7 @@ $conn->close();
                 fd.append('username', email);
                 fd.append('email', email);
                 fd.append('password', password);
+                fd.append('csrf_token', '<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>');
 
                 fetch(ENDPOINT, {
                         method: 'POST',
@@ -2286,7 +2340,6 @@ $conn->close();
                             '<i class="fas fa-paper-plane"></i>&ensp;Send Verification Code');
                         if (d.success) {
                             if (d.masked_contact) subtitle.textContent = 'Code sent to: ' + d.masked_contact;
-                            if (d.dev_otp) console.log('[DEV] Login OTP:', d.dev_otp);
                             showStep(2);
                             clearOtpBoxes();
                             startTimer();

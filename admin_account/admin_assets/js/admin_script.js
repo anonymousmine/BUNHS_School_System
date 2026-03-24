@@ -94,16 +94,9 @@
 
     // Fix dropdown item paths based on current location - called after navigation is loaded
     function initializeDropdownPaths() {
-        const currentPath = window.location.pathname;
-        const isInSubfolder = currentPath.includes('/announcements/');
-        const pathPrefix = isInSubfolder ? '../announcements/' : 'announcements/';
-
-        document.querySelectorAll('.dropdown-item[data-page]').forEach(item => {
-            const page = item.getAttribute('data-page');
-            if (page) {
-                item.href = pathPrefix + page;
-            }
-        });
+        // The dropdown items are already correctly set by PHP using $adminBase
+        // No JavaScript path fixing needed for the main navigation
+        console.log('Dropdown paths are already handled by PHP');
     }
 
     // Expose initialization function for dynamically loaded navigation

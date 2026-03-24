@@ -1869,7 +1869,13 @@ $uacs_labels = [
 </head>
 
 <body>
-    <div id="navigation-container"></div>
+    <?php include 'admin_nav.php'; ?>
+    <script>
+        // Initialize navigation functionality after include
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
+        }
+    </script>
 
     <div class="spinner-overlay" id="loadingOverlay">
         <div style="text-align:center;">

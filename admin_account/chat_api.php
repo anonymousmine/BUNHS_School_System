@@ -85,21 +85,35 @@ if ($action === 'fetch_conversations') {
         exit;
     }
 
-    // pending_file_requests is hardcoded 0 until file_requests
-    // table is created in Phase 5. Referencing a missing table
-    // in a subquery breaks the entire query on strict MySQL.
-    $stmt = $conn->prepare(
-        "SELECT cc.id, cc.student_id, cc.last_message, cc.updated_at,
-                s.first_name, s.last_name,
-                COALESCE(s.grade_level, '') AS grade_level,
-                (SELECT COUNT(*) FROM chat_messages cm
-                 WHERE cm.conversation_id = cc.id
-                   AND cm.is_read = 0
-                   AND cm.sender_role = 'student') AS unread
-         FROM chat_conversations cc
-         JOIN students s ON s.id = cc.student_id
-         ORDER BY cc.updated_at DESC"
-    );
+    $stmt = $conn->prepare("
+        SELECT 
+            cc.id,
+            cc.student_id, 
+            cc.last_message,
+            cc.updated_at,
+            s.first_name, 
+            s.last_name,
+            COALESCE(s.grade_level, '') AS grade_level,
+            COALESCE(
+                (SELECT COUNT(*) 
+                 FROM chat_messages cm 
+                 WHERE cm.conversation_id = cc.id 
+                   AND cm.is_read = 0 
+                   AND cm.sender_role = 'student'
+                ), 0
+            ) AS unread_count,
+            COALESCE(
+                (SELECT COUNT(*) 
+                 FROM file_requests fr 
+                 WHERE fr.student_id = cc.student_id 
+                   AND fr.status = 'pending'
+                ), 0
+            ) AS has_file_request,
+            0 AS is_club_group
+        FROM chat_conversations cc
+        JOIN students s ON s.id = cc.student_id
+        ORDER BY cc.updated_at DESC
+    ");
 
     if (!$stmt) {
         echo json_encode(['success' => false, 'message' => 'DB error: ' . $conn->error]);
@@ -111,12 +125,14 @@ if ($action === 'fetch_conversations') {
     $stmt->close();
 
     foreach ($rows as &$r) {
-        $r['student_name']          = htmlspecialchars($r['first_name'] . ' ' . $r['last_name'], ENT_QUOTES, 'UTF-8');
-        $r['last_message']          = htmlspecialchars($r['last_message'] ?? '', ENT_QUOTES, 'UTF-8');
-        $r['time_ago']              = time_ago($r['updated_at']);
-        $r['avatar_letter']         = strtoupper(substr($r['first_name'], 0, 1));
-        $r['pending_file_requests'] = 0;
-        $r['unread']                = (int) $r['unread'];
+        $r['student_name'] = htmlspecialchars($r['first_name'] . ' ' . $r['last_name'], ENT_QUOTES, 'UTF-8');
+        $r['last_message'] = htmlspecialchars($r['last_message'] ?? 'No messages yet', ENT_QUOTES, 'UTF-8');
+        $r['time_ago'] = time_ago($r['updated_at']);
+        $r['avatar_letter'] = strtoupper(substr($r['first_name'], 0, 1));
+        $r['unread'] = (int) $r['unread_count'];
+        $r['has_file_request'] = (int) $r['has_file_request'];
+        $r['is_club_group'] = (int) $r['is_club_group'];
+        $r['unread_count'] = $r['unread']; // alias for JS
     }
     unset($r);
 
@@ -302,6 +318,80 @@ if ($action === 'get_student_conv') {
     $sid     = (int) $_SESSION['student_id'];
     $conv_id = get_or_create_conversation($conn, $sid, 1);
     echo json_encode(['success' => true, 'conv_id' => $conv_id]);
+    exit;
+}
+
+// ── process_file_request (admin) ────────────────────────────────────────────
+if ($action === 'process_file_request') {
+    if (!$is_admin) {
+        echo json_encode(['success' => false, 'message' => 'Admin only']);
+        exit;
+    }
+
+    $request_id = (int) ($_POST['request_id'] ?? 0);
+    $decision = trim($_POST['decision'] ?? '');
+
+    if (!$request_id || !in_array($decision, ['approve', 'reject'])) {
+        echo json_encode(['success' => false, 'message' => 'Invalid parameters']);
+        exit;
+    }
+
+    // Get request details first
+    $stmt = $conn->prepare("
+        SELECT fr.id, fr.student_id, fr.form_id, fr.status, s.first_name, s.last_name
+        FROM file_requests fr 
+        JOIN students s ON fr.student_id = s.id 
+        WHERE fr.id = ?
+    ");
+    $stmt->bind_param('i', $request_id);
+    $stmt->execute();
+    $request = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$request || $request['status'] !== 'pending') {
+        echo json_encode(['success' => false, 'message' => 'Request not found or already processed']);
+        exit;
+    }
+
+    $student_id = (int) $request['student_id'];
+    $new_status = $decision === 'approve' ? 'approved' : 'rejected';
+
+    // Update file request
+    if ($decision === 'approve') {
+        $stmt = $conn->prepare("UPDATE file_requests SET status = 'approved', approval_date = NOW() WHERE id = ?");
+        $stmt->bind_param('i', $request_id);
+    } else {
+        $reject_reason = trim($_POST['reject_reason'] ?? 'No reason provided');
+        $stmt = $conn->prepare("UPDATE file_requests SET status = 'rejected', rejection_reason = ? WHERE id = ?");
+        $stmt->bind_param('si', $reject_reason, $request_id);
+    }
+
+    $success = $stmt->execute();
+    $stmt->close();
+
+    if ($success) {
+        // Notify student via chat
+        $conv_id = get_or_create_conversation($conn, $student_id);
+        $notif_msg = $decision === 'approve' ?
+            "✅ File request APPROVED. You can download '{$request['form_id']}' now." :
+            "❌ File request REJECTED.";
+
+        $stmt = $conn->prepare("
+            INSERT INTO chat_messages (conversation_id, sender_id, sender_role, receiver_id, message, message_type)
+            VALUES (?, 1, 'admin', ?, ?, 'file_request_response')
+        ");
+        $stmt->bind_param('iis', $conv_id, $student_id, $notif_msg);
+        $stmt->execute();
+        $stmt->close();
+
+        echo json_encode([
+            'success' => true,
+            'message' => "File request $decision successfully",
+            'student_name' => $request['first_name'] . ' ' . $request['last_name']
+        ]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Database error']);
+    }
     exit;
 }
 

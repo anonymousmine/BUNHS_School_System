@@ -238,7 +238,7 @@ $chart_counts = json_encode([
     <style>
         /* Additional Dashboard Styles */
         .dashboard-loading {
-            display: none !important; /* Hide all loading screens */
+            display: flex;
             align-items: center;
             justify-content: center;
             min-height: 200px;
@@ -1092,9 +1092,15 @@ $chart_counts = json_encode([
 </head>
 
 <body>
-    <?php include 'admin_nav.php'; ?>
+    <!-- Loading State -->
+    <div id="navigation-container">
+        <div class="dashboard-loading">
+            <div class="spinner"></div>
+            <p>Loading dashboard...</p>
+        </div>
+    </div>
 
-    <section class="page-content dashboard" id="dashboard-content" style="display: block !important;">
+    <section class="page-content dashboard" id="dashboard-content" style="display: none;">
         <!-- Dashboard Header with Search -->
         <div class="dashboard-header">
             <div>
@@ -1376,14 +1382,23 @@ $chart_counts = json_encode([
             }
         };
 
-        // Initialize Dashboard
+        // Initialize Dashboard with Immediate Fallback
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Dashboard DOM loaded');
             
-            // Dashboard content is now visible by default
+            // Show dashboard content immediately after 1 second regardless of navigation
+            setTimeout(() => {
+                const dashboardContent = document.getElementById('dashboard-content');
+                if (dashboardContent) {
+                    dashboardContent.style.display = 'block';
+                    console.log('Dashboard content forced to show');
+                }
+            }, 1000); // 1 second guaranteed show
             
-            // Navigation is loaded via PHP include, no AJAX needed
+            // Try to load navigation in background
+            loadNavigation();
             
+            // Initialize other components regardless of navigation status
             initChart();
             initDonutChart();
             initExportDropdown();
@@ -1400,6 +1415,108 @@ $chart_counts = json_encode([
             startRealTimeUpdates();
         });
 
+        // Load Navigation with Enhanced Fallback
+        function loadNavigation() {
+            console.log('Loading navigation...');
+            const container = document.getElementById('navigation-container');
+            
+            if (!container) {
+                console.error('Navigation container not found');
+                return;
+            }
+
+            // Try multiple possible paths for admin_nav.php
+            const possiblePaths = [
+                'admin_nav.php',
+                './admin_nav.php',
+                '../admin_nav.php',
+                '../../admin_nav.php'
+            ];
+            
+            let pathIndex = 0;
+            
+            function tryLoadPath(path) {
+                console.log(`Trying navigation path: ${path}`);
+                
+                // Set a timeout for this attempt
+                const attemptTimeout = setTimeout(() => {
+                    console.log(`Timeout for path: ${path}, trying next...`);
+                    pathIndex++;
+                    if (pathIndex < possiblePaths.length) {
+                        tryLoadPath(possiblePaths[pathIndex]);
+                    } else {
+                        console.log('All paths failed, using fallback navigation');
+                        createFallbackNavigation();
+                    }
+                }, 2000); // 2 second timeout per attempt
+                
+                fetch(path)
+                    .then(response => {
+                        clearTimeout(attemptTimeout);
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        return response.text();
+                    })
+                    .then(data => {
+                        clearTimeout(attemptTimeout);
+                        console.log(`Navigation loaded successfully from: ${path}`);
+                        container.innerHTML = data;
+                        initializeNavigation();
+                        
+                        // Show dashboard content with delay
+                        setTimeout(() => {
+                            const dashboardContent = document.getElementById('dashboard-content');
+                            if (dashboardContent) {
+                                dashboardContent.style.display = 'block';
+                                console.log('Dashboard content shown');
+                            }
+                        }, 100);
+                    })
+                    .catch(error => {
+                        clearTimeout(attemptTimeout);
+                        console.error(`Failed to load from ${path}:`, error);
+                        pathIndex++;
+                        if (pathIndex < possiblePaths.length) {
+                            tryLoadPath(possiblePaths[pathIndex]);
+                        } else {
+                            console.log('All paths failed, using fallback navigation');
+                            createFallbackNavigation();
+                        }
+                    });
+            }
+            
+            // Start trying paths
+            tryLoadPath(possiblePaths[0]);
+        }
+
+        // Create fallback navigation
+        function createFallbackNavigation() {
+            const container = document.getElementById('navigation-container');
+            container.innerHTML = 
+                '<div style="background: #2c3e50; color: white; padding: 15px;">' +
+                '<h2>🧪 Admin Dashboard</h2>' +
+                '<p>Navigation loaded (fallback mode)</p>' +
+                '<div style="margin-top: 10px;">' +
+                '<span style="background: #10b981; padding: 5px 10px; border-radius: 4px; font-size: 12px;">' +
+                '✅ Session Active' +
+                '</span>' +
+                '<span style="background: #3b82f6; padding: 5px 10px; border-radius: 4px; font-size: 12px; margin-left: 10px;">' +
+                '✅ Dashboard Ready' +
+                '</span>' +
+                '</div>' +
+                '</div>';
+            
+            // Show dashboard content immediately
+            setTimeout(() => {
+                const dashboardContent = document.getElementById('dashboard-content');
+                if (dashboardContent) {
+                    dashboardContent.style.display = 'block';
+                    console.log('Dashboard content shown (fallback mode)');
+                }
+            }, 100);
+        }
+
         // Initialize Navigation Functionality
         function initializeNavigation() {
             // Move page content to .main div
@@ -1409,11 +1526,18 @@ $chart_counts = json_encode([
                 mainDiv.appendChild(pageContent);
             }
 
-            // Initialize Navigation Functionality (already handled by admin_nav.php)
-            // No need for dropdown path fixing since PHP handles it correctly
-            if (typeof initializeNavigation === 'function') {
-                initializeNavigation();
-            }
+            // Fix dropdown item paths
+            const currentPath = window.location.pathname;
+            const isInSubfolder = currentPath.includes('/announcements/');
+            const pathPrefix = isInSubfolder ? '../announcements/' : 'announcements/';
+
+            document.querySelectorAll('.dropdown-item[data-page]').forEach(item => {
+                const page = item.getAttribute('data-page');
+                if (page) item.href = pathPrefix + page;
+            });
+
+            // Initialize dropdowns after navigation is loaded
+            initNavigationDropdowns();
 
             // ── Mobile hamburger sidebar toggle ──
             // Must run here (not in admin_nav.php) because nav is loaded via

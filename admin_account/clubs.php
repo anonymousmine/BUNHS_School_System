@@ -1354,6 +1354,13 @@
 </head>
 
 <body>
+    <?php include 'admin_nav.php'; ?>
+    <script>
+        // Initialize navigation functionality after include
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
+        }
+    </script>
     <?php
     /* ================================================================
        DATABASE CONNECTION
@@ -1569,32 +1576,6 @@
             function initializeNavigation() {
                 const mainDiv = document.querySelector('.main');
                 const pageContent = document.querySelector('.page-content');
-                if (mainDiv && pageContent) mainDiv.appendChild(pageContent);
-                initializeDropdowns();
-            }
-
-            function initializeDropdowns() {
-                const currentPath = window.location.pathname;
-                const isInSubfolder = currentPath.includes('/announcements/');
-                const pathPrefix = isInSubfolder ? '../announcements/' : 'announcements/';
-                document.querySelectorAll('.dropdown-item[data-page]').forEach(item => {
-                    item.href = pathPrefix + item.getAttribute('data-page');
-                });
-                document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-                    toggle.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const dropdown = this.closest('.dropdown');
-                        const isActive = dropdown.classList.contains('active');
-                        document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
-                        if (!isActive) dropdown.classList.add('active');
-                    });
-                });
-                document.addEventListener('click', function(e) {
-                    if (!e.target.closest('.dropdown'))
-                        document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
-                });
-            }
         </script>
 
         <!-- ============================================================

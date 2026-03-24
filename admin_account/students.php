@@ -257,7 +257,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'docx') {
         $expTypes .= 's';
     }
     $expWhere = !empty($expConditions) ? 'WHERE ' . implode(' AND ', $expConditions) : '';
-    $expStmt  = $conn->prepare('SELECT s.*, COALESCE(NULLIF(spd.photo,\'\'), s.profile_image, \'../assets/img/person/unknown.jpg\') AS effective_photo FROM students s LEFT JOIN student_profile_data spd ON spd.student_id = s.student_id ' . $expWhere . ' ORDER BY s.grade_level, s.last_name, s.first_name');
+    $expStmt  = $conn->prepare('SELECT s.*, COALESCE(NULLIF(spd.photo,\'\'), NULLIF(s.profile_image,\'\'), \'../assets/img/person/unknown.jpg\') AS effective_photo, spd.photo AS profile_photo FROM students s LEFT JOIN student_profile_data spd ON spd.student_id = s.student_id ' . $expWhere . ' ORDER BY s.grade_level, s.last_name, s.first_name');
     if (!empty($expParams)) $expStmt->bind_param($expTypes, ...$expParams);
     $expStmt->execute();
     $expStudents = $expStmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -927,7 +927,16 @@ $totalFiltered = $countStmt->get_result()->fetch_assoc()['total'];
 $countStmt->close();
 $totalPages = max(1, ceil($totalFiltered / $perPage));
 
-$stmt = $conn->prepare("SELECT s.*, COALESCE(NULLIF(spd.photo,''), s.profile_image, '../assets/img/person/unknown.jpg') AS effective_photo FROM students s LEFT JOIN student_profile_data spd ON spd.student_id = s.student_id {$whereClause} ORDER BY s.id DESC LIMIT ? OFFSET ?");
+$stmt = $conn->prepare("SELECT s.*,
+    COALESCE(
+        NULLIF(spd.photo, ''),
+        NULLIF(s.profile_image, ''),
+        '../assets/img/person/unknown.jpg'
+    ) AS effective_photo,
+    spd.photo AS profile_photo
+    FROM students s
+    LEFT JOIN student_profile_data spd ON spd.student_id = s.student_id
+    {$whereClause} ORDER BY s.id DESC LIMIT ? OFFSET ?");
 $allParams = array_merge($params, [$perPage, $offset]);
 $allTypes = $types . 'ii';
 $stmt->bind_param($allTypes, ...$allParams);
@@ -2770,36 +2779,19 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
 </head>
 
 <body>
-    <div id="navigation-container"></div>
+    <?php include 'admin_nav.php'; ?>
     <script>
-        fetch('admin_nav.php').then(r => r.text()).then(data => {
-            document.getElementById('navigation-container').innerHTML = data;
-            const mainDiv = document.querySelector('.main');
-            const pageContent = document.querySelector('.page-content');
-            if (mainDiv && pageContent) mainDiv.appendChild(pageContent);
-            initializeDropdowns();
+        // Initialize navigation functionality after include
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
+        }
+    </script>
         }).catch(e => console.error('Nav error:', e));
 
-        function initializeDropdowns() {
-            const currentPath = window.location.pathname;
-            const isInSubfolder = currentPath.includes('/announcements/');
-            const pathPrefix = isInSubfolder ? '../announcements/' : 'announcements/';
-            document.querySelectorAll('.dropdown-item[data-page]').forEach(item => {
-                item.href = pathPrefix + item.getAttribute('data-page');
-            });
-            document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-                toggle.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const dd = this.closest('.dropdown');
-                    const was = dd.classList.contains('active');
-                    document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
-                    if (!was) dd.classList.add('active');
-                });
-            });
-            document.addEventListener('click', function(e) {
-                if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
-            });
+        // Initialize Navigation Functionality (already handled by admin_nav.php)
+        // No need for dropdown path fixing since PHP handles it correctly
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
         }
     </script>
 
@@ -3048,6 +3040,8 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
                         <?php if (count($students) > 0): ?>
                             <?php foreach ($students as $student):
                                 $fullName = htmlspecialchars(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? ''));
+                                // Prefer the student's own uploaded photo (from profile.php) over admin-uploaded photo
+                                $profilePhoto = !empty($student['profile_photo']) ? $student['profile_photo'] : '';
                                 $imgSrc = htmlspecialchars($student['effective_photo'] ?? '../assets/img/person/unknown.jpg');
                                 $statusVal = $student['status'] ?? 'Active';
                                 $badgeClass = match ($statusVal) {
@@ -3061,6 +3055,7 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
                                 <tr class="student-row"
                                     data-id="<?php echo htmlspecialchars($student['student_id'] ?? ''); ?>"
                                     data-image="<?php echo htmlspecialchars($student['effective_photo'] ?? ''); ?>"
+                                    data-profile-photo="<?php echo htmlspecialchars($profilePhoto); ?>"
                                     data-name="<?php echo $fullName; ?>"
                                     data-grade="<?php echo htmlspecialchars($student['grade_level'] ?? ''); ?>"
                                     data-age="<?php echo htmlspecialchars($student['age'] ?? ''); ?>"
@@ -3652,8 +3647,11 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
         const profileModal = document.getElementById('profile-modal');
 
         function openProfile(row) {
-            const img = row.dataset.image || '';
-            document.getElementById('pm-photo').src = img || '../assets/img/person/unknown.jpg';
+            // Prefer the student's own photo (uploaded via profile.php) over admin-uploaded photo
+            const profilePhoto = row.dataset.profilePhoto || '';
+            const adminPhoto = row.dataset.image || '';
+            const img = profilePhoto || adminPhoto || '../assets/img/person/unknown.jpg';
+            document.getElementById('pm-photo').src = img;
             document.getElementById('pm-name').textContent = row.dataset.name || '';
             document.getElementById('pm-id').textContent = row.dataset.id || '';
             document.getElementById('pm-grade').textContent = row.dataset.grade || '—';
@@ -3827,7 +3825,10 @@ $maxCnt = !empty($gradeCnt) ? max($gradeCnt) : 1;
                 document.getElementById('edit-student-gender').value = row.dataset.gender || '';
                 document.getElementById('edit-student-age').value = row.dataset.age || '';
                 document.getElementById('edit-student-status').value = status;
-                document.getElementById('edit-student-profile-img').src = this.dataset.image || '../assets/img/person/unknown.jpg';
+                // Prefer student's own photo (from profile.php) over admin-uploaded photo
+                const editProfilePhoto = row.dataset.profilePhoto || '';
+                const editAdminPhoto = this.dataset.image || '';
+                document.getElementById('edit-student-profile-img').src = editProfilePhoto || editAdminPhoto || '../assets/img/person/unknown.jpg';
                 document.getElementById('edit-student-modal').style.display = 'flex';
             });
         });

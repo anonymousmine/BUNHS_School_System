@@ -1939,7 +1939,13 @@ $all_permissions = [
 </head>
 
 <body>
-    <div id="navigation-container"></div>
+    <?php include 'admin_nav.php'; ?>
+    <script>
+        // Initialize navigation functionality after include
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
+        }
+    </script>
 
     <main class="main page-content">
         <div class="toast-stack" id="toastStack"></div>
@@ -2577,31 +2583,16 @@ $all_permissions = [
                 const page = document.querySelector('.page-content');
                 if (main && page) main.appendChild(page);
                 initDropdowns();
-                initMobileNav(); // ← hamburger must be called here, not inside nav script
+                initMobileNav(); 
             })
             .catch(e => console.error('Nav error:', e));
 
         function initDropdowns() {
-            const path = window.location.pathname;
-            const isSubfolder = path.includes('/announcements/');
-            const prefix = isSubfolder ? '../announcements/' : 'announcements/';
-            document.querySelectorAll('.dropdown-item[data-page]').forEach(el => {
-                el.href = prefix + el.getAttribute('data-page');
-            });
-            document.querySelectorAll('.dropdown-toggle').forEach(t => {
-                t.addEventListener('click', e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const d = t.closest('.dropdown');
-                    const was = d.classList.contains('active');
-                    document.querySelectorAll('.dropdown').forEach(x => x.classList.remove('active'));
-                    if (!was) d.classList.add('active');
-                });
-            });
-            document.addEventListener('click', e => {
-                if (!e.target.closest('.dropdown'))
-                    document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
-            });
+            // Initialize Navigation Functionality (already handled by admin_nav.php)
+            // No need for dropdown path fixing since PHP handles it correctly
+            if (typeof initializeNavigation === 'function') {
+                initializeNavigation();
+            }
         }
 
         // Mobile hamburger sidebar toggle

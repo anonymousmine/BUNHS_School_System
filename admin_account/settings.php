@@ -1,7 +1,10 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id']) || !in_array($_SESSION['user_type'] ?? '', ['admin', 'sub-admin'])) {
-    header('Location: ../login.php');
+require_once '../session_config.php';  // unified session params — must replace session_start()
+
+$is_logged_in = (isset($_SESSION['user_id']) && in_array($_SESSION['user_type'] ?? '', ['admin', 'sub-admin']))
+    || isset($_SESSION['admin_id']);
+if (!$is_logged_in) {
+    header('Location: ../index.php');
     exit;
 }
 
@@ -901,21 +904,15 @@ while ($log = mysqli_fetch_assoc($logsRes)) {
 </head>
 
 <body>
-    <div id="navigation-container"></div>
+    <?php include 'admin_nav.php'; ?>
+    <script>
+        // Initialize navigation functionality after include
+        if (typeof initializeNavigation === 'function') {
+            initializeNavigation();
+        }
+    </script>
 
     <script>
-        fetch('admin_nav.php')
-            .then(response => response.text())
-            .then(data => {
-                document.getElementById('navigation-container').innerHTML = data;
-                const mainDiv = document.querySelector('.main');
-                const pageContent = document.querySelector('.page-content');
-                if (mainDiv && pageContent) {
-                    mainDiv.appendChild(pageContent);
-                }
-                initializeDropdowns();
-            })
-            .catch(error => console.error('Error loading navigation:', error));
 
         // Load settings
         loadSettings();
@@ -923,28 +920,11 @@ while ($log = mysqli_fetch_assoc($logsRes)) {
         initAutoSave();
 
         function initializeDropdowns() {
-            const currentPath = window.location.pathname;
-            const isInSubfolder = currentPath.includes('/announcements/');
-            const pathPrefix = isInSubfolder ? '../announcements/' : 'announcements/';
-            document.querySelectorAll('.dropdown-item[data-page]').forEach(item => {
-                const page = item.getAttribute('data-page');
-                item.href = pathPrefix + page;
-            });
-            document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-                toggle.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const dropdown = this.closest('.dropdown');
-                    const isActive = dropdown.classList.contains('active');
-                    document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
-                    if (!isActive) dropdown.classList.add('active');
-                });
-            });
-            document.addEventListener('click', function(e) {
-                if (!e.target.closest('.dropdown')) {
-                    document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
-                }
-            });
+            // Initialize Navigation Functionality (already handled by admin_nav.php)
+            // No need for dropdown path fixing since PHP handles it correctly
+            if (typeof initializeNavigation === 'function') {
+                initializeNavigation();
+            }
         }
     </script>
 

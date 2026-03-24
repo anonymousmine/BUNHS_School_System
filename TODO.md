@@ -1,46 +1,46 @@
-<<<<<<< HEAD
-# BUNHS Railway Fix v2 - Docker Builder ✅
+# BUNHS Login Debug & Fix Plan
 
-✅ 2/3: railway.json + Dockerfile (php8.3-apache + mysqli verify)
+## Status: Analysis Complete - Schema Probe Pending
 
-## Deploy Now:
-
+### 1. Information Gathered
 ```
-git add . && git commit -m "fix: railway dockerfile mysqli php8.3" && git push
-```
-
-**Railway will:**
-
-1. Build Docker → ✅ "mysqli extension LOADED"
-2. Deploy with your DB vars
-3. Site works!
-
-**Why Docker**: Your Dockerfile mysqli install WORKS. Nixpacks/FrankenPHP broken.
-=======
-# BUNHS School System - Railway MySQLi Fix (Nixpacks)
-
-✅ 3/5 complete: nixpacks.toml, railway.json, start-container.sh → plain PHP server + mysqli/DB checks
-
-## Deployment Ready ✅ 3/3 Core Files Fixed
-
-**Test Locally:**
-
-```bash
-docker build -t bunhs-test . && docker run -p 8080:8080 -e DB_HOST=host.docker.internal -e DB_PORT=3306 --rm bunhs-test
+login_otp.php: fetch_user() fails on students 'username' column (line 73)
+index.php: $cert_card1/2/3 undefined → PHP warnings break AJAX JSON
+Admin flow: index.php → login_otp.php (AJAX) → dashboard
+Test cred: Admin_SchoolHead_BUNHS (likely in admin table, NOT students)
 ```
 
-**Deploy:**
+### 2. Plan (Step-by-Step)
+1. Probe DB schema: confirm students columns, admin/sub_admin structure
+2. Fix login_otp.php: 
+   - fetch_user(): detect students cols dynamically OR skip for admin creds
+   - Early-exit admin check before students
+3. Fix index.php:
+   - Define $cert_card defaults before usage
+   - Remove legacy PHP login handler (use only AJAX)
+4. Test: Login with provided creds → OTP → admin_dashboard.php
+5. Security: Validate sessions, no output before headers/JSON
 
-1. `git add . && git commit -m "fix: railway mysqli nixpacks" && git push`
-2. Railway rebuilds → check build logs: "✅ mysqli extension LOADED"
-3. Set Railway DB vars
-4. Site loads without 500 error
+### 3. Dependent Files
+```
+REQUIRED:
+- login_otp.php (main fix)
+- index.php (warnings + handler)
 
-**Next Manual Steps:**
+PROBE:
+- DB: students, admin, sub_admin tables
 
-- Local test confirms mysqli
-- Deploy/push to Railway
-- Verify site + DB connection
+OPTIONAL:
+- cache_helper.php (ensure admin:{username} works)
+```
 
-**Next:** Complete step 1
->>>>>>> a03aafe901d1a7c9bf4323242c5e2b494f6d6f82
+### 4. Follow-up Steps
+```
+1. `tail -f logs/php_errors.log` during login test
+2. XAMPP Apache running + DB accessible
+3. Test: POST Admin_SchoolHead_BUNHS / BUNHS_Admin_DEPED_buyoan
+4. Verify redirect: admin_account/admin_dashboard.php
+```
+
+## Next Action: Await DB schema + user approval to edit files.
+
