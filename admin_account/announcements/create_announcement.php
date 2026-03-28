@@ -1,5 +1,192 @@
 <?php
+// Session management and role-based access control
+include '../../session_config.php';
 include '../../db_connection.php';
+
+// Check if user is logged in and has appropriate role
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_type'])) {
+    header('Location: ../../login.php');
+    exit();
+}
+
+$allowed_roles = ['admin', 'sub-admin'];
+if (!in_array($_SESSION['user_type'], $allowed_roles)) {
+    header('Location: ../../index.php?error=unauthorized');
+    exit();
+}
+
+// ============================================================
+//  SECURITY FUNCTIONS
+// ============================================================
+
+// CSRF Protection
+function generateCSRFToken() {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        $_SESSION['csrf_token_time'] = time();
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function validateEventCSRFToken($token) {
+    if (empty($_SESSION['csrf_token']) || empty($token)) {
+        return false;
+    }
+    
+    // Token expires after 1 hour
+    if (time() - $_SESSION['csrf_token_time'] > 3600) {
+        unset($_SESSION['csrf_token']);
+        unset($_SESSION['csrf_token_time']);
+        return false;
+    }
+    
+    return hash_equals($_SESSION['csrf_token'], $token);
+}
+
+// Input Sanitization
+function sanitizeInput($input, $type = 'string') {
+    switch ($type) {
+        case 'string':
+            return trim(htmlspecialchars($input, ENT_QUOTES, 'UTF-8'));
+        case 'email':
+            return filter_var(trim($input), FILTER_SANITIZE_EMAIL);
+        case 'int':
+            return filter_var($input, FILTER_SANITIZE_NUMBER_INT);
+        case 'float':
+            return filter_var($input, FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
+        case 'url':
+            return filter_var($input, FILTER_SANITIZE_URL);
+        default:
+            return trim(htmlspecialchars($input, ENT_QUOTES, 'UTF-8'));
+    }
+}
+
+// Output Escaping
+function esc($string) {
+    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+}
+
+// Comprehensive Input Validation
+function validateEventInput($data) {
+    $errors = [];
+    
+    // Required fields validation
+    if (empty($data['event_title'])) {
+        $errors[] = "Event title is required";
+    } elseif (strlen($data['event_title']) > 100) {
+        $errors[] = "Event title too long (max 100 characters)";
+    } elseif (!preg_match('/^[a-zA-Z0-9\s\-_,.()&\/]+$/', $data['event_title'])) {
+        $errors[] = "Event title contains invalid characters";
+    }
+    
+    if (empty($data['event_category'])) {
+        $errors[] = "Event category is required";
+    }
+    
+    if (empty($data['event_date'])) {
+        $errors[] = "Event date is required";
+    } elseif (strtotime($data['event_date']) < strtotime('today')) {
+        $errors[] = "Event date cannot be in the past";
+    }
+    
+    // Description validation
+    if (!empty($data['event_description']) && strlen($data['event_description']) > 500) {
+        $errors[] = "Description too long (max 500 characters)";
+    }
+    
+    // Email validation for organizer contact
+    if (!empty($data['organizer_contact'])) {
+        if (filter_var($data['organizer_contact'], FILTER_VALIDATE_EMAIL)) {
+            // Valid email
+        } elseif (preg_match('/^[\d\s\-\+\(\)]+$/', $data['organizer_contact'])) {
+            // Valid phone number format
+        } else {
+            $errors[] = "Organizer contact must be a valid email or phone number";
+        }
+    }
+    
+    // Time validation
+    if (!empty($data['event_start_time']) && !empty($data['event_end_time'])) {
+        if ($data['event_start_time'] >= $data['event_end_time']) {
+            $errors[] = "End time must be after start time";
+        }
+    }
+    
+    return $errors;
+}
+
+// Secure File Upload Validation
+function validateFileUpload($file, $allowedTypes = ['jpg', 'jpeg', 'png', 'webp'], $maxSize = 5242880) {
+    $errors = [];
+    
+    // Check if file was uploaded
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        switch ($file['error']) {
+            case UPLOAD_ERR_INI_SIZE:
+            case UPLOAD_ERR_FORM_SIZE:
+                $errors[] = "File too large (max 5MB)";
+                break;
+            case UPLOAD_ERR_PARTIAL:
+                $errors[] = "File upload was incomplete";
+                break;
+            case UPLOAD_ERR_NO_FILE:
+                // No file uploaded - not an error for optional fields
+                break;
+            case UPLOAD_ERR_NO_TMP_DIR:
+                $errors[] = "Server configuration error - no temporary directory";
+                break;
+            case UPLOAD_ERR_CANT_WRITE:
+                $errors[] = "Server error - cannot write file";
+                break;
+            case UPLOAD_ERR_EXTENSION:
+                $errors[] = "File upload stopped by extension";
+                break;
+            default:
+                $errors[] = "Unknown upload error";
+                break;
+        }
+        return $errors;
+    }
+    
+    // Check file size
+    if ($file['size'] > $maxSize) {
+        $errors[] = "File too large (max 5MB)";
+    }
+    
+    // Check file extension
+    $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($extension, $allowedTypes)) {
+        $errors[] = "Invalid file type. Allowed: " . implode(', ', $allowedTypes);
+    }
+    
+    // Validate actual file content (MIME type)
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mimeType = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+        
+        $allowedMimes = [
+            'image/jpeg',
+            'image/png', 
+            'image/webp',
+            'image/gif'
+        ];
+        
+        if (!in_array($mimeType, $allowedMimes)) {
+            $errors[] = "File content does not match extension";
+        }
+    }
+    
+    // Check if file is actually an image
+    if (!@getimagesize($file['tmp_name'])) {
+        $errors[] = "Uploaded file is not a valid image";
+    }
+    
+    return $errors;
+}
+
+// Generate CSRF token for this session
+$csrf_token = generateCSRFToken();
 
 // ============================================================
 //  HELPER: ensure extended columns exist (idempotent)
@@ -13,6 +200,8 @@ function ensure_event_columns($conn)
         "organizer_position"   => "VARCHAR(255) DEFAULT NULL",
         "organizer_contact"    => "VARCHAR(255) DEFAULT NULL",
         "team_based"           => "TINYINT(1) DEFAULT 0",
+        "source"               => "VARCHAR(255) DEFAULT NULL",
+        "is_official"          => "TINYINT(1) DEFAULT 0",
     ];
     foreach ($checks as $col => $def) {
         $r = $conn->query("SHOW COLUMNS FROM events LIKE '$col'");
@@ -84,6 +273,14 @@ function ensure_feature_tables($conn)
 ensure_event_columns($conn);
 ensure_feature_tables($conn);
 
+// Check if DepEd calendar has been seeded
+$already_seeded = $conn->query(
+    "SELECT COUNT(*) as cnt FROM events WHERE source = 'DepEd Order No. 012, s. 2025'"
+)->fetch_assoc()['cnt'];
+if ($already_seeded == 0) {
+    insert_deped_calendar_events($conn);
+}
+
 // ============================================================
 //  EXISTING FUNCTIONS (unchanged)
 // ============================================================
@@ -116,43 +313,65 @@ function delete_news($conn, $id)
 {
     $stmt = $conn->prepare("DELETE FROM news WHERE id = ?");
     $stmt->bind_param("i", $id);
-    $success = $stmt->execute();
-    $stmt->close();
-    return $success;
 }
 
 function insert_event($conn)
 {
-    $title            = $_POST['event_title'];
-    $description      = $_POST['event_description'];
-    $event_date       = $_POST['event_date'];
-    $category         = $_POST['event_category'];
-    $event_start_time = isset($_POST['event_start_time']) ? $_POST['event_start_time'] : null;
-    $event_end_time   = isset($_POST['event_end_time'])   ? $_POST['event_end_time']   : null;
-    $event_days       = isset($_POST['event_days'])       ? intval($_POST['event_days']) : 1;
-    $team_based       = isset($_POST['team_based'])       ? 1 : 0;
-    $location         = isset($_POST['event_location'])   ? $_POST['event_location']   : null;
-    $organizer_name   = isset($_POST['organizer_name'])   ? $_POST['organizer_name']   : null;
-    $organizer_pos    = isset($_POST['organizer_position']) ? $_POST['organizer_position'] : null;
-    $organizer_contact = isset($_POST['organizer_contact']) ? $_POST['organizer_contact'] : null;
+    // Server-side validation
+    $validation_errors = validateEventInput($_POST);
+    if (!empty($validation_errors)) {
+        echo json_encode(['status' => 'error', 'message' => implode(', ', $validation_errors)]);
+        return false;
+    }
+
+    $title            = sanitizeInput($_POST['event_title'], 'string');
+    $description      = sanitizeInput($_POST['event_description'], 'string');
+    $event_date       = sanitizeInput($_POST['event_date'], 'string');
+    $category         = sanitizeInput($_POST['event_category'], 'string');
+    $event_start_time = !empty($_POST['event_start_time']) ? sanitizeInput($_POST['event_start_time'], 'string') : null;
+    $event_end_time   = !empty($_POST['event_end_time']) ? sanitizeInput($_POST['event_end_time'], 'string') : null;
+    $event_days       = isset($_POST['event_days']) ? intval($_POST['event_days']) : 1;
+    $team_based       = isset($_POST['team_based']) ? 1 : 0;
+    $location         = !empty($_POST['event_location']) ? sanitizeInput($_POST['event_location'], 'string') : null;
+    $organizer_name   = !empty($_POST['organizer_name']) ? sanitizeInput($_POST['organizer_name'], 'string') : null;
+    $organizer_pos    = !empty($_POST['organizer_position']) ? sanitizeInput($_POST['organizer_position'], 'string') : null;
+    $organizer_contact = !empty($_POST['organizer_contact']) ? sanitizeInput($_POST['organizer_contact'], 'string') : null;
+    $source           = !empty($_POST['event_source']) ? sanitizeInput($_POST['event_source'], 'string') : null;
+    $is_official      = isset($_POST['is_official']) ? 1 : 0;
 
     if ($event_days < 1) $event_days = 1;
 
-    // Handle image upload
+    // Validate time logic
+    if ($event_start_time && $event_end_time && $event_start_time >= $event_end_time) {
+        echo json_encode(['status' => 'error', 'message' => 'End time must be after start time.']);
+        return false;
+    }
+
+    // Handle image upload with security validation
     $image = '';
-    if (isset($_FILES['event_image']) && $_FILES['event_image']['error'] == 0) {
+    if (isset($_FILES['event_image']) && $_FILES['event_image']['error'] != UPLOAD_ERR_NO_FILE) {
+        $file_errors = validateFileUpload($_FILES['event_image']);
+        if (!empty($file_errors)) {
+            echo json_encode(['status' => 'error', 'message' => implode(', ', $file_errors)]);
+            return false;
+        }
+        
         $target_dir  = "../../assets/img/events/";
         if (!is_dir($target_dir)) mkdir($target_dir, 0755, true);
         $ext         = strtolower(pathinfo($_FILES['event_image']['name'], PATHINFO_EXTENSION));
-        $filename    = 'event_' . time() . '.' . $ext;
+        $filename    = 'event_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
         $target_file = $target_dir . $filename;
+        
         if (move_uploaded_file($_FILES['event_image']['tmp_name'], $target_file)) {
             $image = $filename;
+        } else {
+            echo json_encode(['status' => 'error', 'message' => 'Failed to save uploaded file.']);
+            return false;
         }
     }
 
-    $stmt = $conn->prepare("INSERT INTO events (title, description, event_date, category, event_start_time, event_end_time, event_days, team_based, location, image, organizer_name, organizer_position, organizer_contact, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
-    $stmt->bind_param("ssssssiisssss", $title, $description, $event_date, $category, $event_start_time, $event_end_time, $event_days, $team_based, $location, $image, $organizer_name, $organizer_pos, $organizer_contact);
+    $stmt = $conn->prepare("INSERT INTO events (title, description, event_date, category, event_start_time, event_end_time, event_days, team_based, location, image, organizer_name, organizer_position, organizer_contact, source, is_official, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+    $stmt->bind_param("ssssssiisssssii", $title, $description, $event_date, $category, $event_start_time, $event_end_time, $event_days, $team_based, $location, $image, $organizer_name, $organizer_pos, $organizer_contact, $source, $is_official);
     $success = $stmt->execute();
     $new_id  = $conn->insert_id;
     $stmt->close();
@@ -281,16 +500,25 @@ function get_all_events($conn)
 
 function get_category_counts($conn)
 {
-    $categories = ['Academic', 'Sports', 'Cultural', 'Workshops', 'Conferences'];
+    $categories = ['Academic', 'Sports', 'Cultural', 'Workshops', 'Conferences', 'Academic Calendar', 'Holidays', 'Health & Nutrition', 'Governance & Elections', 'Assessments', 'Professional Development', 'Remedial & Intervention'];
+    
+    // Get counts with single query
+    $stmt = $conn->prepare("SELECT category, COUNT(*) as count FROM events GROUP BY category");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $db_counts = [];
+    while ($row = $result->fetch_assoc()) {
+        $db_counts[$row['category']] = $row['count'];
+    }
+    $stmt->close();
+    
+    // Build final counts array with 0 for missing categories
     $counts = [];
     foreach ($categories as $cat) {
-        $s = $conn->prepare("SELECT COUNT(*) as c FROM events WHERE category=?");
-        $s->bind_param("s", $cat);
-        $s->execute();
-        $r = $s->get_result();
-        $counts[$cat] = $r->fetch_assoc()['c'];
-        $s->close();
+        $counts[$cat] = $db_counts[$cat] ?? 0;
     }
+    
     return $counts;
 }
 
@@ -447,13 +675,98 @@ function get_event_by_id($conn, $id)
 }
 
 // ============================================================
+//  NEW: DepEd Calendar Functions
+// ============================================================
+function insert_deped_calendar_events($conn)
+{
+    // Clear existing official events to avoid duplicates
+    $conn->query("DELETE FROM events WHERE is_official = 1");
+    
+    $events = [
+        // Academic Calendar Events
+        ["title"=>"Start of School Year 2025-2026", "description"=>"Formal opening of School Year 2025-2026", "event_date"=>"2025-06-16", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"End of School Year 2025-2026", "description"=>"EOSY rites and deliberations", "event_date"=>"2026-03-31", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"Brigada Eskwela 2025", "description"=>"National Schools Maintenance Week", "event_date"=>"2025-06-09", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        
+        // Early Registration Periods
+        ["title"=>"Early Registration for SY 2025-2026", "description"=>"Early registration for incoming students", "event_date"=>"2025-05-10", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"Balik Eskwela Program", "description"=>"Orientations and enrollment for returning students", "event_date"=>"2025-06-02", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        
+        // National Holidays
+        ["title"=>"Day of Valor (Araw ng Kagitingan)", "description"=>"Regular Holiday", "event_date"=>"2025-04-09", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Maundy Thursday", "description"=>"Regular Holiday", "event_date"=>"2025-04-17", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Good Friday", "description"=>"Regular Holiday", "event_date"=>"2025-04-18", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Labor Day", "description"=>"Regular Holiday", "event_date"=>"2025-05-01", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Independence Day", "description"=>"Regular Holiday", "event_date"=>"2025-06-12", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"National Heroes Day", "description"=>"Regular Holiday", "event_date"=>"2025-08-25", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Bonifacio Day", "description"=>"Regular Holiday", "event_date"=>"2025-11-30", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Christmas Day", "description"=>"Regular Holiday", "event_date"=>"2025-12-25", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Rizal Day", "description"=>"Regular Holiday", "event_date"=>"2025-12-30", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        
+        // Special Non-Working Holidays
+        ["title"=>"Ninoy Aquino Day", "description"=>"Special Non-Working Holiday", "event_date"=>"2025-08-21", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"All Saints' Day", "description"=>"Special Non-Working Holiday", "event_date"=>"2025-11-01", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"All Souls' Day", "description"=>"Special Non-Working Holiday", "event_date"=>"2025-11-02", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        ["title"=>"Last Day of the Year", "description"=>"Special Non-Working Holiday", "event_date"=>"2025-12-31", "category"=>"Holidays", "source"=>"Proclamation No. 368", "is_official"=>1],
+        
+        // Break Periods
+        ["title"=>"Mid-year Break", "description"=>"Last week of October break", "event_date"=>"2025-10-27", "category"=>"Holidays", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1, "event_days"=>5],
+        ["title"=>"Christmas Break Start", "description"=>"Start of Christmas break", "event_date"=>"2025-12-20", "category"=>"Holidays", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"Christmas Break End", "description"=>"Resumption of classes", "event_date"=>"2026-01-06", "category"=>"Holidays", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        
+        // Parent-Teacher Conferences
+        ["title"=>"First Quarter Parent-Teacher Conference", "description"=>"PTC after first quarter exams", "event_date"=>"2025-08-15", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"Second Quarter Parent-Teacher Conference", "description"=>"PTC after second quarter exams", "event_date"=>"2025-10-24", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"Third Quarter Parent-Teacher Conference", "description"=>"PTC after third quarter exams", "event_date"=>"2026-01-23", "category"=>"Academic Calendar", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        
+        // Health & Nutrition
+        ["title"=>"OK sa DepEd Program Launch", "description"=>"Health and Nutrition Program", "event_date"=>"2025-07-15", "category"=>"Health & Nutrition", "source"=>"DepEd Memorandum", "is_official"=>1],
+        ["title"=>"National School Deworming Month", "description"=>"Mass deworming activities", "event_date"=>"2025-07-01", "category"=>"Health & Nutrition", "source"=>"DepEd Memorandum", "is_official"=>1],
+        ["title"=>"School Dental Health Program", "description"=>"Dental check-up and treatment", "event_date"=>"2025-09-20", "category"=>"Health & Nutrition", "source"=>"DepEd Memorandum", "is_official"=>1],
+        
+        // Governance & Elections
+        ["title"=>"Learner Government Elections", "description"=>"Student government elections after 3rd Quarter exams", "event_date"=>"2026-01-30", "category"=>"Governance & Elections", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"School In-service Training (INSET)", "description"=>"Teacher professional development", "event_date"=>"2025-10-20", "category"=>"Governance & Elections", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1, "event_days"=>3],
+        
+        // Assessments
+        ["title"=>"First Quarterly Assessment", "description"=>"First quarter examinations", "event_date"=>"2025-08-08", "category"=>"Assessments", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1, "event_days"=>3],
+        ["title"=>"Second Quarterly Assessment", "description"=>"Second quarter examinations", "event_date"=>"2025-10-17", "category"=>"Assessments", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1, "event_days"=>3],
+        ["title"=>"Third Quarterly Assessment", "description"=>"Third quarter examinations", "event_date"=>"2026-01-16", "category"=>"Assessments", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1, "event_days"=>3],
+        ["title"=>"Fourth Quarterly Assessment", "description"=>"Fourth quarter examinations", "event_date"=>"2026-03-20", "category"=>"Assessments", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1, "event_days"=>3],
+        ["title"=>"National Achievement Test (NAT)", "description"=>"System assessment for Grade 6 and 10", "event_date"=>"2026-02-15", "category"=>"Assessments", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+        ["title"=>"Early Language, Literacy, and Numeracy Assessment", "description"=>"ELLN for Kindergarten to Grade 3", "event_date"=>"2025-10-10", "category"=>"Assessments", "source"=>"DepEd Order No. 012, s. 2025", "is_official"=>1],
+    ];
+    
+    $success_count = 0;
+    foreach ($events as $ev) {
+        $event_days = isset($ev['event_days']) ? $ev['event_days'] : 1;
+        $is_official = isset($ev['is_official']) ? $ev['is_official'] : 1;
+        
+        $stmt = $conn->prepare("INSERT INTO events (title, description, event_date, category, event_days, source, is_official, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
+        $stmt->bind_param("ssssisi", $ev['title'], $ev['description'], $ev['event_date'], $ev['category'], $event_days, $ev['source'], $is_official);
+        if ($stmt->execute()) {
+            $success_count++;
+        }
+        $stmt->close();
+    }
+    
+    return $success_count;
+}
+
+// ============================================================
 //  AJAX REQUEST HANDLER
 // ============================================================
 if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
     header('Content-Type: application/json');
 
     if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
-        $action = $_POST['action'];
+        // Validate CSRF token for all POST requests
+        if (!validateEventCSRFToken($_POST['csrf_token'] ?? '')) {
+            echo json_encode(['status' => 'error', 'message' => 'Security token expired. Please refresh the page.']);
+            exit;
+        }
+
+        $action = sanitizeInput($_POST['action'], 'string');
 
         // ---------- existing actions ----------
         if ($action == 'add_event') {
@@ -462,8 +775,9 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
             exit;
         }
         if ($action == 'update_event' && isset($_POST['event_id'])) {
-            $success = update_event_details($conn, $_POST['event_id']);
-            echo json_encode($success ? ['status' => 'success', 'message' => 'Event updated!'] : ['status' => 'error', 'message' => 'Error updating event.']);
+            $event_id = intval($_POST['event_id']);
+            $success = update_event_details($conn, $event_id);
+            echo json_encode($success ? ['status' => 'success', 'message' => 'Event updated successfully!'] : ['status' => 'error', 'message' => 'Error updating event.']);
             exit;
         }
         if ($action == 'delete_event' && isset($_POST['id'])) {
@@ -584,25 +898,22 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
             echo json_encode(['status' => 'success', 'applicants' => $applicants]);
             exit;
         }
+        // ---------- DepEd Calendar Action ----------
+        if ($action == 'import_deped_calendar') {
+            $count = insert_deped_calendar_events($conn);
+            echo json_encode(['status' => 'success', 'message' => "Successfully imported {$count} DepEd calendar events."]);
+            exit;
+        }
     }
 
     if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['action'])) {
         $success = insert_news($conn);
         echo json_encode($success ? ['status' => 'success', 'message' => 'News post created!'] : ['status' => 'error', 'message' => 'Error.']);
-    }
-    exit;
-}
-
-// Handle regular POST
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    if (!isset($_POST['action'])) {
-        $success = insert_news($conn);
-        if ($success) echo "<script>alert('News post created successfully!'); window.location.reload();</script>";
-        else          echo "<script>alert('Error creating news post.');</script>";
+        exit;
     }
 }
 
-// Data for the page
+// Data for the page - refreshed 2026-03-26
 $featured_events  = get_featured_events($conn);
 $today            = date("Y-m-d");
 $featured_event   = !empty($featured_events) ? $featured_events[0] : null;
@@ -618,30 +929,62 @@ $all_applications = get_all_applications($conn);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Announcements - School Admin Dashboard</title>
-    <link rel="stylesheet" href="../admin_assets/cs/admin_style.css">
+    <link rel="stylesheet" href="/BUNHS_School_System/admin_account/admin_assets/cs/admin_style.css?v=20260326">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link href="../../assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-    <link href="../../assets/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
-    <link href="../../assets/vendor/swiper/swiper-bundle.min.css" rel="stylesheet">
-    <link href="../../assets/vendor/glightbox/css/glightbox.min.css" rel="stylesheet">
-    <link href="../../assets/css/main.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="/BUNHS_School_System/assets/vendor/bootstrap/css/bootstrap.min.css?v=20260326" rel="stylesheet">
+    <link href="/BUNHS_School_System/assets/vendor/bootstrap-icons/bootstrap-icons.css?v=20260326" rel="stylesheet">
+    <link href="/BUNHS_School_System/assets/css/main.css?v=20260326" rel="stylesheet">
     <style>
+        /* ============================================================
+           BUNHS ANNOUNCEMENTS & EVENTS — REDESIGNED UI
+           Deep Forest theme · Outfit + Plus Jakarta Sans
+        ============================================================ */
         :root {
-            --moss-green-primary: #4A5D23;
-            --moss-green-light: #6B7F3A;
-            --moss-green-lighter: #7A8F4A;
-            --moss-green-lightest: #8A9F5A;
-            --white: #FFFFFF;
-            --gray-light: #F8F9FA;
-            --text-primary: #212529;
-            --text-secondary: #6C757D;
-            --success-color: #28a745;
-            --danger-color: #dc3545;
-            --warning-color: #ffc107;
-            --info-color: #17a2b8;
+            --forest-deep:    #102C26;
+            --forest-mid:     #1B4D44;
+            --forest-bright:  #2A7A68;
+            --forest-mist:    #3D9E8A;
+            --forest-pale:    #E6F4F1;
+            --forest-softer:  #F0F9F7;
+            --gold:           #D4A843;
+            --gold-light:     #F0C96A;
+            --white:          #FFFFFF;
+            --ink:            #0E1F1C;
+            --ink-mid:        #2C4A44;
+            --ink-soft:       #5A7A74;
+            --surface:        #F7FAFA;
+            --border:         #D4E8E4;
+            --shadow-sm:      0 2px 8px rgba(16,44,38,.08);
+            --shadow-md:      0 8px 28px rgba(16,44,38,.13);
+            --shadow-lg:      0 20px 50px rgba(16,44,38,.18);
+            --radius-sm:      8px;
+            --radius-md:      14px;
+            --radius-lg:      22px;
+            --transition:     all .25s cubic-bezier(.4,0,.2,1);
         }
 
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: var(--surface);
+            color: var(--ink);
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        h1,h2,h3,h4,h5,h6,
+        .heading-title,
+        .admin-section-title,
+        .modal-title {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+        }
+
+        /* ============================================================
+           TOAST
+        ============================================================ */
         .toast-container {
             position: fixed;
             top: 20px;
@@ -649,865 +992,331 @@ $all_applications = get_all_applications($conn);
             z-index: 9999;
             display: flex;
             flex-direction: column;
-            gap: 10px
+            gap: 10px;
         }
 
         .toast-notification {
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 16px 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, .15);
+            padding: 14px 18px;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
             color: #fff;
+            font-family: 'Plus Jakarta Sans', sans-serif;
             font-weight: 500;
-            min-width: 300px;
-            max-width: 400px;
-            animation: slideInRight .4s ease-out, fadeOut .4s ease-in 3.6s forwards;
-            backdrop-filter: blur(10px)
-        }
-
-        .toast-notification.success {
-            background: linear-gradient(135deg, #28a745, #20c997)
-        }
-
-        .toast-notification.error {
-            background: linear-gradient(135deg, #dc3545, #e74c3c)
-        }
-
-        .toast-notification.warning {
-            background: linear-gradient(135deg, #ffc107, #ffb300);
-            color: #212529
-        }
-
-        .toast-notification.info {
-            background: linear-gradient(135deg, #17a2b8, #1abc9c)
-        }
-
-        .toast-notification i {
-            font-size: 20px;
-            flex-shrink: 0
-        }
-
-        .toast-notification .toast-message {
-            flex: 1;
-            font-size: 14px
-        }
-
-        .toast-notification .toast-close {
-            background: none;
-            border: none;
-            color: inherit;
-            cursor: pointer;
-            padding: 0;
-            font-size: 18px;
-            opacity: .7;
-            transition: opacity .2s
-        }
-
-        .toast-notification .toast-close:hover {
-            opacity: 1
-        }
-
-        @keyframes slideInRight {
-            from {
-                transform: translateX(100%);
-                opacity: 0
-            }
-
-            to {
-                transform: translateX(0);
-                opacity: 1
-            }
-        }
-
-        @keyframes fadeOut {
-            from {
-                opacity: 1
-            }
-
-            to {
-                opacity: 0;
-                transform: translateX(100%)
-            }
-        }
-
-        .modal-content {
-            background-color: #fff;
-            border-radius: 16px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, .15);
-            overflow: hidden
-        }
-
-        .modal-header {
-            border-bottom: 1px solid #E9ECEF;
-            padding: 1.5rem 2rem;
-            background: linear-gradient(135deg, var(--moss-green-primary), var(--moss-green-light));
-            color: #fff
-        }
-
-        .modal-header .modal-title {
-            font-weight: 600;
-            font-size: 1.25rem
-        }
-
-        .modal-header .btn-close {
-            filter: invert(1);
-            opacity: .8
-        }
-
-        .modal-body {
-            padding: 2rem
-        }
-
-        .modal-footer {
-            border-top: 1px solid #E9ECEF;
-            padding: 1.5rem 2rem;
-            background: #f8f9fa
-        }
-
-        .form-field-wrapper {
-            position: relative;
-            margin-bottom: 1.25rem
-        }
-
-        .form-field-wrapper .field-icon {
-            position: absolute;
-            left: 14px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-secondary);
-            font-size: 16px;
-            z-index: 2;
-            transition: color .3s ease
-        }
-
-        .form-field-wrapper textarea+.field-icon {
-            top: 20px;
-            transform: none
-        }
-
-        .form-field-wrapper .form-control,
-        .form-field-wrapper .form-select {
-            padding: 0.875rem 1rem 0.875rem 42px;
-            border: 2px solid #E9ECEF;
-            border-radius: 10px;
-            font-size: 1rem;
-            transition: all .3s ease;
-            background: #fafbfc
-        }
-
-        .form-field-wrapper .form-control:focus,
-        .form-field-wrapper .form-select:focus {
-            border-color: var(--moss-green-primary);
-            box-shadow: 0 0 0 4px rgba(74, 93, 35, .15);
-            background: #fff;
-            outline: none
-        }
-
-        .form-label {
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: .5rem;
-            font-size: .9rem;
-            display: flex;
-            align-items: center;
-            gap: 6px
-        }
-
-        .required-star {
-            color: #dc3545;
-            font-size: 12px
-        }
-
-        .btn-primary {
-            background-color: var(--moss-green-primary);
-            border-color: var(--moss-green-primary);
-            font-weight: 600;
-            padding: .75rem 1.75rem;
-            border-radius: 10px;
-            transition: all .3s ease
-        }
-
-        .btn-primary:hover {
-            background-color: var(--moss-green-light);
-            border-color: var(--moss-green-light);
-            transform: translateY(-3px);
-            box-shadow: 0 6px 20px rgba(74, 93, 35, .35)
-        }
-
-        .form-section-card {
-            background: #fff;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            border: 1px solid rgba(0, 0, 0, .05);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, .04)
-        }
-
-        .form-section-card .section-title {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--moss-green-primary);
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding-bottom: .75rem;
-            border-bottom: 2px solid var(--moss-green-lightest)
-        }
-
-        .calendar-container {
-            max-width: 100%;
-            margin: 0 auto
-        }
-
-        .calendar-wrapper {
-            background: #fff;
-            border-radius: 16px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, .1);
-            overflow: hidden
-        }
-
-        .month {
-            padding: 20px;
-            width: 100%;
-            background: linear-gradient(135deg, #1abc9c, #16a085);
-            text-align: center
-        }
-
-        .month ul {
-            margin: 0;
-            padding: 0
-        }
-
-        .month ul li {
-            color: #fff;
-            font-size: 18px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            font-weight: 500
-        }
-
-        .month .prev,
-        .month .next {
-            padding-top: 8px;
-            cursor: pointer;
-            color: #fff;
-            transition: all .3s ease;
-            width: 36px;
-            height: 36px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%
-        }
-
-        .month .prev:hover,
-        .month .next:hover {
-            background: rgba(255, 255, 255, .2);
-            transform: scale(1.1)
-        }
-
-        .weekdays {
-            margin: 0;
-            padding: 12px 0;
-            background-color: #f8f9fa;
-            display: flex;
-            justify-content: space-around;
-            border-bottom: 1px solid #eee
-        }
-
-        .weekdays li {
-            display: inline-block;
-            width: 13.6%;
-            color: #666;
-            text-align: center;
-            font-weight: 600;
-            font-size: 13px;
-            text-transform: uppercase
-        }
-
-        .days {
-            padding: 8px;
-            background: #fafafa;
-            margin: 0;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: flex-start
-        }
-
-        .days li {
-            list-style-type: none;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 14.28%;
-            text-align: center;
-            margin-bottom: 4px;
             font-size: 14px;
-            color: #555;
-            padding: 10px 0;
-            position: relative;
-            cursor: pointer;
-            transition: all .25s ease;
-            border-radius: 10px;
-            min-height: 44px
+            min-width: 280px;
+            max-width: 380px;
+            animation: slideInRight .35s ease-out, fadeOut .4s ease-in 3.6s forwards;
+            backdrop-filter: blur(12px);
         }
 
-        .days li:hover {
-            background: linear-gradient(135deg, var(--moss-green-light), var(--moss-green-lighter));
-            color: #fff;
-            transform: scale(1.05);
-            box-shadow: 0 4px 12px rgba(74, 93, 35, .3)
-        }
+        .toast-notification.success  { background: linear-gradient(135deg, var(--forest-mid), var(--forest-bright)); }
+        .toast-notification.error    { background: linear-gradient(135deg, #c0392b, #e74c3c); }
+        .toast-notification.warning  { background: linear-gradient(135deg, #d4a017, var(--gold)); color: var(--ink); }
+        .toast-notification.info     { background: linear-gradient(135deg, var(--forest-bright), var(--forest-mist)); }
+        .toast-notification i        { font-size: 18px; flex-shrink: 0; }
+        .toast-notification .toast-message { flex: 1; }
+        .toast-notification .toast-close   { background: none; border: none; color: inherit; cursor: pointer; padding: 0; font-size: 16px; opacity: .7; transition: opacity .2s; }
+        .toast-notification .toast-close:hover { opacity: 1; }
 
-        .days li.other-month {
-            color: #ccc
-        }
+        @keyframes slideInRight { from { transform: translateX(110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeOut      { from { opacity: 1; } to { opacity: 0; transform: translateX(110%); } }
+        @keyframes spin         { to { transform: rotate(360deg); } }
+        @keyframes fadeInUp     { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
 
-        .days li.today {
-            font-weight: bold;
-            color: #1abc9c
-        }
-
-        .days li.today::after {
-            content: '';
-            position: absolute;
-            bottom: 6px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 6px;
-            height: 6px;
-            background: #1abc9c;
-            border-radius: 50%
-        }
-
-        .days li .event-dot {
-            position: absolute;
-            bottom: 4px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background-color: #1abc9c
-        }
-
-        .days li .event-dot.academic {
-            background-color: #3498db
-        }
-
-        .days li .event-dot.sports {
-            background-color: #e74c3c
-        }
-
-        .days li .event-dot.cultural {
-            background-color: #9b59b6
-        }
-
-        .days li .event-dot.workshops {
-            background-color: #f39c12
-        }
-
-        .days li .event-dot.conferences {
-            background-color: #1abc9c
-        }
-
-        .event-item {
-            display: flex;
-            gap: 20px;
-            padding: 20px;
-            background: #fff;
-            border-radius: 12px;
-            margin-bottom: 16px;
-            border: 1px solid rgba(0, 0, 0, .05);
-            transition: all .3s ease
-        }
-
-        .event-item:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, .12)
-        }
-
-        .event-item .event-date {
-            flex-shrink: 0;
-            width: 70px;
-            text-align: center;
-            padding: 12px;
-            background: linear-gradient(135deg, #1abc9c, #16a085);
-            border-radius: 12px;
-            color: #fff
-        }
-
-        .event-item .event-date .day {
-            display: block;
-            font-size: 28px;
-            font-weight: 700;
-            line-height: 1
-        }
-
-        .event-item .event-date .month {
-            display: block;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            padding: 0;
-            background: transparent
-        }
-
-        .event-item .event-content {
-            flex: 1
-        }
-
-        .event-item .event-content h3 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #333
-        }
-
-        .event-item .event-meta {
-            display: flex;
-            gap: 16px;
-            margin-bottom: 10px;
-            flex-wrap: wrap
-        }
-
-        .event-item .event-meta p {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: .85rem;
-            color: #666;
-            margin: 0
-        }
-
-        .event-item .event-meta i {
-            color: #1abc9c
-        }
-
-        .event-item .btn-event {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            color: #1abc9c;
-            font-weight: 600;
-            font-size: .9rem;
-            text-decoration: none;
-            transition: gap .3s ease
-        }
-
-        .event-item .btn-event:hover {
-            gap: 10px
-        }
-
-        .event-item-category {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase
-        }
-
-        .event-item-category.academic {
-            background-color: #3498db;
-            color: #fff
-        }
-
-        .event-item-category.sports {
-            background-color: #e74c3c;
-            color: #fff
-        }
-
-        .event-item-category.cultural {
-            background-color: #9b59b6;
-            color: #fff
-        }
-
-        .event-item-category.workshops {
-            background-color: #f39c12;
-            color: #fff
-        }
-
-        .event-item-category.conferences {
-            background-color: #1abc9c;
-            color: #fff
-        }
-
-        .event-modal .modal-header {
-            background: linear-gradient(135deg, #1abc9c, #16a085);
-            color: #fff;
-            border-radius: 0
-        }
-
-        .event-modal .event-date-header {
-            background: linear-gradient(135deg, #1abc9c, #16a085);
-            color: #fff;
-            padding: 20px 24px;
-            margin: -1.5rem -1.5rem 1.5rem -1.5rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between
-        }
-
-        .events-list-modal {
-            max-height: 300px;
-            overflow-y: auto;
-            padding-right: 8px
-        }
-
-        .event-list-item {
-            padding: 14px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-            background: #f8f9fa;
-            border-left: 4px solid #1abc9c;
-            transition: all .3s ease;
-            position: relative
-        }
-
-        .event-list-item:hover {
-            transform: translateX(4px);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, .1)
-        }
-
-        .event-list-item h6 {
-            margin: 0 0 6px;
-            color: #333;
-            font-weight: 600
-        }
-
-        .event-list-item p {
-            margin: 0;
-            font-size: 13px;
-            color: #666
-        }
-
-        .event-list-item .delete-event-btn {
-            position: absolute;
-            right: 12px;
-            top: 12px;
-            background: none;
-            border: none;
-            color: #dc3545;
-            cursor: pointer;
-            opacity: .5;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center
-        }
-
-        .event-list-item .delete-event-btn:hover {
-            opacity: 1;
-            background: rgba(220, 53, 69, .1)
-        }
-
-        .events-page-sidebar .sidebar-item {
-            background: #fff;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, .04);
-            border: 1px solid rgba(0, 0, 0, .05)
-        }
-
-        .events-page-sidebar .sidebar-title {
-            font-size: 1rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 16px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #1abc9c
-        }
-
-        .categories ul {
-            list-style: none;
-            padding: 0;
-            margin: 0
-        }
-
-        .categories ul li {
-            padding: 10px 0;
-            border-bottom: 1px solid #f0f0f0
-        }
-
-        .categories ul li:last-child {
-            border-bottom: none
-        }
-
-        .categories ul li a {
-            display: flex;
-            justify-content: space-between;
-            color: #555;
-            text-decoration: none;
-            font-weight: 500
-        }
-
-        .categories ul li a:hover {
-            color: #1abc9c
-        }
-
-        .categories ul li a span {
-            background: #f0f0f0;
-            padding: 2px 10px;
-            border-radius: 12px;
-            font-size: .8rem
-        }
-
-        .pagination-wrapper {
-            margin-top: 30px
-        }
-
-        .pagination .page-link {
-            border: none;
-            padding: 10px 16px;
-            margin: 0 4px;
-            border-radius: 8px;
-            color: #555;
-            font-weight: 500
-        }
-
-        .pagination .page-link:hover {
-            background: #1abc9c;
-            color: #fff
-        }
-
-        .pagination .page-item.active .page-link {
-            background: linear-gradient(135deg, #1abc9c, #16a085);
-            color: #fff
-        }
-
-        .page-content {
-            margin-left: 0;
-            width: calc(100vw - 260px);
-            max-width: 100%;
-            padding: 0 20px
-        }
-
-        .text-muted {
-            text-align: center !important
-        }
-
+        /* ============================================================
+           LOADING / NAV
+        ============================================================ */
         .dashboard-loading {
             display: flex;
             align-items: center;
             justify-content: center;
             min-height: 100vh;
             flex-direction: column;
-            gap: 16px
+            gap: 16px;
         }
 
-        .dashboard-loading .spinner {
-            width: 48px;
-            height: 48px;
-            border: 4px solid #e5e7eb;
-            border-top-color: #4A5D23;
+        .dashboard-loading .spinner,
+        .spinner-enhanced {
+            width: 44px;
+            height: 44px;
+            border: 3px solid var(--border);
+            border-top-color: var(--forest-bright);
             border-radius: 50%;
-            animation: spin 1s linear infinite
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg)
-            }
+            animation: spin 1s linear infinite;
         }
 
         .nav-error {
             background: #fef2f2;
             border: 1px solid #fecaca;
-            border-radius: 12px;
+            border-radius: var(--radius-md);
             padding: 24px;
             text-align: center;
-            margin: 16px
+            margin: 16px;
         }
 
-        .featured-event-carousel {
+        /* ============================================================
+           PAGE TITLE / HERO BANNER
+        ============================================================ */
+        .page-title {
+            background: linear-gradient(135deg, var(--forest-deep) 0%, var(--forest-mid) 60%, var(--forest-bright) 100%);
+            color: #fff;
+            padding: 3.5rem 0 2.5rem;
+            margin-bottom: 0;
             position: relative;
-            overflow: hidden
+            overflow: hidden;
         }
 
-        .featured-event-slide {
-            display: none;
-            animation: fadeIn .5s ease-in-out
+        .page-title::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 60% 80% at 80% 50%, rgba(212,168,67,.12) 0%, transparent 70%),
+                radial-gradient(ellipse 40% 60% at 10% 80%, rgba(61,158,138,.15) 0%, transparent 60%);
+            pointer-events: none;
         }
 
-        .featured-event-slide.active {
-            display: block
+        .page-title::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--forest-bright), var(--gold), var(--forest-bright));
         }
 
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateX(20px)
-            }
-
-            to {
-                opacity: 1;
-                transform: translateX(0)
-            }
+        .heading-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.6rem;
+            font-weight: 800;
+            letter-spacing: -.5px;
+            margin-bottom: .5rem;
+            position: relative;
+            z-index: 2;
         }
 
-        @media(max-width:768px) {
-            .event-item {
-                flex-direction: column;
-                gap: 12px
-            }
-
-            .event-item .event-date {
-                width: 100%;
-                display: flex;
-                align-items: center;
-                gap: 12px
-            }
+        .page-title p {
+            font-size: 1rem;
+            opacity: .82;
+            position: relative;
+            z-index: 2;
         }
 
-        /* ---- NEW: Applications & Groups UI ---- */
+        /* breadcrumbs */
+        .breadcrumbs { position: relative; z-index: 2; }
+        .breadcrumbs ol { display: flex; gap: 6px; list-style: none; padding: 0; margin: 1rem 0 0; flex-wrap: wrap; }
+        .breadcrumbs ol li { font-size: .85rem; opacity: .75; }
+        .breadcrumbs ol li a { color: #fff; text-decoration: none; opacity: .85; }
+        .breadcrumbs ol li a:hover { opacity: 1; text-decoration: underline; }
+        .breadcrumbs ol li + li::before { content: '/'; margin-right: 6px; opacity: .5; }
+        .breadcrumbs ol li.current { opacity: 1; font-weight: 600; }
+
+        /* ============================================================
+           FEATURED EVENT BANNER
+        ============================================================ */
+        .featured-event-section { margin: 0; padding: 0; }
+
+        .featured-event-banner {
+            padding: 56px 24px 52px !important;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .featured-event-banner::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(0,0,0,.55), rgba(0,0,0,.3));
+            pointer-events: none;
+        }
+
+        .featured-event-banner .row { position: relative; z-index: 2; }
+
+        .featured-event-banner h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: clamp(1.8rem, 3vw, 2.8rem) !important;
+            font-weight: 800 !important;
+            letter-spacing: -.3px;
+            text-shadow: 0 2px 12px rgba(0,0,0,.4);
+        }
+
+        .featured-event-banner .badge {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            letter-spacing: .5px;
+            border-radius: 30px;
+        }
+
+        /* ============================================================
+           MAIN CONTENT WRAPPER
+        ============================================================ */
+        .main.page-content { background: var(--surface); }
+
+        /* ============================================================
+           ADMIN SECTION CARDS
+        ============================================================ */
         .admin-section-card {
-            background: #fff;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, .08);
-            padding: 28px;
-            margin-bottom: 30px;
+            background: var(--white);
+            border-radius: var(--radius-lg);
+            padding: 2rem 2.25rem;
+            margin-bottom: 2.25rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-sm);
+            transition: box-shadow .3s ease;
+            position: relative;
+            overflow: hidden;
+            animation: fadeInUp .45s ease both;
         }
 
+        .admin-section-card:hover {
+            box-shadow: var(--shadow-md);
+        }
+
+        .admin-section-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--forest-deep), var(--forest-bright), var(--gold));
+            border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        }
+
+        /* Section headings inside cards */
         .admin-section-title {
-            font-size: 1.2rem;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.25rem;
             font-weight: 700;
-            color: var(--moss-green-primary);
-            border-bottom: 3px solid var(--moss-green-lightest);
-            padding-bottom: 12px;
-            margin-bottom: 20px;
+            color: var(--forest-deep);
+            border-bottom: 2px solid var(--forest-pale);
+            padding-bottom: 1rem;
+            margin-bottom: 1.75rem;
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-wrap: wrap;
         }
 
         .admin-section-title i {
-            color: var(--moss-green-light);
+            color: var(--forest-bright);
+            font-size: 1.1rem;
         }
 
-        .applications-table th {
-            background: linear-gradient(135deg, var(--moss-green-primary), var(--moss-green-light));
-            color: #fff;
-            font-weight: 600;
-            font-size: .85rem;
-            text-transform: uppercase;
-            letter-spacing: .5px;
-        }
+        .admin-section-title .ms-auto { margin-left: auto; }
 
-        .applications-table td {
-            vertical-align: middle;
-            font-size: .9rem;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: .78rem;
-            font-weight: 600;
-        }
-
-        .status-badge.Pending {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .status-badge.Approved {
-            background: #d1e7dd;
-            color: #0f5132;
-        }
-
-        .status-badge.Rejected {
-            background: #f8d7da;
-            color: #842029;
-        }
-
-        .btn-approve {
-            background: #28a745;
-            color: #fff;
-            border: none;
-            padding: 5px 12px;
-            border-radius: 8px;
-            font-size: .8rem;
-            cursor: pointer;
-        }
-
-        .btn-approve:hover {
-            background: #218838;
-        }
-
-        .btn-reject {
-            background: #dc3545;
-            color: #fff;
-            border: none;
-            padding: 5px 12px;
-            border-radius: 8px;
-            font-size: .8rem;
-            cursor: pointer;
-        }
-
-        .btn-reject:hover {
-            background: #c82333;
-        }
-
-        .group-card {
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 18px;
-            margin-bottom: 16px;
-            border: 1px solid #e9ecef;
-        }
-
-        .group-card .group-title {
-            font-size: 1rem;
-            font-weight: 700;
-            color: var(--moss-green-primary);
-            margin-bottom: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .group-card .member-tag,
-        .group-card .teacher-tag {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: #fff;
-            border: 1px solid #dee2e6;
-            border-radius: 20px;
-            padding: 4px 12px;
+        /* ============================================================
+           FORM CONTROLS
+        ============================================================ */
+        .form-label {
+            font-family: 'Outfit', sans-serif;
             font-size: .82rem;
-            margin: 3px;
+            font-weight: 600;
+            color: var(--ink-mid);
+            text-transform: uppercase;
+            letter-spacing: .4px;
+            margin-bottom: .35rem;
         }
 
-        .group-card .teacher-tag {
-            background: #e8f5e9;
-            border-color: #a5d6a7;
+        .form-control, .form-select {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: .9rem;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: .65rem .9rem;
+            background: var(--white);
+            color: var(--ink);
+            transition: var(--transition);
         }
 
-        .group-card .remove-btn {
-            background: none;
-            border: none;
-            color: #dc3545;
-            cursor: pointer;
-            font-size: .75rem;
-            padding: 0 0 0 4px;
+        .form-control:focus, .form-select:focus {
+            border-color: var(--forest-bright);
+            box-shadow: 0 0 0 3px rgba(42,122,104,.15);
+            outline: none;
         }
 
-        .event-select-filter {
-            max-width: 320px;
-            margin-bottom: 20px;
+        .form-control::placeholder { color: #aebfbb; }
+
+        .form-field-wrapper {
+            position: relative;
+            margin-bottom: .25rem;
         }
 
+        .form-field-wrapper .field-icon {
+            position: absolute;
+            right: 13px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--ink-soft);
+            font-size: 14px;
+            z-index: 2;
+            pointer-events: none;
+            transition: color .2s;
+        }
+
+        .form-field-wrapper:focus-within .field-icon { color: var(--forest-bright); }
+
+        .form-field-wrapper .form-control,
+        .form-field-wrapper .form-select { padding-right: 38px; }
+
+        .form-field-wrapper textarea + .field-icon { top: 16px; transform: none; }
+
+        .required-star { color: #e74c3c; font-size: 11px; }
+
+        .character-counter {
+            position: absolute;
+            bottom: 10px;
+            right: 12px;
+            font-size: 11px;
+            color: var(--ink-soft);
+            background: var(--white);
+            padding: 0 4px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+
+        .field-validation-wrapper.has-counter .form-control { padding-bottom: 28px; }
+
+        .validation-feedback { font-size: .78rem; color: #e74c3c; min-height: 18px; }
+
+        /* Enhanced validation styles */
+        .form-control.is-valid {
+            border-color: #28a745;
+            background-color: #f8fff9;
+        }
+
+        .form-control.is-invalid {
+            border-color: #dc3545;
+            background-color: #fff8f8;
+        }
+
+        .form-control.is-valid:focus {
+            border-color: #28a745;
+            box-shadow: 0 0 0 0.2rem rgba(40, 167, 69, 0.25);
+        }
+
+        .form-control.is-invalid:focus {
+            border-color: #dc3545;
+            box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+        }
+
+        .validation-feedback.show {
+            display: block !important;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Highlight / schedule dynamic rows */
         .highlight-row,
         .schedule-row-input {
             display: flex;
@@ -1517,56 +1326,726 @@ $all_applications = get_all_applications($conn);
         }
 
         .highlight-row input,
-        .schedule-row-input input {
-            flex: 1;
-        }
+        .schedule-row-input input { flex: 1; }
 
         .btn-remove-row {
             background: none;
             border: none;
-            color: #dc3545;
-            font-size: 18px;
-            cursor: pointer;
+            color: #e74c3c;
+            font-size: 20px;
             line-height: 1;
+            cursor: pointer;
+            padding: 0 4px;
+            transition: transform .2s;
         }
+        .btn-remove-row:hover { transform: scale(1.2); }
 
         .btn-add-row {
-            font-size: .85rem;
-            color: var(--moss-green-primary);
+            font-size: .83rem;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            color: var(--forest-bright);
             background: none;
-            border: 1px dashed var(--moss-green-light);
-            border-radius: 8px;
+            border: 1.5px dashed var(--forest-mist);
+            border-radius: var(--radius-sm);
             padding: 6px 14px;
             cursor: pointer;
-            transition: all .2s;
+            transition: var(--transition);
+        }
+        .btn-add-row:hover { background: var(--forest-pale); border-color: var(--forest-bright); }
+
+        /* Checkbox */
+        .form-check-input {
+            border-color: var(--border);
+            transition: var(--transition);
+        }
+        .form-check-input:checked {
+            background-color: var(--forest-bright);
+            border-color: var(--forest-bright);
+        }
+        .form-check-label { font-size: .9rem; color: var(--ink-mid); }
+
+        /* Form section groupings inside modals */
+        .form-section-card {
+            background: var(--forest-softer);
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1.25rem;
+            border: 1px solid var(--border);
         }
 
-        .btn-add-row:hover {
-            background: #f1f5e9;
+        .form-section-card .section-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: .9rem;
+            font-weight: 700;
+            color: var(--forest-deep);
+            margin-bottom: .9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-bottom: .6rem;
+            border-bottom: 1.5px solid var(--border);
         }
 
-        .manage-event-btn {
+        /* ============================================================
+           BUTTONS
+        ============================================================ */
+        .btn-primary,
+        .btn-enhanced {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: .88rem;
+            letter-spacing: .3px;
+            padding: .65rem 1.6rem;
+            border-radius: var(--radius-sm);
+            border: none;
+            background: linear-gradient(135deg, var(--forest-deep), var(--forest-mid));
+            color: #fff;
+            cursor: pointer;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-primary::after,
+        .btn-enhanced::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,.08), transparent);
+            pointer-events: none;
+        }
+
+        .btn-primary:hover,
+        .btn-enhanced:hover {
+            background: linear-gradient(135deg, var(--forest-mid), var(--forest-bright));
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16,44,38,.3);
+            color: #fff;
+        }
+
+        .btn-primary:active,
+        .btn-enhanced:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: .88rem;
+            padding: .65rem 1.4rem;
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            color: var(--ink-mid);
+            transition: var(--transition);
+        }
+
+        .btn-secondary:hover {
+            background: var(--forest-pale);
+            border-color: var(--forest-mist);
+            color: var(--forest-deep);
+        }
+
+        .btn-outline-primary {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: .82rem;
+            padding: .4rem .85rem;
+            border-radius: 7px;
+            border: 1.5px solid var(--forest-mid);
+            color: var(--forest-mid);
+            background: transparent;
+            transition: var(--transition);
+        }
+        .btn-outline-primary:hover { background: var(--forest-pale); color: var(--forest-deep); }
+
+        .btn-outline-info {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: .82rem;
+            padding: .4rem .85rem;
+            border-radius: 7px;
+            border: 1.5px solid #17a2b8;
+            color: #17a2b8;
+            background: transparent;
+            transition: var(--transition);
+        }
+        .btn-outline-info:hover { background: #e9f8fb; color: #117a8b; }
+
+        .btn-outline-danger {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: .82rem;
+            padding: .4rem .85rem;
+            border-radius: 7px;
+            border: 1.5px solid #dc3545;
+            color: #dc3545;
+            background: transparent;
+            transition: var(--transition);
+        }
+        .btn-outline-danger:hover { background: #fdf2f3; color: #a71d2a; }
+
+        .btn-group-enhanced { display: flex; gap: 5px; flex-wrap: wrap; }
+
+        .btn-approve {
+            font-family: 'Outfit', sans-serif;
+            font-size: .8rem;
+            font-weight: 600;
+            padding: 5px 12px;
+            border: none;
+            border-radius: 7px;
+            background: linear-gradient(135deg, #1e7e34, #28a745);
+            color: #fff;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .btn-approve:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(40,167,69,.3); }
+
+        .btn-reject {
+            font-family: 'Outfit', sans-serif;
+            font-size: .8rem;
+            font-weight: 600;
+            padding: 5px 12px;
+            border: none;
+            border-radius: 7px;
+            background: linear-gradient(135deg, #a71d2a, #dc3545);
+            color: #fff;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .btn-reject:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(220,53,69,.3); }
+
+        .btn-retry {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            padding: 8px 20px;
+            border: 2px solid #e74c3c;
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: #e74c3c;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .btn-retry:hover { background: #e74c3c; color: #fff; }
+
+        .manage-event-btn, .btn-manage-event {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 7px 16px;
-            font-size: .85rem;
+            padding: 7px 14px;
+            font-family: 'Outfit', sans-serif;
+            font-size: .83rem;
+            font-weight: 600;
             border-radius: 8px;
             cursor: pointer;
-            font-weight: 600;
             text-decoration: none;
-            transition: all .2s;
-        }
-
-        .btn-manage-event {
-            background: linear-gradient(135deg, var(--moss-green-primary), var(--moss-green-light));
+            transition: var(--transition);
+            background: linear-gradient(135deg, var(--forest-deep), var(--forest-mid));
             color: #fff;
             border: none;
         }
+        .btn-manage-event:hover { opacity: .9; transform: translateY(-1px); }
 
-        .btn-manage-event:hover {
-            opacity: .9;
-            transform: translateY(-1px);
+        /* ============================================================
+           TABLES
+        ============================================================ */
+        .table-enhanced,
+        .table-hover {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: .87rem;
+            border-collapse: separate;
+            border-spacing: 0;
+            width: 100%;
+        }
+
+        .table-enhanced thead tr,
+        .applications-table thead tr,
+        .table-hover thead tr {
+            background: linear-gradient(135deg, var(--forest-deep), var(--forest-mid));
+        }
+
+        .table-enhanced th,
+        .applications-table th,
+        .table-hover th {
+            padding: 1rem 1rem;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: .78rem;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: rgba(255,255,255,.9);
+            border: none;
+            white-space: nowrap;
+        }
+
+        .table-enhanced th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+        .table-enhanced th:last-child  { border-radius: 0 var(--radius-sm) 0 0; }
+
+        .table-enhanced td,
+        .applications-table td,
+        .table-hover td {
+            padding: .9rem 1rem;
+            vertical-align: middle;
+            border-bottom: 1px solid var(--forest-pale);
+            color: var(--ink);
+            transition: background .15s ease;
+        }
+
+        .table-enhanced tbody tr:hover td,
+        .applications-table tbody tr:hover td,
+        .table-hover tbody tr:hover td {
+            background: var(--forest-softer);
+        }
+
+        .table-enhanced tbody tr:last-child td { border-bottom: none; }
+
+        .table-responsive {
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* ============================================================
+           BADGES & STATUS
+        ============================================================ */
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-family: 'Outfit', sans-serif;
+            font-size: .75rem;
+            font-weight: 700;
+            letter-spacing: .3px;
+            text-transform: uppercase;
+        }
+
+        .status-badge.Pending, .status-badge.primary   { background: #fff3cd; color: #856404; }
+        .status-badge.Approved, .status-badge.success  { background: #d1e7dd; color: #0a5132; }
+        .status-badge.Rejected, .status-badge.danger   { background: #f8d7da; color: #842029; }
+        .status-badge.secondary                         { background: #e9ecef; color: #5a6268; }
+
+        .event-date-badge {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 7px 10px;
+            background: linear-gradient(135deg, var(--forest-mid), var(--forest-bright));
+            color: #fff;
+            border-radius: 10px;
+            font-size: .82rem;
+            min-width: 58px;
+            text-align: center;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            box-shadow: 0 3px 8px rgba(27,77,68,.25);
+        }
+
+        .event-date-badge small { font-size: .7rem; opacity: .85; font-weight: 400; }
+
+        .event-title-cell strong { color: var(--ink); font-weight: 600; }
+        .event-title-cell .text-muted { font-size: .8rem; color: var(--ink-soft); }
+
+        /* Category pills */
+        .event-item-category {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-family: 'Outfit', sans-serif;
+            font-size: .75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+        }
+
+        .event-item-category.academic          { background: #dbeafe; color: #1e40af; }
+        .event-item-category.sports            { background: #fee2e2; color: #991b1b; }
+        .event-item-category.cultural          { background: #ede9fe; color: #5b21b6; }
+        .event-item-category.workshops         { background: #fef3c7; color: #92400e; }
+        .event-item-category.conferences       { background: #d1fae5; color: #065f46; }
+        .event-item-category.holidays          { background: #fce7f3; color: #9d174d; }
+        .event-item-category.assessments       { background: #e0f2fe; color: #075985; }
+        .event-item-category                   { background: var(--forest-pale); color: var(--forest-deep); }
+
+        /* ============================================================
+           SEARCH / FILTER BAR
+        ============================================================ */
+        .search-filter-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+            align-items: flex-end;
+        }
+
+        .search-filter-row .form-field-wrapper { flex: 1; min-width: 180px; }
+
+        /* ============================================================
+           CALENDAR
+        ============================================================ */
+        .calendar-wrapper {
+            background: var(--white);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .month {
+            padding: 20px;
+            width: 100%;
+            background: linear-gradient(135deg, var(--forest-deep), var(--forest-mid));
+            text-align: center;
+        }
+
+        .month ul { margin: 0; padding: 0; list-style: none; display: flex; align-items: center; justify-content: space-between; }
+        .month ul li { color: #fff; }
+        .month ul li:nth-child(2) { font-family: 'Outfit', sans-serif; font-size: 1rem; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+
+        .month .prev, .month .next {
+            cursor: pointer;
+            color: rgba(255,255,255,.8);
+            width: 32px; height: 32px;
+            display: inline-flex; align-items: center; justify-content: center;
+            border-radius: 50%;
+            transition: var(--transition);
+            font-size: 18px;
+        }
+        .month .prev:hover, .month .next:hover { background: rgba(255,255,255,.2); color: #fff; }
+
+        .weekdays {
+            margin: 0; padding: 10px 0;
+            background: var(--forest-softer);
+            display: flex; justify-content: space-around;
+            border-bottom: 1px solid var(--border);
+            list-style: none;
+        }
+        .weekdays li { display: inline-block; width: 13.6%; color: var(--ink-soft); text-align: center; font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 12px; text-transform: uppercase; }
+
+        .days { padding: 8px; background: var(--white); margin: 0; display: flex; flex-wrap: wrap; justify-content: flex-start; list-style: none; }
+        .days li {
+            list-style: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14.28%;
+            text-align: center;
+            margin-bottom: 4px;
+            font-size: 13px;
+            color: var(--ink);
+            padding: 10px 0;
+            position: relative;
+            cursor: pointer;
+            transition: var(--transition);
+            border-radius: 10px;
+            min-height: 44px;
+            font-weight: 500;
+        }
+        .days li:hover { background: var(--forest-pale); color: var(--forest-deep); transform: scale(1.06); }
+        .days li.other-month { color: var(--border); }
+        .days li.today { font-weight: 800; color: var(--forest-bright); }
+        .days li.today::after { content: ''; position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; background: var(--forest-bright); border-radius: 50%; }
+        .days li .event-dot { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%; background: var(--forest-bright); }
+        .days li .event-dot.academic   { background: #3b82f6; }
+        .days li .event-dot.sports     { background: #ef4444; }
+        .days li .event-dot.cultural   { background: #8b5cf6; }
+        .days li .event-dot.workshops  { background: #f59e0b; }
+
+        /* ============================================================
+           SIDEBAR (events list & categories)
+        ============================================================ */
+        .sidebar-item {
+            background: var(--white);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-sm);
+            padding: 1.25rem 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .sidebar-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--forest-deep);
+            margin-bottom: 1rem;
+            padding-bottom: .6rem;
+            border-bottom: 2px solid var(--forest-pale);
+        }
+
+        .categories ul { list-style: none; padding: 0; margin: 0; }
+        .categories ul li { margin-bottom: 8px; }
+        .categories ul li a {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--ink-mid);
+            text-decoration: none;
+            font-size: .88rem;
+            padding: 7px 12px;
+            border-radius: var(--radius-sm);
+            transition: var(--transition);
+        }
+        .categories ul li a:hover { background: var(--forest-pale); color: var(--forest-deep); }
+        .categories ul li a span {
+            background: var(--forest-pale);
+            color: var(--forest-mid);
+            border-radius: 20px;
+            padding: 2px 10px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: .78rem;
+        }
+
+        /* ============================================================
+           UPCOMING EVENTS LIST
+        ============================================================ */
+        .event-item {
+            display: flex;
+            gap: 16px;
+            padding: 16px;
+            background: var(--white);
+            border-radius: var(--radius-md);
+            margin-bottom: 12px;
+            border: 1px solid var(--border);
+            transition: var(--transition);
+        }
+        .event-item:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--forest-mist); }
+
+        .event-item .event-date {
+            flex-shrink: 0;
+            width: 66px;
+            text-align: center;
+            padding: 10px 8px;
+            background: linear-gradient(135deg, var(--forest-deep), var(--forest-mid));
+            border-radius: var(--radius-sm);
+            color: #fff;
+            font-family: 'Outfit', sans-serif;
+        }
+        .event-item .event-date .day   { display: block; font-size: 26px; font-weight: 800; line-height: 1; }
+        .event-item .event-date .month { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; padding: 0; background: transparent; opacity: .8; }
+
+        .event-item .event-content { flex: 1; }
+        .event-item .event-content h3 { font-family: 'Outfit', sans-serif; font-size: 1rem; font-weight: 700; margin-bottom: 6px; color: var(--ink); }
+        .event-item .event-meta { display: flex; gap: 14px; margin-bottom: 8px; flex-wrap: wrap; }
+        .event-item .event-meta p { display: flex; align-items: center; gap: 5px; font-size: .82rem; color: var(--ink-soft); margin: 0; }
+        .event-item .event-meta i { color: var(--forest-bright); }
+
+        .event-item .btn-event {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: var(--forest-bright);
+            font-family: 'Outfit', sans-serif;
+            font-size: .82rem;
+            font-weight: 700;
+            text-decoration: none;
+            padding: 4px 0;
+            border-bottom: 1.5px solid transparent;
+            transition: var(--transition);
+        }
+        .event-item .btn-event:hover { color: var(--forest-deep); border-bottom-color: var(--forest-deep); }
+
+        /* ============================================================
+           MODAL
+        ============================================================ */
+        .modal-content {
+            background: var(--white);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .modal-header, .modal-header-enhanced {
+            background: linear-gradient(135deg, var(--forest-deep), var(--forest-mid));
+            color: #fff;
+            padding: 1.4rem 2rem;
+            border: none;
+        }
+
+        .modal-title {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+
+        .modal-header .btn-close { filter: invert(1); opacity: .75; }
+        .modal-header .btn-close:hover { opacity: 1; }
+
+        .modal-body { padding: 1.75rem 2rem; }
+
+        .modal-footer {
+            padding: 1.2rem 2rem;
+            border-top: 1px solid var(--border);
+            background: var(--forest-softer);
+        }
+
+        /* Event date header inside modal */
+        .event-date-header {
+            background: linear-gradient(135deg, var(--forest-deep), var(--forest-mid));
+            color: #fff;
+            padding: 1.4rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .event-date-header h5 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 1.2rem;
+            margin: 0;
+        }
+
+        .event-date-display {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: .85rem;
+            opacity: .85;
+            background: rgba(255,255,255,.15);
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+
+        /* Live preview inside modal */
+        .event-preview-container {
+            background: var(--forest-softer);
+            border-radius: var(--radius-md);
+            border: 1.5px solid var(--border);
+            overflow: hidden;
+            margin-top: 1.5rem;
+        }
+
+        .event-preview-header {
+            background: var(--forest-pale);
+            padding: .8rem 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .event-preview-title {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: .85rem;
+            color: var(--forest-deep);
+        }
+
+        .event-preview-card { padding: 1.25rem; }
+
+        .events-list-modal {
+            max-height: 180px;
+            overflow-y: auto;
+            margin-top: 8px;
+        }
+
+        /* ============================================================
+           GROUPS
+        ============================================================ */
+        .group-card {
+            background: var(--forest-softer);
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-bottom: 14px;
+        }
+
+        .group-card .group-name {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--forest-deep);
+            margin-bottom: 8px;
+        }
+
+        .group-card .member-tag,
+        .group-card .teacher-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--white);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 3px 10px;
+            font-size: .82rem;
+            margin: 3px;
+            color: var(--ink-mid);
+        }
+
+        .group-card .teacher-tag { background: var(--forest-pale); border-color: var(--forest-mist); color: var(--forest-deep); }
+
+        .group-card .remove-btn {
+            background: none;
+            border: none;
+            color: #e74c3c;
+            cursor: pointer;
+            font-size: .72rem;
+            padding: 0 0 0 3px;
+            transition: transform .2s;
+        }
+        .group-card .remove-btn:hover { transform: scale(1.3); }
+
+        /* ============================================================
+           EVENT SELECT FILTER (Applications section)
+        ============================================================ */
+        .event-select-filter {
+            max-width: 340px;
+            margin-bottom: 1.5rem;
+        }
+
+        /* ============================================================
+           FEATURED EVENT CAROUSEL
+        ============================================================ */
+        .featured-event-carousel { position: relative; overflow: hidden; }
+        .featured-event-slide { display: none; animation: fadeIn .5s ease-in-out; }
+        .featured-event-slide.active { display: block; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+
+        /* ============================================================
+           MISC UTILITIES
+        ============================================================ */
+        .text-muted { color: var(--ink-soft) !important; }
+
+        .loading-enhanced {
+            display: flex; align-items: center; justify-content: center;
+            padding: 2.5rem;
+            background: var(--forest-softer);
+            border-radius: var(--radius-md);
+            margin: 1.5rem 0;
+        }
+
+        /* Focus ring for accessibility */
+        .focus-ring:focus {
+            box-shadow: 0 0 0 3px rgba(42,122,104,.2), 0 0 0 6px rgba(42,122,104,.08);
+        }
+
+        /* Interactive micro-interaction */
+        .interactive-element { transition: var(--transition); }
+        .interactive-element:active { transform: scale(.97); }
+
+        /* ============================================================
+           RESPONSIVE
+        ============================================================ */
+        @media (max-width: 768px) {
+            .admin-section-card { padding: 1.25rem 1.25rem; }
+            .heading-title { font-size: 1.85rem; }
+
+            .event-item { flex-direction: column; gap: 10px; }
+            .event-item .event-date { width: 100%; display: flex; align-items: center; gap: 12px; }
+            .event-item .event-date .day { font-size: 22px; }
+
+            .search-filter-row { flex-direction: column; }
+            .search-filter-row > * { width: 100%; }
+
+            .modal-body { padding: 1.25rem 1.25rem; }
         }
     </style>
 </head>
@@ -1580,14 +2059,16 @@ $all_applications = get_all_applications($conn);
         </div>
     </div>
 
-    <main class="main page-content" id="main-content" style="display:none;">
+    <main class="main page-content" id="main-content" style="display: block; margin-left: 240px; width: calc(100vw - 240px); max-width: calc(100vw - 240px); padding: 0 20px; overflow-x: hidden; box-sizing: border-box;">
         <div class="page-title">
             <div class="heading">
                 <div class="container">
                     <div class="row d-flex justify-content-center text-center">
                         <div class="col-lg-8">
-                            <h1 class="heading-title">Announcements & Events</h1>
-                            <p class="mb-0">Manage events, applications, and group assignments at Buyoan National High School.</p>
+                            <h1 class="heading-title">
+                                <i class="fas fa-bullhorn me-3" style="color:var(--gold-light,#F0C96A);font-size:2rem;vertical-align:middle;"></i>Announcements &amp; Events
+                            </h1>
+                            <p class="mb-0" style="font-size:1.05rem;opacity:.85;max-width:520px;margin:0 auto;">Manage school events, student applications, and group assignments for Buyoan National High School.</p>
                         </div>
                     </div>
                 </div>
@@ -1595,7 +2076,7 @@ $all_applications = get_all_applications($conn);
             <nav class="breadcrumbs">
                 <div class="container">
                     <ol>
-                        <li><a href="../admin_dashboard.php">Home</a></li>
+                        <li><a href="../admin_dashboard.php"><i class="fas fa-home me-1"></i>Home</a></li>
                         <li class="current">Announcements</li>
                     </ol>
                 </div>
@@ -1668,142 +2149,198 @@ $all_applications = get_all_applications($conn);
          EVENT MODAL (add event on calendar click)
     ====================================================== -->
         <div class="modal fade event-modal" id="eventModal" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
                 <div class="modal-content">
                     <div class="event-date-header">
-                        <h5 class="modal-title">Add Event</h5>
+                        <div>
+                            <h5 class="modal-title"><i class="fas fa-calendar-plus me-2"></i>Add New Event</h5>
+                            <small style="opacity:.75;font-size:.8rem;">DepEd Order No. 012, s. 2025 compliant</small>
+                        </div>
                         <div class="event-date-display" id="eventDateDisplay"></div>
                     </div>
                     <div class="modal-body">
                         <form action="" method="POST" id="eventForm" enctype="multipart/form-data">
                             <input type="hidden" id="eventDate" name="event_date">
-                            <div class="row">
-                                <div class="col-md-8 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <input type="text" class="form-control" id="eventTitle" name="event_title" placeholder="Event title" required>
-                                        <i class="fas fa-calendar-check field-icon"></i>
+                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+
+                            <!-- ── SECTION 1: Basic Information ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-info-circle"></i>Basic Information</div>
+                                <div class="row g-3">
+                                    <div class="col-md-8">
+                                        <div class="field-validation-wrapper has-counter">
+                                            <label class="form-label">Event Title <span class="required-star">*</span></label>
+                                            <div class="form-field-wrapper">
+                                                <input type="text" class="form-control" id="eventTitle" name="event_title" placeholder="e.g. Foundation Day Celebration" maxlength="100" required>
+                                                <i class="fas fa-calendar-check field-icon"></i>
+                                                <span class="character-counter" id="titleCounter">0/100</span>
+                                            </div>
+                                            <div class="validation-feedback" id="titleFeedback"></div>
+                                        </div>
                                     </div>
-                                    <label class="form-label">Event Title <span class="required-star">*</span></label>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <select class="form-select" id="eventCategory" name="event_category" required>
-                                            <option value="">Category</option>
-                                            <option value="Academic">Academic</option>
-                                            <option value="Sports">Sports</option>
-                                            <option value="Cultural">Cultural</option>
-                                            <option value="Workshops">Workshops</option>
-                                            <option value="Conferences">Conferences</option>
-                                        </select>
-                                        <i class="fas fa-tag field-icon"></i>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Category <span class="required-star">*</span></label>
+                                        <div class="form-field-wrapper">
+                                            <select class="form-select" id="eventCategory" name="event_category" required>
+                                                <option value="">Select category…</option>
+                                                <optgroup label="── Academic ──">
+                                                    <option value="Academic">Academic</option>
+                                                    <option value="Academic Calendar">Academic Calendar</option>
+                                                    <option value="Assessments">Assessments</option>
+                                                    <option value="Remedial &amp; Intervention">Remedial &amp; Intervention</option>
+                                                    <option value="Professional Development">Professional Development</option>
+                                                </optgroup>
+                                                <optgroup label="── Events ──">
+                                                    <option value="Sports">Sports</option>
+                                                    <option value="Cultural">Cultural</option>
+                                                    <option value="Workshops">Workshops</option>
+                                                    <option value="Conferences">Conferences</option>
+                                                </optgroup>
+                                                <optgroup label="── DepEd Programs ──">
+                                                    <option value="Health &amp; Nutrition">Health &amp; Nutrition</option>
+                                                    <option value="Governance &amp; Elections">Governance &amp; Elections</option>
+                                                    <option value="National Celebrations">National Celebrations</option>
+                                                    <option value="Activities &amp; Observances">Activities &amp; Observances</option>
+                                                </optgroup>
+                                                <optgroup label="── Calendar ──">
+                                                    <option value="Holidays">Holidays</option>
+                                                    <option value="Class Suspension">Class Suspension</option>
+                                                    <option value="Break Period">Break Period</option>
+                                                </optgroup>
+                                            </select>
+                                            <i class="fas fa-tag field-icon"></i>
+                                        </div>
                                     </div>
-                                    <label class="form-label">Category <span class="required-star">*</span></label>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Location / Venue</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="text" class="form-control" name="event_location" placeholder="e.g. Main Auditorium, Covered Court, Online">
+                                            <i class="fas fa-map-marker-alt field-icon"></i>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Participation Level</label>
+                                        <div class="form-field-wrapper">
+                                            <select class="form-select" name="event_level">
+                                                <option value="">— select —</option>
+                                                <option value="School">School-Level</option>
+                                                <option value="District">District-Level</option>
+                                                <option value="Division">Division-Level</option>
+                                                <option value="Regional">Regional-Level</option>
+                                                <option value="National">National</option>
+                                                <option value="International">International</option>
+                                            </select>
+                                            <i class="fas fa-sitemap field-icon"></i>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="field-validation-wrapper has-counter">
+                                            <label class="form-label">Description / Purpose</label>
+                                            <div class="form-field-wrapper">
+                                                <textarea class="form-control" id="eventDescription" name="event_description" placeholder="Brief description of the event, its objectives, and expected participants…" rows="3" maxlength="500"></textarea>
+                                                <i class="fas fa-align-left field-icon"></i>
+                                                <span class="character-counter" id="descCounter">0/500</span>
+                                            </div>
+                                            <div class="validation-feedback" id="descFeedback"></div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <div class="form-field-wrapper">
-                                    <input type="text" class="form-control" name="event_location" placeholder="e.g. Main Auditorium">
-                                    <i class="fas fa-map-marker-alt field-icon"></i>
-                                </div>
-                                <label class="form-label">Location</label>
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-field-wrapper">
-                                    <textarea class="form-control" id="eventDescription" name="event_description" placeholder="Event description" rows="3"></textarea>
-                                    <i class="fas fa-align-left field-icon"></i>
-                                </div>
-                                <label class="form-label">Description</label>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <input type="time" class="form-control" name="event_start_time">
-                                        <i class="fas fa-clock field-icon"></i>
+
+                            <!-- ── SECTION 2: Schedule & Duration ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-clock"></i>Schedule &amp; Duration</div>
+                                <div class="row g-3">
+                                    <div class="col-md-3">
+                                        <label class="form-label">Start Date <span class="required-star">*</span></label>
+                                        <div class="form-field-wrapper">
+                                            <input type="date" class="form-control" name="event_date_display" id="eventStartDateDisplay" readonly style="background:var(--forest-softer);">
+                                            <i class="fas fa-calendar field-icon"></i>
+                                        </div>
+                                        <small class="text-muted">Set by selecting a date on the calendar.</small>
                                     </div>
-                                    <label class="form-label">Start Time</label>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <input type="time" class="form-control" name="event_end_time">
-                                        <i class="fas fa-clock field-icon"></i>
+                                    <div class="col-md-3">
+                                        <label class="form-label">End Date <small class="text-muted">(if multi-day)</small></label>
+                                        <div class="form-field-wrapper">
+                                            <input type="date" class="form-control" name="event_end_date">
+                                            <i class="fas fa-calendar-check field-icon"></i>
+                                        </div>
                                     </div>
-                                    <label class="form-label">End Time</label>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <input type="number" class="form-control" id="eventDays" name="event_days" min="1" value="1">
-                                        <i class="fas fa-calendar-day field-icon"></i>
+                                    <div class="col-md-2">
+                                        <label class="form-label">Start Time</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="time" class="form-control" name="event_start_time">
+                                            <i class="fas fa-clock field-icon"></i>
+                                        </div>
                                     </div>
-                                    <label class="form-label">Duration (days)</label>
+                                    <div class="col-md-2">
+                                        <label class="form-label">End Time</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="time" class="form-control" name="event_end_time">
+                                            <i class="fas fa-clock field-icon"></i>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Event Image</label>
+
+                            <!-- ── SECTION 3: Organizer & Responsible Unit ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-user-tie"></i>Organizer &amp; Responsible Unit</div>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Responsible Office / Unit</label>
+                                        <div class="form-field-wrapper">
+                                            <select class="form-select" name="responsible_office">
+                                                <option value="">— select —</option>
+                                                <option value="School Administration">School Administration</option>
+                                                <option value="Guidance Office">Guidance Office</option>
+                                                <option value="English Department">English Department</option>
+                                                <option value="Mathematics Department">Mathematics Department</option>
+                                                <option value="Science Department">Science Department</option>
+                                                <option value="Filipino Department">Filipino Department</option>
+                                                <option value="AP Department">Araling Panlipunan Dept.</option>
+                                                <option value="TLE / TVL Department">TLE / TVL Department</option>
+                                                <option value="MAPEH Department">MAPEH Department</option>
+                                                <option value="Values Education">Values Education Dept.</option>
+                                                <option value="SSLG / SELG">SSLG / SELG</option>
+                                                <option value="External Partners">External Partners (EPS)</option>
+                                                <option value="SDO / Division Office">SDO / Division Office</option>
+                                                <option value="Regional Office">Regional Office</option>
+                                                <option value="DepEd Central">DepEd Central Office</option>
+                                            </select>
+                                            <i class="fas fa-building field-icon"></i>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Organizer Name</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="text" class="form-control" name="organizer_name" placeholder="Full name of organizer / coordinator">
+                                            <i class="fas fa-user field-icon"></i>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Position / Designation</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="text" class="form-control" name="organizer_position" placeholder="e.g. School Principal, Department Head">
+                                            <i class="fas fa-id-badge field-icon"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ── SECTION 6: Event Cover Image ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-image"></i>Event Cover Image</div>
                                 <input type="file" class="form-control" name="event_image" accept="image/*">
+                                <small class="text-muted mt-1 d-block">Accepted: JPG, PNG, WEBP. Recommended size: 1200×600px.</small>
                             </div>
-                            <!-- Organizer -->
-                            <div class="row">
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <input type="text" class="form-control" name="organizer_name" placeholder="Organizer name">
-                                        <i class="fas fa-user field-icon"></i>
-                                    </div>
-                                    <label class="form-label">Organizer Name</label>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <input type="text" class="form-control" name="organizer_position" placeholder="Position / Title">
-                                        <i class="fas fa-id-badge field-icon"></i>
-                                    </div>
-                                    <label class="form-label">Position</label>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-field-wrapper">
-                                        <input type="text" class="form-control" name="organizer_contact" placeholder="Email or phone">
-                                        <i class="fas fa-phone field-icon"></i>
-                                    </div>
-                                    <label class="form-label">Contact Info</label>
-                                </div>
-                            </div>
-                            <!-- Highlights -->
-                            <div class="mb-3">
-                                <label class="form-label"><i class="fas fa-star me-1"></i>Event Highlights</label>
-                                <div id="highlightsContainer">
-                                    <div class="highlight-row">
-                                        <input type="text" class="form-control form-control-sm" name="highlights[]" placeholder="Highlight item">
-                                        <button type="button" class="btn-remove-row" onclick="removeRow(this)">×</button>
-                                    </div>
-                                </div>
-                                <button type="button" class="btn-add-row mt-1" onclick="addHighlightRow()"><i class="fas fa-plus me-1"></i>Add Highlight</button>
-                            </div>
-                            <!-- Schedule -->
-                            <div class="mb-3">
-                                <label class="form-label"><i class="fas fa-list-ol me-1"></i>Event Schedule</label>
-                                <div id="scheduleContainer">
-                                    <div class="schedule-row-input">
-                                        <input type="text" class="form-control form-control-sm" name="schedule_time[]" placeholder="Time (e.g. 9:00 AM - 10:00 AM)" style="width:200px;flex:none;">
-                                        <input type="text" class="form-control form-control-sm" name="schedule_activity[]" placeholder="Activity">
-                                        <input type="text" class="form-control form-control-sm" name="schedule_desc[]" placeholder="Description (optional)">
-                                        <button type="button" class="btn-remove-row" onclick="removeRow(this)">×</button>
-                                    </div>
-                                </div>
-                                <button type="button" class="btn-add-row mt-1" onclick="addScheduleRow()"><i class="fas fa-plus me-1"></i>Add Schedule Row</button>
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="teamBased" name="team_based">
-                                    <label class="form-check-label" for="teamBased"><i class="fas fa-users me-1"></i> Team-based Event</label>
-                                </div>
-                            </div>
+
                         </form>
-                        <div class="mt-4">
-                            <h6 class="fw-bold">Events on this date:</h6>
-                            <div class="events-list-modal" id="eventsListForDate"></div>
-                        </div>
+
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" form="eventForm" class="btn btn-primary" id="eventSubmitBtn"><i class="fas fa-save me-2"></i>Add Event</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><i class="fas fa-times me-2"></i>Cancel</button>
+                        <button type="submit" form="eventForm" class="btn btn-primary" id="eventSubmitBtn"><i class="fas fa-save me-2"></i>Save Event</button>
                     </div>
                 </div>
             </div>
@@ -1816,82 +2353,162 @@ $all_applications = get_all_applications($conn);
             <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Event Details</h5>
+                        <div>
+                            <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Event Details</h5>
+                            <small style="opacity:.75;font-size:.8rem;">DepEd Order No. 012, s. 2025 compliant</small>
+                        </div>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <form id="editEventForm" enctype="multipart/form-data">
                             <input type="hidden" id="editEventId" name="event_id">
                             <input type="hidden" name="event_date" id="editEventDate">
-                            <div class="row">
-                                <div class="col-md-8 mb-3">
-                                    <label class="form-label">Event Title <span class="required-star">*</span></label>
-                                    <input type="text" class="form-control" id="editEventTitle" name="event_title" required>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <label class="form-label">Category <span class="required-star">*</span></label>
-                                    <select class="form-select" id="editEventCategory" name="event_category" required>
-                                        <option value="Academic">Academic</option>
-                                        <option value="Sports">Sports</option>
-                                        <option value="Cultural">Cultural</option>
-                                        <option value="Workshops">Workshops</option>
-                                        <option value="Conferences">Conferences</option>
-                                    </select>
+                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+
+                            <!-- ── SECTION 1: Basic Information ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-info-circle"></i>Basic Information</div>
+                                <div class="row g-3">
+                                    <div class="col-md-8">
+                                        <label class="form-label">Event Title <span class="required-star">*</span></label>
+                                        <input type="text" class="form-control" id="editEventTitle" name="event_title" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Category <span class="required-star">*</span></label>
+                                        <div class="form-field-wrapper">
+                                            <select class="form-select" id="editEventCategory" name="event_category" required>
+                                                <option value="">Select category…</option>
+                                                <optgroup label="── Academic ──">
+                                                    <option value="Academic">Academic</option>
+                                                    <option value="Academic Calendar">Academic Calendar</option>
+                                                    <option value="Assessments">Assessments</option>
+                                                    <option value="Remedial &amp; Intervention">Remedial &amp; Intervention</option>
+                                                    <option value="Professional Development">Professional Development</option>
+                                                </optgroup>
+                                                <optgroup label="── Events ──">
+                                                    <option value="Sports">Sports</option>
+                                                    <option value="Cultural">Cultural</option>
+                                                    <option value="Workshops">Workshops</option>
+                                                    <option value="Conferences">Conferences</option>
+                                                </optgroup>
+                                                <optgroup label="── DepEd Programs ──">
+                                                    <option value="Health &amp; Nutrition">Health &amp; Nutrition</option>
+                                                    <option value="Governance &amp; Elections">Governance &amp; Elections</option>
+                                                    <option value="National Celebrations">National Celebrations</option>
+                                                    <option value="Activities &amp; Observances">Activities &amp; Observances</option>
+                                                </optgroup>
+                                                <optgroup label="── Calendar ──">
+                                                    <option value="Holidays">Holidays</option>
+                                                    <option value="Class Suspension">Class Suspension</option>
+                                                    <option value="Break Period">Break Period</option>
+                                                </optgroup>
+                                            </select>
+                                            <i class="fas fa-tag field-icon"></i>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Location / Venue</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="text" class="form-control" id="editEventLocation" name="event_location" placeholder="e.g. Main Auditorium, Online">
+                                            <i class="fas fa-map-marker-alt field-icon"></i>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Participation Level</label>
+                                        <select class="form-select" id="editEventLevel" name="event_level">
+                                            <option value="">— select —</option>
+                                            <option value="School">School-Level</option>
+                                            <option value="District">District-Level</option>
+                                            <option value="Division">Division-Level</option>
+                                            <option value="Regional">Regional-Level</option>
+                                            <option value="National">National</option>
+                                            <option value="International">International</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label">Description / Purpose</label>
+                                        <textarea class="form-control" id="editEventDescription" name="event_description" rows="3" placeholder="Event description and objectives…"></textarea>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Location</label>
-                                    <input type="text" class="form-control" id="editEventLocation" name="event_location">
-                                </div>
-                                <div class="col-md-3 mb-3">
-                                    <label class="form-label">Start Time</label>
-                                    <input type="time" class="form-control" id="editEventStartTime" name="event_start_time">
-                                </div>
-                                <div class="col-md-3 mb-3">
-                                    <label class="form-label">End Time</label>
-                                    <input type="time" class="form-control" id="editEventEndTime" name="event_end_time">
+
+                            <!-- ── SECTION 2: Schedule & Duration ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-clock"></i>Schedule &amp; Duration</div>
+                                <div class="row g-3">
+                                    <div class="col-md-3">
+                                        <label class="form-label">Event Date</label>
+                                        <input type="date" class="form-control" id="editEventDateDisplay" name="event_date_edit" readonly style="background:var(--forest-softer);">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">End Date <small class="text-muted">(multi-day)</small></label>
+                                        <input type="date" class="form-control" id="editEventEndDate" name="event_end_date">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">Start Time</label>
+                                        <input type="time" class="form-control" id="editEventStartTime" name="event_start_time">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">End Time</label>
+                                        <input type="time" class="form-control" id="editEventEndTime" name="event_end_time">
+                                    </div>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Description</label>
-                                <textarea class="form-control" id="editEventDescription" name="event_description" rows="3"></textarea>
+
+                            <!-- ── SECTION 5: Organizer & Responsible Unit ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-user-tie"></i>Organizer &amp; Responsible Unit</div>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Responsible Office / Unit</label>
+                                        <select class="form-select" id="editResponsibleOffice" name="responsible_office">
+                                            <option value="">— select —</option>
+                                            <option value="School Administration">School Administration</option>
+                                            <option value="Guidance Office">Guidance Office</option>
+                                            <option value="English Department">English Department</option>
+                                            <option value="Mathematics Department">Mathematics Department</option>
+                                            <option value="Science Department">Science Department</option>
+                                            <option value="Filipino Department">Filipino Department</option>
+                                            <option value="AP Department">Araling Panlipunan Dept.</option>
+                                            <option value="TLE / TVL Department">TLE / TVL Department</option>
+                                            <option value="MAPEH Department">MAPEH Department</option>
+                                            <option value="Values Education">Values Education Dept.</option>
+                                            <option value="SSLG / SELG">SSLG / SELG</option>
+                                            <option value="External Partners">External Partners (EPS)</option>
+                                            <option value="SDO / Division Office">SDO / Division Office</option>
+                                            <option value="Regional Office">Regional Office</option>
+                                            <option value="DepEd Central">DepEd Central Office</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Organizer Name</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="text" class="form-control" id="editOrgName" name="organizer_name">
+                                            <i class="fas fa-user field-icon"></i>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Position / Designation</label>
+                                        <div class="form-field-wrapper">
+                                            <input type="text" class="form-control" id="editOrgPosition" name="organizer_position">
+                                            <i class="fas fa-id-badge field-icon"></i>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Event Image <small class="text-muted">(leave blank to keep existing)</small></label>
+
+                            <!-- ── SECTION 6: Event Image ── -->
+                            <div class="form-section-card">
+                                <div class="section-title"><i class="fas fa-image"></i>Event Cover Image</div>
+                                <div id="currentImagePreview" class="mb-2"></div>
                                 <input type="file" class="form-control" name="event_image" accept="image/*">
-                                <div id="currentImagePreview" class="mt-2"></div>
+                                <small class="text-muted mt-1 d-block">Leave blank to keep the existing image.</small>
                             </div>
-                            <div class="row">
-                                <div class="col-md-4 mb-3">
-                                    <label class="form-label">Organizer Name</label>
-                                    <input type="text" class="form-control" id="editOrgName" name="organizer_name">
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <label class="form-label">Organizer Position</label>
-                                    <input type="text" class="form-control" id="editOrgPosition" name="organizer_position">
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <label class="form-label">Organizer Contact</label>
-                                    <input type="text" class="form-control" id="editOrgContact" name="organizer_contact">
-                                </div>
-                            </div>
-                            <!-- Highlights -->
-                            <div class="mb-3">
-                                <label class="form-label"><i class="fas fa-star me-1"></i>Event Highlights</label>
-                                <div id="editHighlightsContainer"></div>
-                                <button type="button" class="btn-add-row mt-1" onclick="addEditHighlightRow()"><i class="fas fa-plus me-1"></i>Add Highlight</button>
-                            </div>
-                            <!-- Schedule -->
-                            <div class="mb-3">
-                                <label class="form-label"><i class="fas fa-list-ol me-1"></i>Event Schedule</label>
-                                <div id="editScheduleContainer"></div>
-                                <button type="button" class="btn-add-row mt-1" onclick="addEditScheduleRow()"><i class="fas fa-plus me-1"></i>Add Row</button>
-                            </div>
+
                         </form>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><i class="fas fa-times me-2"></i>Cancel</button>
                         <button type="button" class="btn btn-primary" id="saveEditEventBtn"><i class="fas fa-save me-2"></i>Save Changes</button>
                     </div>
                 </div>
@@ -1906,8 +2523,8 @@ $all_applications = get_all_applications($conn);
                 <div class="row g-4">
                     <div class="col-lg-8">
                         <div class="events-list" id="eventsListContainer">
-                            <div class="text-center py-5">
-                                <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
+                            <div class="loading-enhanced">
+                                <div class="spinner-enhanced"></div>
                                 <p class="mt-3 text-muted">Loading events...</p>
                             </div>
                         </div>
@@ -1964,17 +2581,160 @@ $all_applications = get_all_applications($conn);
         </section>
 
         <!-- ======================================================
+         SECTION: EVENT MANAGEMENT (CRUD)
+    ====================================================== -->
+        <section class="container mb-5">
+            <div class="admin-section-card">
+                <div class="admin-section-title">
+                    <i class="fas fa-calendar-alt"></i>
+                    <span>Event Management</span>
+                    <div class="ms-auto">
+                        <button class="btn btn-enhanced interactive-element" onclick="openCreateModal()" style="background:linear-gradient(135deg,#102C26,#1B4D44);font-size:.85rem;padding:.55rem 1.25rem;">
+                            <i class="fas fa-plus me-2"></i>Create New Event
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Search and Filter -->
+                <div class="row g-3 mb-4 align-items-end">
+                    <div class="col-md-5">
+                        <label class="form-label"><i class="fas fa-search me-1"></i>Search Events</label>
+                        <div class="form-field-wrapper">
+                            <input type="text" class="form-control focus-ring" id="eventSearchInput" placeholder="Search by title…">
+                            <i class="fas fa-search field-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="eventCategoryFilter" class="form-label"><i class="fas fa-tag me-1"></i>Category</label>
+                        <select class="form-select focus-ring" id="eventCategoryFilter">
+                            <option value="">All Categories</option>
+                            <option value="Academic">Academic</option>
+                            <option value="Sports">Sports</option>
+                            <option value="Cultural">Cultural</option>
+                            <option value="Workshops">Workshops</option>
+                            <option value="Conferences">Conferences</option>
+                            <option value="Academic Calendar">Academic Calendar</option>
+                            <option value="Holidays">Holidays</option>
+                            <option value="Health &amp; Nutrition">Health &amp; Nutrition</option>
+                            <option value="Governance &amp; Elections">Governance &amp; Elections</option>
+                            <option value="Assessments">Assessments</option>
+                            <option value="Professional Development">Professional Development</option>
+                            <option value="Remedial &amp; Intervention">Remedial &amp; Intervention</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="eventStatusFilter" class="form-label"><i class="fas fa-filter me-1"></i>Status</label>
+                        <select class="form-select focus-ring" id="eventStatusFilter">
+                            <option value="">All Events</option>
+                            <option value="upcoming">Upcoming</option>
+                            <option value="past">Past</option>
+                            <option value="official">Official Only</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Events Table -->
+                <div class="table-responsive">
+                    <table class="table table-hover table-enhanced" id="eventsManagementTable">
+                        <thead>
+                            <tr>
+                                <th><i class="fas fa-calendar me-2"></i>Date</th>
+                                <th><i class="fas fa-heading me-2"></i>Title</th>
+                                <th><i class="fas fa-tag me-2"></i>Category</th>
+                                <th><i class="fas fa-map-marker-alt me-2"></i>Location</th>
+                                <th><i class="fas fa-info-circle me-2"></i>Status</th>
+                                <th><i class="fas fa-cogs me-2"></i>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eventsManagementBody">
+                            <?php 
+                            $events_query = "SELECT * FROM events ORDER BY event_date DESC, created_at DESC";
+                            $events_result = $conn->query($events_query);
+                            if ($events_result && $events_result->num_rows > 0):
+                                while ($event = $events_result->fetch_assoc()): 
+                                    $event_date = new DateTime($event['event_date']);
+                                    $is_past = $event_date < new DateTime();
+                                    $status_class = $is_past ? 'secondary' : ($event['is_official'] ? 'success' : 'primary');
+                                    $status_text = $is_past ? 'Past' : ($event['is_official'] ? 'Official' : 'Regular');
+                            ?>
+                                <tr id="event-row-<?php echo $event['id']; ?>">
+                                    <td>
+                                        <span class="event-date-badge">
+                                            <strong><?php echo $event_date->format('M d'); ?></strong><br>
+                                            <small><?php echo $event_date->format('Y'); ?></small>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div class="event-title-cell">
+                                            <strong><?php echo htmlspecialchars($event['title']); ?></strong>
+                                            <?php if ($event['event_start_time']): ?>
+                                                <br><small class="text-muted"><i class="fas fa-clock me-1"></i><?php echo $event['event_start_time']; ?></small>
+                                            <?php endif; ?>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="event-item-category <?php echo strtolower($event['category']); ?>">
+                                            <?php echo htmlspecialchars($event['category']); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <?php if ($event['location']): ?>
+                                            <i class="fas fa-map-marker-alt me-1"></i><?php echo htmlspecialchars($event['location']); ?>
+                                        <?php else: ?>
+                                            <span class="text-muted">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge <?php echo $status_class; ?>">
+                                            <?php echo $status_text; ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div class="btn-group-enhanced">
+                                            <button class="btn btn-outline-primary btn-enhanced interactive-element" onclick="editEvent(<?php echo $event['id']; ?>)" title="Edit Event">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button class="btn btn-outline-info btn-enhanced interactive-element" onclick="viewEventDetails(<?php echo $event['id']; ?>)" title="View Event Details">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            <button class="btn btn-outline-danger btn-enhanced interactive-element" onclick="deleteEvent(<?php echo $event['id']; ?>, '<?php echo addslashes(htmlspecialchars($event['title'])); ?>')" title="Delete Event">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php 
+                                endwhile;
+                            else:
+                            ?>
+                                <tr>
+                                    <td colspan="6" class="text-center py-5">
+                                        <i class="fas fa-calendar-times fa-3x mb-3" style="color:var(--border);display:block;"></i>
+                                        <p class="mb-2" style="font-family:'Outfit',sans-serif;font-weight:700;color:var(--ink-soft);">No events found</p>
+                                        <p class="text-muted mb-3" style="font-size:.85rem;">Click "Create New Event" or select a date on the calendar to add your first event.</p>
+                                        <button class="btn btn-enhanced" onclick="openCreateModal()" style="font-size:.83rem;padding:.5rem 1.25rem;"><i class="fas fa-plus me-2"></i>Create First Event</button>
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ======================================================
          SECTION: EVENT JOIN APPLICATIONS
     ====================================================== -->
         <section class="container mb-5">
             <div class="admin-section-card">
                 <div class="admin-section-title">
-                    <i class="fas fa-clipboard-list"></i> Event Join Applications
+                    <i class="fas fa-clipboard-list"></i>
+                    <span>Event Join Applications</span>
                 </div>
 
                 <!-- Filter by event -->
                 <div class="event-select-filter">
-                    <label class="form-label mb-1"><i class="fas fa-filter me-1"></i>Filter by Event</label>
+                    <label for="appEventFilter" class="form-label"><i class="fas fa-filter me-1"></i>Filter by Event</label>
                     <select class="form-select" id="appEventFilter" onchange="loadApplications()">
                         <option value="">All Events</option>
                         <?php foreach ($all_events_list as $ev): ?>
@@ -2001,7 +2761,11 @@ $all_applications = get_all_applications($conn);
                         <tbody id="applicationsBody">
                             <?php if (empty($all_applications)): ?>
                                 <tr>
-                                    <td colspan="9" class="text-center text-muted py-4">No applications yet.</td>
+                                    <td colspan="9" class="text-center py-5">
+                                        <i class="fas fa-clipboard fa-3x mb-3" style="color:var(--border);display:block;"></i>
+                                        <p style="font-family:'Outfit',sans-serif;font-weight:700;color:var(--ink-soft);margin-bottom:4px;">No applications yet</p>
+                                        <p class="text-muted" style="font-size:.85rem;">Student applications to join events will appear here.</p>
+                                    </td>
                                 </tr>
                             <?php else: ?>
                                 <?php foreach ($all_applications as $i => $app): ?>
@@ -2037,12 +2801,13 @@ $all_applications = get_all_applications($conn);
         <section class="container mb-5">
             <div class="admin-section-card">
                 <div class="admin-section-title">
-                    <i class="fas fa-users"></i> Group Management
+                    <i class="fas fa-users"></i>
+                    <span>Group Management</span>
                 </div>
 
                 <div class="row align-items-end mb-4">
                     <div class="col-md-5">
-                        <label class="form-label"><i class="fas fa-calendar-alt me-1"></i>Select Event</label>
+                        <label for="groupEventSelect" class="form-label"><i class="fas fa-calendar-alt me-1"></i>Select Event</label>
                         <select class="form-select" id="groupEventSelect" onchange="loadGroupsForEvent()">
                             <option value="">— Choose event —</option>
                             <?php foreach ($all_events_list as $ev): ?>
@@ -2051,7 +2816,7 @@ $all_applications = get_all_applications($conn);
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label"><i class="fas fa-users me-1"></i>New Group Name</label>
+                        <label for="newGroupName" class="form-label"><i class="fas fa-users me-1"></i>New Group Name</label>
                         <input type="text" class="form-control" id="newGroupName" placeholder="e.g. Group A">
                     </div>
                     <div class="col-md-3">
@@ -2067,13 +2832,61 @@ $all_applications = get_all_applications($conn);
 
     </main><!-- end #main-content -->
 
-    <script src="../../assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="../../assets/vendor/swiper/swiper-bundle.min.js"></script>
-    <script src="../../assets/vendor/glightbox/js/glightbox.min.js"></script>
-    <script src="../../assets/js/main.js"></script>
-    <script src="../admin_assets/js/admin_script.js"></script>
+    <script src="/BUNHS_School_System/assets/vendor/bootstrap/js/bootstrap.bundle.min.js?v=20260326"></script>
+    <script src="/BUNHS_School_System/assets/js/main.js?v=20260326"></script>
+    <script src="/BUNHS_School_System/admin_account/admin_assets/js/admin_script.js?v=20260326"></script>
 
     <script>
+        // ============================================================
+        //  PREVENT MAIN.JS ERRORS - Defensive checks for missing elements
+        // ============================================================
+        // Override main.js functions that might cause errors
+        const preventMainJSErrors = function() {
+            // Prevent toggleScrolled errors
+            const originalToggleScrolled = window.toggleScrolled;
+            if (typeof originalToggleScrolled === 'function') {
+                window.toggleScrolled = function() {
+                    try {
+                        const element = document.querySelector('header, .topbar, .navbar');
+                        if (element && element.classList) {
+                            return originalToggleScrolled.apply(this, arguments);
+                        }
+                    } catch (e) {
+                        console.warn('toggleScrolled error prevented:', e);
+                    }
+                };
+            }
+            
+            // Prevent addEventListener errors
+            const elementsThatMightNotExist = [
+                '.hamburger-btn',
+                '.search input',
+                '.user-dropdown',
+                '.notification-btn'
+            ];
+            
+            elementsThatMightNotExist.forEach(selector => {
+                const element = document.querySelector(selector);
+                if (element && element.addEventListener) {
+                    // Element exists and has addEventListener - safe to use
+                }
+            });
+        };
+
+        // ============================================================
+        //  INIT
+        // ============================================================
+        document.addEventListener('DOMContentLoaded', function() {
+            // First prevent main.js errors
+            preventMainJSErrors();
+            
+            // Then load navigation
+            loadNavigation();
+            
+            // Finally initialize calendar
+            initCalendar();
+        });
+
         // ============================================================
         //  TOAST
         // ============================================================
@@ -2095,31 +2908,55 @@ $all_applications = get_all_applications($conn);
         }
 
         // ============================================================
-        //  NAV LOADING (unchanged from original)
+        //  NAV LOADING 
         // ============================================================
         function loadNavigation() {
             const container = document.getElementById('navigation-container');
-            const currentPath = window.location.pathname;
-            const navPath = currentPath.includes('/announcements/') ? '../admin_nav.php' : 'admin_nav.php';
-            fetch(navPath)
+            if (!container) {
+                console.error('Navigation container not found');
+                return;
+            }
+            
+            console.log('Loading navigation...');
+            fetch('/BUNHS_School_System/admin_account/admin_nav.php?embed=html&current_page=announcements')
                 .then(r => {
-                    if (!r.ok) throw new Error();
+                    console.log('Navigation response status:', r.status);
+                    if (!r.ok) {
+                        throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+                    }
                     return r.text();
                 })
                 .then(data => {
+                    console.log('Navigation loaded successfully, length:', data.length);
                     container.innerHTML = data;
                     initializeNavigation();
-                    document.getElementById('main-content').style.display = 'block';
+                    const mainContent = document.getElementById('main-content');
+                    if (mainContent) {
+                        mainContent.style.display = 'block';
+                    }
                 })
-                .catch(() => {
-                    container.innerHTML = '<div class="nav-error"><i class="fas fa-exclamation-triangle"></i><h3>Unable to Load Navigation</h3><button class="btn-retry" onclick="loadNavigation()">Try Again</button></div>';
+                .catch(error => {
+                    console.error('Navigation loading failed:', error);
+                    container.innerHTML = `<div class="nav-error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <h3>Unable to Load Navigation</h3>
+                        <p>Error: ${error.message}</p>
+                        <button class="btn-retry" onclick="loadNavigation()">Try Again</button>
+                    </div>`;
                 });
         }
 
         function initializeNavigation() {
-            const mainDiv = document.querySelector('.main');
-            const pageContent = document.querySelector('.page-content');
-            if (mainDiv && pageContent) mainDiv.appendChild(pageContent);
+            const navigationContainer = document.querySelector('#navigation-container');
+            if (navigationContainer) {
+                const mainDiv = navigationContainer.querySelector('.main');
+                if (mainDiv) {
+                    while (mainDiv.firstChild) {
+                        navigationContainer.appendChild(mainDiv.firstChild);
+                    }
+                    mainDiv.remove();
+                }
+            }
             fixAllNavLinks();
             initDropdowns();
         }
@@ -2146,12 +2983,14 @@ $all_applications = get_all_applications($conn);
 
         function initDropdowns() {
             document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+                if (!toggle) return;
                 const fresh = toggle.cloneNode(true);
                 toggle.parentNode.replaceChild(fresh, toggle);
                 fresh.addEventListener('click', function(e) {
                     e.preventDefault();
                     e.stopPropagation();
                     const dropdown = this.closest('.dropdown');
+                    if (!dropdown) return;
                     const isActive = dropdown.classList.contains('active');
                     document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
                     if (!isActive) dropdown.classList.add('active');
@@ -2367,19 +3206,32 @@ $all_applications = get_all_applications($conn);
 
         function openEventModal(dateStr) {
             const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+            document.getElementById('eventForm').reset();
             document.getElementById('eventDate').value = dateStr;
-            document.getElementById('eventDateDisplay').textContent = new Date(dateStr).toLocaleDateString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            });
+            if (document.getElementById('eventStartDateDisplay'))
+                document.getElementById('eventStartDateDisplay').value = dateStr;
+            
+            // Set date display if element exists
+            const dateDisplay = document.getElementById('eventDateDisplay');
+            if (dateDisplay) {
+                dateDisplay.textContent = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+            }
+            
             loadEventsForDate(dateStr);
             modal.show();
         }
 
         function loadEventsForDate(dateStr) {
             const c = document.getElementById('eventsListForDate');
+            if (!c) {
+                // Element doesn't exist in the current modal structure, so just skip
+                return;
+            }
             if (eventsData[dateStr] && eventsData[dateStr].length > 0) {
                 c.innerHTML = eventsData[dateStr].map(ev =>
                     `<div class="event-list-item category-${ev.category.toLowerCase()} position-relative">
@@ -2418,14 +3270,361 @@ $all_applications = get_all_applications($conn);
             c.insertAdjacentHTML('afterbegin', createEventHTML(event));
         }
 
-        // Submit add-event form
+        // Enhanced Form Validation System
+        class FormValidator {
+            constructor(formId) {
+                this.form = document.getElementById(formId);
+                this.rules = {};
+                this.setupValidation();
+            }
+
+            addRule(fieldName, rules) {
+                this.rules[fieldName] = rules;
+            }
+
+            validateField(fieldName, value) {
+                const rules = this.rules[fieldName];
+                if (!rules) return { valid: true };
+
+                for (const rule of rules) {
+                    const result = rule.test(value);
+                    if (!result.valid) {
+                        this.showFieldError(fieldName, result.message);
+                        return result;
+                    }
+                }
+
+                this.clearFieldError(fieldName);
+                return { valid: true };
+            }
+
+            validateAll() {
+                let isValid = true;
+                const firstInvalidField = null;
+
+                for (const fieldName in this.rules) {
+                    const field = this.form.querySelector(`[name="${fieldName}"]`);
+                    if (field) {
+                        const result = this.validateField(fieldName, field.value);
+                        if (!result.valid) {
+                            isValid = false;
+                            if (!firstInvalidField) firstInvalidField = field;
+                        }
+                    }
+                }
+
+                if (!isValid && firstInvalidField) {
+                    firstInvalidField.focus();
+                    firstInvalidField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+
+                return isValid;
+            }
+
+            showFieldError(fieldName, message) {
+                const field = this.form.querySelector(`[name="${fieldName}"]`);
+                const feedback = document.getElementById(`${fieldName.replace(/[^a-zA-Z0-9]/g, '')}Feedback`);
+                
+                if (field) {
+                    field.classList.add('is-invalid');
+                    field.classList.remove('is-valid');
+                }
+                
+                if (feedback) {
+                    feedback.textContent = message;
+                    feedback.style.display = 'block';
+                }
+            }
+
+            clearFieldError(fieldName) {
+                const field = this.form.querySelector(`[name="${fieldName}"]`);
+                const feedback = document.getElementById(`${fieldName.replace(/[^a-zA-Z0-9]/g, '')}Feedback`);
+                
+                if (field) {
+                    field.classList.remove('is-invalid');
+                    field.classList.add('is-valid');
+                }
+                
+                if (feedback) {
+                    feedback.textContent = '';
+                    feedback.style.display = 'none';
+                }
+            }
+
+            setupValidation() {
+                // Real-time validation
+                this.form.addEventListener('input', (e) => {
+                    if (e.target.name && this.rules[e.target.name]) {
+                        this.validateField(e.target.name, e.target.value);
+                    }
+                });
+
+                // Form submission validation
+                this.form.addEventListener('submit', (e) => {
+                    if (!this.validateAll()) {
+                        e.preventDefault();
+                        showToast('Please correct the errors below', 'error');
+                    }
+                });
+            }
+        }
+
+        // Initialize enhanced validator for event form
+        const eventValidator = new FormValidator('eventForm');
+        
+        eventValidator.addRule('event_title', [
+            {
+                test: (value) => {
+                    if (!value.trim()) return { valid: false, message: 'Event title is required' };
+                    if (value.length > 100) return { valid: false, message: 'Title too long (max 100 characters)' };
+                    if (!/^[a-zA-Z0-9\s\-_,.()&\/]+$/.test(value)) return { valid: false, message: 'Title contains invalid characters' };
+                    return { valid: true };
+                }
+            }
+        ]);
+
+        eventValidator.addRule('event_category', [
+            {
+                test: (value) => {
+                    if (!value) return { valid: false, message: 'Category is required' };
+                    return { valid: true };
+                }
+            }
+        ]);
+
+        eventValidator.addRule('event_date', [
+            {
+                test: (value) => {
+                    if (!value) return { valid: false, message: 'Event date is required' };
+                    if (new Date(value) < new Date().setHours(0,0,0,0)) return { valid: false, message: 'Event date cannot be in the past' };
+                    return { valid: true };
+                }
+            }
+        ]);
+
+        eventValidator.addRule('event_description', [
+            {
+                test: (value) => {
+                    if (value && value.length > 500) return { valid: false, message: 'Description too long (max 500 characters)' };
+                    return { valid: true };
+                }
+            }
+        ]);
+
+        // Character counters
+        function updateCharacterCounter(fieldId, counterId, maxLength) {
+            const field = document.getElementById(fieldId);
+            const counter = document.getElementById(counterId);
+            
+            if (field && counter) {
+                field.addEventListener('input', () => {
+                    const length = field.value.length;
+                    counter.textContent = `${length}/${maxLength}`;
+                    counter.style.color = length > maxLength * 0.9 ? '#e74c3c' : '#6c757d';
+                });
+            }
+        }
+
+        updateCharacterCounter('eventTitle', 'titleCounter', 100);
+        updateCharacterCounter('eventDescription', 'descCounter', 500);
+
+        // Auto-save functionality
+        class AutoSave {
+            constructor(formId, storageKey = 'eventDraft', interval = 30000) {
+                this.form = document.getElementById(formId);
+                this.storageKey = storageKey;
+                this.interval = interval;
+                this.timer = null;
+                this.lastSave = null;
+                this.setupAutoSave();
+            }
+
+            getFormData() {
+                const formData = new FormData(this.form);
+                const data = {};
+                for (let [key, value] of formData.entries()) {
+                    if (key !== 'csrf_token') { // Don't save CSRF token
+                        data[key] = value;
+                    }
+                }
+                return data;
+            }
+
+            saveToStorage() {
+                const data = this.getFormData();
+                
+                // Only save if data has changed
+                const currentData = JSON.stringify(data);
+                if (this.lastSave !== currentData) {
+                    localStorage.setItem(this.storageKey, currentData);
+                    localStorage.setItem(`${this.storageKey}_timestamp`, Date.now());
+                    this.lastSave = currentData;
+                    this.showSaveIndicator();
+                }
+            }
+
+            loadFromStorage() {
+                const savedData = localStorage.getItem(this.storageKey);
+                const timestamp = localStorage.getItem(`${this.storageKey}_timestamp`);
+                
+                if (savedData && timestamp) {
+                    const age = Date.now() - parseInt(timestamp);
+                    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+                    
+                    if (age < maxAge) {
+                        try {
+                            const data = JSON.parse(savedData);
+                            this.populateForm(data);
+                            this.showRestoreIndicator();
+                            return true;
+                        } catch (e) {
+                            console.error('Error loading draft:', e);
+                        }
+                    }
+                }
+                return false;
+            }
+
+            populateForm(data) {
+                // Populate form fields
+                for (const [key, value] of Object.entries(data)) {
+                    const field = this.form.querySelector(`[name="${key}"]`);
+                    if (field) {
+                        if (field.type === 'checkbox') {
+                            field.checked = value === '1' || value === true;
+                        } else if (field.type === 'radio') {
+                            const radio = this.form.querySelector(`[name="${key}"][value="${value}"]`);
+                            if (radio) radio.checked = true;
+                        } else if (field.type === 'file') {
+                            // Skip file inputs - they cannot be programmatically set for security reasons
+                            continue;
+                        } else {
+                            field.value = value;
+                        }
+                        
+                        // Trigger change events for dynamic fields
+                        field.dispatchEvent(new Event('change', { bubbles: true }));
+                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }
+            }
+
+            clearStorage() {
+                localStorage.removeItem(this.storageKey);
+                localStorage.removeItem(`${this.storageKey}_timestamp`);
+                this.lastSave = null;
+                this.hideSaveIndicator();
+            }
+
+            setupAutoSave() {
+                // Load draft on page load
+                if (this.loadFromStorage()) {
+                    // Show restore notification
+                    setTimeout(() => {
+                        showToast('Draft restored from auto-save', 'info');
+                    }, 1000);
+                }
+
+                // Start auto-save timer
+                this.startAutoSave();
+
+                // Save on form changes
+                this.form.addEventListener('input', () => {
+                    this.debounceSave();
+                });
+
+                this.form.addEventListener('change', () => {
+                    this.debounceSave();
+                });
+
+                // Clear on successful submission
+                this.form.addEventListener('submit', () => {
+                    this.clearStorage();
+                });
+            }
+
+            startAutoSave() {
+                this.stopAutoSave();
+                this.timer = setInterval(() => {
+                    this.saveToStorage();
+                }, this.interval);
+            }
+
+            stopAutoSave() {
+                if (this.timer) {
+                    clearInterval(this.timer);
+                    this.timer = null;
+                }
+            }
+
+            debounceSave() {
+                clearTimeout(this.debounceTimer);
+                this.debounceTimer = setTimeout(() => {
+                    this.saveToStorage();
+                }, 2000); // Wait 2 seconds after user stops typing
+            }
+
+            showSaveIndicator() {
+                let indicator = document.getElementById('autoSaveIndicator');
+                if (!indicator) {
+                    indicator = document.createElement('div');
+                    indicator.id = 'autoSaveIndicator';
+                    indicator.innerHTML = '<i class="fas fa-save me-1"></i>Draft saved';
+                    indicator.style.cssText = `
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: var(--forest-deep);
+                        color: white;
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        z-index: 9999;
+                        box-shadow: var(--shadow-md);
+                        opacity: 0;
+                        transition: opacity 0.3s ease;
+                    `;
+                    document.body.appendChild(indicator);
+                }
+                
+                setTimeout(() => {
+                    indicator.style.opacity = '1';
+                }, 100);
+
+                setTimeout(() => {
+                    indicator.style.opacity = '0';
+                }, 2000);
+            }
+
+            showRestoreIndicator() {
+                const indicator = document.getElementById('autoSaveIndicator');
+                if (indicator) {
+                    indicator.innerHTML = '<i class="fas fa-history me-1"></i>Draft restored';
+                    indicator.style.background = 'var(--gold)';
+                    
+                    setTimeout(() => {
+                        indicator.style.opacity = '0';
+                    }, 3000);
+                }
+            }
+
+            hideSaveIndicator() {
+                const indicator = document.getElementById('autoSaveIndicator');
+                if (indicator) {
+                    indicator.remove();
+                }
+            }
+        }
+
+        // Initialize auto-save for event form
+        const autoSave = new AutoSave('eventForm', 'eventDraft');
+
+        // Submit add-event form with enhanced validation
         document.getElementById('eventForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            const title = document.getElementById('eventTitle').value;
-            const cat = document.getElementById('eventCategory').value;
-            const date = document.getElementById('eventDate').value;
-            if (!title || !cat || !date) {
-                alert('Please fill in all required fields.');
+            
+            // Use validator instead of basic checks
+            if (!eventValidator.validateAll()) {
                 return;
             }
             const btn = document.getElementById('eventSubmitBtn');
@@ -2473,23 +3672,12 @@ $all_applications = get_all_applications($conn);
                 document.getElementById('editEventDescription').value = ev.description || '';
                 document.getElementById('editOrgName').value = ev.organizer_name || '';
                 document.getElementById('editOrgPosition').value = ev.organizer_position || '';
-                document.getElementById('editOrgContact').value = ev.organizer_contact || '';
 
                 // Image preview
                 const prev = document.getElementById('currentImagePreview');
-                prev.innerHTML = ev.image ? `<img src="../../assets/img/events/${escHtml(ev.image)}" style="max-height:100px;border-radius:8px;" alt="Current image"> <small class="text-muted ms-2">${escHtml(ev.image)}</small>` : '<small class="text-muted">No image uploaded.</small>';
-
-                // Highlights
-                const hc = document.getElementById('editHighlightsContainer');
-                hc.innerHTML = '';
-                if (ev.highlights && ev.highlights.length > 0) ev.highlights.forEach(h => addEditHighlightRow(h.highlight));
-                else addEditHighlightRow();
-
-                // Schedule
-                const sc = document.getElementById('editScheduleContainer');
-                sc.innerHTML = '';
-                if (ev.schedule && ev.schedule.length > 0) ev.schedule.forEach(s => addEditScheduleRow(s.time_slot, s.activity, s.description));
-                else addEditScheduleRow();
+                if (prev) {
+                    prev.innerHTML = ev.image ? `<img src="../../assets/img/events/${escHtml(ev.image)}" style="max-height:100px;border-radius:8px;" alt="Current image"> <small class="text-muted ms-2">${escHtml(ev.image)}</small>` : '<small class="text-muted">No image uploaded.</small>';
+                }
 
                 new bootstrap.Modal(document.getElementById('editEventModal')).show();
             });
@@ -2746,13 +3934,163 @@ $all_applications = get_all_applications($conn);
         }
 
         // ============================================================
+        //  EVENT MANAGEMENT CRUD FUNCTIONS
+        // ============================================================
+        function openCreateModal() {
+            const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+            document.getElementById('eventForm').reset();
+            document.getElementById('eventDays').value = '1';
+            // Set default date to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('eventDate').value = today;
+            if (document.getElementById('eventStartDateDisplay')) {
+                document.getElementById('eventStartDateDisplay').value = today;
+            }
+            document.getElementById('eventDateDisplay').textContent = new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            loadEventsForDate(today);
+            modal.show();
+        }
+
+        function editEvent(eventId) {
+            ajaxPost({
+                action: 'get_event',
+                event_id: eventId
+            }).then(data => {
+                if (data.status !== 'success') {
+                    showToast('Could not load event details.', 'error');
+                    return;
+                }
+                const ev = data.event;
+
+                // Core fields
+                document.getElementById('editEventId').value        = ev.id;
+                document.getElementById('editEventDate').value      = ev.event_date;
+                document.getElementById('editEventTitle').value     = ev.title || '';
+                document.getElementById('editEventCategory').value  = ev.category || 'Academic';
+                document.getElementById('editEventLocation').value  = ev.location || '';
+                document.getElementById('editEventLevel').value    = ev.event_level || '';
+                document.getElementById('editEventStartTime').value = ev.event_start_time || '';
+                document.getElementById('editEventEndTime').value   = ev.event_end_time || '';
+                document.getElementById('editEventEndDate').value   = ev.event_end_date || '';
+                document.getElementById('editEventDescription').value = ev.description || '';
+
+                // Date display
+                if (document.getElementById('editEventDateDisplay'))
+                    document.getElementById('editEventDateDisplay').value = ev.event_date;
+
+                // Organizer fields
+                document.getElementById('editResponsibleOffice').value = ev.responsible_office || '';
+                document.getElementById('editOrgName').value           = ev.organizer_name || '';
+                document.getElementById('editOrgPosition').value       = ev.organizer_position || '';
+
+                // Image preview
+                const prev = document.getElementById('currentImagePreview');
+                prev.innerHTML = ev.image
+                    ? `<div class="d-flex align-items-center gap-2 p-2" style="background:var(--forest-softer);border-radius:8px;border:1px solid var(--border);">
+                         <img src="../../assets/img/events/${escHtml(ev.image)}" style="max-height:70px;border-radius:6px;" alt="Current image">
+                         <small class="text-muted">${escHtml(ev.image)}</small>
+                       </div>`
+                    : '<small class="text-muted"><i class="fas fa-image me-1"></i>No image uploaded.</small>';
+
+                new bootstrap.Modal(document.getElementById('editEventModal')).show();
+            }).catch(() => showToast('Error loading event details.', 'error'));
+        }
+
+        function viewEventDetails(eventId) {
+            // Open event in new tab or show details modal
+            window.open(`../../events.php#event-${eventId}`, '_blank');
+        }
+
+        function deleteEvent(eventId, eventTitle) {
+            if (!confirm(`Are you sure you want to delete "${eventTitle}"? This action cannot be undone.`)) {
+                return;
+            }
+            
+            ajaxPost({
+                action: 'delete_event',
+                id: eventId
+            }).then(data => {
+                if (data.status === 'success') {
+                    showToast('Event deleted successfully.', 'success');
+                    // Remove row from table
+                    const row = document.getElementById(`event-row-${eventId}`);
+                    if (row) row.remove();
+                    // Refresh other components
+                    loadUpcomingEvents();
+                    loadEventsForMonth(currentYear, currentMonth + 1);
+                } else {
+                    showToast('Error deleting event: ' + (data.message || 'Unknown error'), 'error');
+                }
+            }).catch(() => showToast('Error deleting event.', 'error'));
+        }
+
+        // Search and filter functionality
+        document.getElementById('eventSearchInput')?.addEventListener('input', function() {
+            filterEventsTable();
+        });
+
+        document.getElementById('eventCategoryFilter')?.addEventListener('change', function() {
+            filterEventsTable();
+        });
+
+        document.getElementById('eventStatusFilter')?.addEventListener('change', function() {
+            filterEventsTable();
+        });
+
+        function filterEventsTable() {
+            const searchTerm = document.getElementById('eventSearchInput')?.value.toLowerCase() || '';
+            const categoryFilter = document.getElementById('eventCategoryFilter')?.value || '';
+            const statusFilter = document.getElementById('eventStatusFilter')?.value || '';
+            
+            const rows = document.querySelectorAll('#eventsManagementBody tr');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            rows.forEach(row => {
+                if (row.cells.length === 1) return; // Skip "no events" row
+                
+                const title = row.cells[1].textContent.toLowerCase();
+                const category = row.cells[2].textContent.trim();
+                const dateText = row.cells[0].textContent.trim();
+                const statusBadge = row.cells[4].querySelector('.status-badge');
+                const status = statusBadge ? statusBadge.textContent.trim().toLowerCase() : '';
+                
+                // Extract date from the date cell
+                const dateMatch = dateText.match(/(\w{3})\s(\d{1,2})/);
+                let eventDate = null;
+                if (dateMatch) {
+                    const month = new Date(Date.parse(dateMatch[1] + " 1, 2020")).getMonth();
+                    const day = parseInt(dateMatch[2]);
+                    const year = parseInt(dateText.match(/\d{4}/)?.[0] || new Date().getFullYear());
+                    eventDate = new Date(year, month, day);
+                }
+                
+                let matchesSearch = !searchTerm || title.includes(searchTerm);
+                let matchesCategory = !categoryFilter || category === categoryFilter;
+                let matchesStatus = true;
+                
+                if (statusFilter === 'upcoming') {
+                    matchesStatus = eventDate && eventDate >= today;
+                } else if (statusFilter === 'past') {
+                    matchesStatus = eventDate && eventDate < today;
+                } else if (statusFilter === 'official') {
+                    matchesStatus = status.includes('official');
+                }
+                
+                row.style.display = matchesSearch && matchesCategory && matchesStatus ? '' : 'none';
+            });
+        }
+
+        // ============================================================
         //  INIT
         // ============================================================
-        document.addEventListener('DOMContentLoaded', function() {
-            loadNavigation();
-            initCalendar();
-        });
-    </script>
+
+</script>
 </body>
 
 </html>

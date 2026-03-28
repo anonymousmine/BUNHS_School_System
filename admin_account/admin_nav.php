@@ -42,11 +42,11 @@ $_uri_parts  = explode('/', $_SERVER['REQUEST_URI']);
 $_ai         = array_search('admin_account', $_uri_parts);
 
 if ($_ai !== false) {
-    $adminBase  = implode('/', array_slice($_uri_parts, 0, $_ai + 1)) . '/';
-    $assetsBase = implode('/', array_slice($_uri_parts, 0, $_ai))     . '/';
+    $adminBase  = '/BUNHS_School_System/admin_account/';
+    $assetsBase = '/BUNHS_School_System/';
 } else {
-    $adminBase  = '/admin_account/';
-    $assetsBase = '/';
+    $adminBase  = '/BUNHS_School_System/admin_account/';
+    $assetsBase = '/BUNHS_School_System/';
 }
 
 // AJAX API URLs (always inside admin_account/)
@@ -206,10 +206,10 @@ function _get_user_data(mysqli $conn): array
         'user_type' => $_SESSION['user_type'] ?? 'admin',
         'principal_title' => ''
     ];
-    
+
     $user_id = (int)($_SESSION['user_id'] ?? 0);
     $user_type = $_SESSION['user_type'] ?? 'admin';
-    
+
     if ($user_id > 0 && $conn->ping()) {
         if ($user_type === 'admin') {
             // Fetch from admin table
@@ -222,7 +222,7 @@ function _get_user_data(mysqli $conn): array
                 $result = $stmt->get_result();
                 $admin = $result->fetch_assoc();
                 $stmt->close();
-                
+
                 if ($admin) {
                     $user_data['name'] = $admin['full_name'] ?? $user_data['name'];
                     if (!empty($admin['profile_image'])) {
@@ -235,8 +235,8 @@ function _get_user_data(mysqli $conn): array
                         $user_data['profile_image'] = $admin['profile_image'];
                     }
                     $user_data['principal_title'] = $admin['principal_title'] ?? '';
-                    $user_data['role'] = !empty($user_data['principal_title']) 
-                        ? $user_data['principal_title'] 
+                    $user_data['role'] = !empty($user_data['principal_title'])
+                        ? $user_data['principal_title']
                         : 'Administrator';
                     // Admins use 'upload' type for profile photos
                     $user_data['photo_type'] = !empty($admin['profile_image']) ? 'upload' : 'default';
@@ -253,15 +253,15 @@ function _get_user_data(mysqli $conn): array
                 $result = $stmt->get_result();
                 $sub_admin = $result->fetch_assoc();
                 $stmt->close();
-                
+
                 if ($sub_admin) {
                     $user_data['name'] = $sub_admin['full_name'] ?? $user_data['name'];
-                    
+
                     // Handle profile picture based on registration method and type
                     $profile_type = $sub_admin['profile_picture_type'] ?? 'icon';
                     $profile_url = $sub_admin['profile_picture_url'] ?? '';
                     $profile_img = $sub_admin['profile_image'] ?? '';
-                    
+
                     if ($profile_type === 'gmail' && !empty($profile_url)) {
                         // User registered with Gmail and has a profile URL
                         $user_data['photo'] = $profile_url;
@@ -285,19 +285,36 @@ function _get_user_data(mysqli $conn): array
                         $user_data['photo'] = 'icon';
                         $user_data['photo_type'] = 'icon';
                     }
-                    
+
                     // Use roleLabel function to format role
                     $user_data['role'] = roleLabel($sub_admin['role'] ?? 'news_admin');
                 }
             }
         }
     }
-    
+
     return $user_data;
 }
 
 // Get user data for use in navigation
 $current_user = _get_user_data($conn);
+
+// ── CSRF Token Generation ───────────────────────────────────────────
+if (!function_exists('generateCSRFToken')) {
+    function generateCSRFToken()
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        if (!isset($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            $_SESSION['csrf_token_expires'] = time() + 1800; // 30 minutes
+        }
+
+        return $_SESSION['csrf_token'] ?? '';
+    }
+}
 ?>
 
 <?php
@@ -319,6 +336,10 @@ if ($_embed === 'json') {
     exit;
 }
 ?>
+
+<!-- CSRF Token for JavaScript -->
+<meta name="csrf-token" content="<?= htmlspecialchars(generateCSRFToken(), ENT_QUOTES, 'UTF-8') ?>">
+
 <!-- ════════════════════════════════════════════════════════════
      STYLES
 ════════════════════════════════════════════════════════════ -->
@@ -1117,6 +1138,28 @@ if ($_embed === 'json') {
                 </div>
             </div>
 
+            <!-- ── Upcoming Events ── -->
+            <div class="dropdown-wrapper" id="announcementWrapper">
+                <button class="icon-btn" id="announcementBtn"
+                    data-dropdown="announcementPanel"
+                    aria-label="Upcoming Events" title="Upcoming Events">
+                    <i class="fas fa-calendar-alt"></i>
+                    <span class="badge" id="announcementBadge" data-count="0"
+                        style="display:none;"></span>
+                </button>
+                <div class="dropdown-panel" id="announcementPanel">
+                    <div class="dp-header">
+                        <h4>Upcoming Events</h4>
+                        <a href="<?= $adminBase ?>announcements/create_announcement.php"
+                            style="font-size:12px;color:#8a9a5b;font-weight:600;">Manage events</a>
+                    </div>
+                    <div class="dp-body" id="announcementBody">
+                        <div class="dp-loading"><i class="fas fa-spinner"></i> Loading…</div>
+                    </div>
+                    <a href="<?= $adminBase ?>announcements/" class="dp-footer">View all events</a>
+                </div>
+            </div>
+
             <!-- ── User profile dropdown ── -->
             <div class="dropdown-wrapper" id="userWrapper">
                 <button class="user" id="userBtn"
@@ -1178,15 +1221,15 @@ if ($_embed === 'json') {
     </div>
 
     <a href="<?= $adminBase ?>admin_profile.php" class="profile" tabindex="0"
-       style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
+        style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
         <?php if (($current_user['photo_type'] ?? 'default') === 'icon'): ?>
             <div style="width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 3px 12px rgba(0,0,0,0.15);">
                 <i class="fa-solid fa-user" style="color: white; font-size: 20px;"></i>
             </div>
         <?php else: ?>
-            <img src="<?= ($current_user['photo_type'] ?? 'default') === 'external' ? $current_user['photo'] : $assetsBase . $current_user['photo'] ?>" 
-                 alt="Profile picture"
-                 style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 3px 12px rgba(0,0,0,0.15);">
+            <img src="<?= ($current_user['photo_type'] ?? 'default') === 'external' ? $current_user['photo'] : $assetsBase . $current_user['photo'] ?>"
+                alt="Profile picture"
+                style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover; border: 2px solid #fff; box-shadow: 0 3px 12px rgba(0,0,0,0.15);">
         <?php endif; ?>
         <div class="info">
             <h4 style="margin:0; font-size:14px; font-weight:600; color:#1e293b;"><?= htmlspecialchars($current_user['name'], ENT_QUOTES, 'UTF-8') ?></h4>
@@ -1219,28 +1262,6 @@ if ($_embed === 'json') {
                 <?php endif; ?>
             </a>
 
-            <!-- Students -->
-            <a href="<?= $adminBase ?>students.php" class="menu-item">
-                <i class="fas fa-user-graduate"></i>
-                <span>Students</span>
-                <?php if (_nav_has_new($_new_modules, 'students')): ?>
-                    <span class="sb-new">NEW</span>
-                <?php elseif ($_counts['students'] > 0): ?>
-                    <span class="sb-count"><?= _nav_fmt_count($_counts['students']) ?></span>
-                <?php endif; ?>
-            </a>
-
-            <!-- Teachers -->
-            <a href="<?= $adminBase ?>teachers.php" class="menu-item">
-                <i class="fas fa-chalkboard-teacher"></i>
-                <span>Teachers</span>
-                <?php if (_nav_has_new($_new_modules, 'teachers')): ?>
-                    <span class="sb-new">NEW</span>
-                <?php elseif ($_counts['teachers'] > 0): ?>
-                    <span class="sb-count"><?= _nav_fmt_count($_counts['teachers']) ?></span>
-                <?php endif; ?>
-            </a>
-
             <!-- Forms -->
             <a href="<?= $adminBase ?>forms.php" class="menu-item">
                 <i class="fas fa-file-circle-check"></i>
@@ -1252,102 +1273,78 @@ if ($_embed === 'json') {
                 <?php endif; ?>
             </a>
 
-            <!-- Clubs -->
-            <a href="<?= $adminBase ?>clubs.php" class="menu-item">
-                <i class="fas fa-users-line"></i>
-                <span>Clubs</span>
-                <?php if (_nav_has_new($_new_modules, 'clubs')): ?>
-                    <span class="sb-new">NEW</span>
-                <?php elseif ($_counts['clubs'] > 0): ?>
-                    <span class="sb-count"><?= _nav_fmt_count($_counts['clubs']) ?></span>
-                <?php endif; ?>
-            </a>
-        </div>
+            <!-- ── MANAGEMENT ── -->
+            <div class="menu-section">
+                <span class="menu-label">MANAGEMENT</span>
 
-        <!-- ── MANAGEMENT ── -->
-        <div class="menu-section">
-            <span class="menu-label">MANAGEMENT</span>
-
-            <!-- Announcements (collapsible sub-menu) -->
-            <div class="sidebar-dropdown" id="announcementsDropdown">
-                <button class="menu-item sidebar-dropdown-toggle"
-                    aria-haspopup="true"
-                    aria-expanded="false"
-                    aria-controls="announcementsMenu">
-                    <i class="fas fa-calendar-alt"></i>
-                    <span>Announcements</span>
-                    <?php if (
-                        _nav_has_new($_new_modules, 'announcements') ||
-                        _nav_has_new($_new_modules, 'news')
-                    ): ?>
-                        <span class="sb-new" style="margin-right:4px;">NEW</span>
-                    <?php endif; ?>
-                    <i class="fas fa-chevron-down sidebar-dropdown-arrow"
-                        style="font-size:11px; margin-left:auto; flex-shrink:0;
+                <!-- Announcements (collapsible sub-menu) -->
+                <div class="sidebar-dropdown" id="announcementsDropdown">
+                    <button type="button" class="menu-item sidebar-dropdown-toggle"
+                        aria-haspopup="true"
+                        aria-expanded="false"
+                        aria-controls="announcementsMenu">
+                        <i class="fas fa-calendar-alt"></i>
+                        <span>Announcements</span>
+                        <?php if (
+                            _nav_has_new($_new_modules, 'announcements') ||
+                            _nav_has_new($_new_modules, 'news')
+                        ): ?>
+                            <span class="sb-new" style="margin-right:4px;">NEW</span>
+                        <?php endif; ?>
+                        <i class="fas fa-chevron-down sidebar-dropdown-arrow"
+                            style="font-size:11px; margin-left:auto; flex-shrink:0;
                               transition:transform .2s ease;"></i>
-                </button>
-                <div class="sidebar-dropdown-menu" id="announcementsMenu"
-                    style="display:none; padding-left:14px;">
-                    <a href="<?= $adminBase ?>announcements/create_announcement.php"
-                        class="menu-item" style="font-size:13px;">
-                        <i class="fas fa-calendar-check"></i>
-                        <span>Post Announcement</span>
-                    </a>
-                    <a href="<?= $adminBase ?>announcements/create_new.php"
-                        class="menu-item" style="font-size:13px;">
-                        <i class="fas fa-plus-circle"></i>
-                        <span>Post News</span>
-                    </a>
-                    <a href="<?= $adminBase ?>announcements/Emergency_system.php"
-                        class="menu-item" style="font-size:13px;">
-                        <i class="fa-solid fa-biohazard" style="color:rgb(211,60,8);"></i>
-                        <span>Emergency System</span>
-                    </a>
+                    </button>
+                    <div class="sidebar-dropdown-menu" id="announcementsMenu"
+                        style="display:none; padding-left:14px;">
+                        <a href="<?= $adminBase ?>announcements/create_announcement.php"
+                            class="menu-item" style="font-size:13px;">
+                            <i class="fas fa-calendar-check"></i>
+                            <span>Post Announcement</span>
+                        </a>
+                        <a href="<?= $adminBase ?>announcements/create_new.php"
+                            class="menu-item" style="font-size:13px;">
+                            <i class="fas fa-plus-circle"></i>
+                            <span>Post News</span>
+                        </a>
+                        <a href="<?= $adminBase ?>announcements/Emergency_system.php"
+                            class="menu-item" style="font-size:13px;">
+                            <i class="fa-solid fa-biohazard" style="color:rgb(211,60,8);"></i>
+                            <span>Emergency System</span>
+                        </a>
+                    </div>
                 </div>
-            </div>
 
-            <!--
+                <!--
             <a href="<?= $adminBase ?>reports.php" class="menu-item">
                 <i class="fa-solid fa-person-harassing"></i>
                 <span>Reports</span>
             </a>
             -->
 
-            <!-- Chatbox — orange unread message count -->
-            <a href="<?= $adminBase ?>admin_chatbox.php" class="menu-item">
-                <i class="fa-solid fa-comments"></i>
-                <span>Chatbox</span>
-                <?php if ($_counts['chat'] > 0): ?>
-                    <span class="sb-chat" id="sidebarChatBadge">
-                        <?= _nav_fmt_count($_counts['chat']) ?>
-                    </span>
-                <?php else: ?>
-                    <span class="sb-chat" id="sidebarChatBadge" style="display:none;"></span>
-                <?php endif; ?>
-            </a>
+                <!-- Chatbox — orange unread message count -->
+                <a href="<?= $adminBase ?>admin_chatbox.php" class="menu-item">
+                    <i class="fa-solid fa-comments"></i>
+                    <span>Chatbox</span>
+                    <?php if ($_counts['chat'] > 0): ?>
+                        <span class="sb-chat" id="sidebarChatBadge">
+                            <?= _nav_fmt_count($_counts['chat']) ?>
+                        </span>
+                    <?php else: ?>
+                        <span class="sb-chat" id="sidebarChatBadge" style="display:none;"></span>
+                    <?php endif; ?>
+                </a>
 
-            <!-- Finance — green total amount -->
-            <a href="<?= $adminBase ?>finance.php" class="menu-item">
-                <i class="fas fa-wallet"></i>
-                <span>Finance</span>
-                <?php if ($_counts['finance'] > 0): ?>
-                    <span class="sb-finance">
-                        <?= _nav_fmt_finance($_counts['finance']) ?>
-                    </span>
-                <?php endif; ?>
-            </a>
-        </div>
-
-        <!-- ── SYSTEM ── -->
-        <div class="menu-section">
-            <span class="menu-label">SYSTEM</span>
-            <a href="<?= $adminBase ?>settings.php" class="menu-item">
-                <i class="fas fa-cog"></i><span>Settings</span>
-            </a>
-            <a href="<?= $adminBase ?>help&support.php" class="menu-item">
-                <i class="fas fa-question-circle"></i><span>Help & Support</span>
-            </a>
-        </div>
+                <!-- ── SYSTEM ── -->
+                <div class="menu-section">
+                    <span class="menu-label">SYSTEM</span>
+                    <a href="<?= $adminBase ?>settings.php" class="menu-item">
+                        <i class="fas fa-cog"></i><span>Settings</span>
+                    </a>
+                    <a href="<?= $adminBase ?>help&support.php" class="menu-item">
+                        <i class="fas fa-question-circle"></i><span>Help & Support</span>
+                    </a>
+                </div>
 
     </nav>
 
@@ -1390,6 +1387,12 @@ if ($_embed === 'json') {
         chatUrl: <?= json_encode($chatboxPath)  ?>,
     };
 
+    /* ── CSRF Token Helper ── */
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
     /* ── initAdminNav()
          Called automatically on DOMContentLoaded when nav is PHP-included.
          Call it manually after a fetch()+innerHTML insertion, e.g.:
@@ -1426,6 +1429,7 @@ if ($_embed === 'json') {
         /* Lazy-load flags — content fetched only on first open */
         var bellLoaded = false;
         var envLoaded = false;
+        var announcementLoaded = false;
 
         /* ── Mark-all-read (bound directly — element is always present) ── */
         var markAllBtn = _root.getElementById ?
@@ -1508,6 +1512,10 @@ if ($_embed === 'json') {
                 if (targetId === 'envelopePanel' && !envLoaded) {
                     envLoaded = true;
                     fetchEnvelope();
+                }
+                if (targetId === 'announcementPanel' && !announcementLoaded) {
+                    announcementLoaded = true;
+                    fetchAnnouncements();
                 }
             }
         });
@@ -1644,6 +1652,7 @@ if ($_embed === 'json') {
 
             var fd = new FormData();
             fd.append('action', 'envelope_preview');
+            fd.append('csrf_token', getCSRFToken());
             fetch(_NAV_API.chat, {
                     method: 'POST',
                     body: fd
@@ -1674,13 +1683,13 @@ if ($_embed === 'json') {
             body.innerHTML = list.map(function(m) {
                 var unreadClass = m.unread > 0 ? 'unread' : '';
                 var unreadBadge = m.unread > 0 ? '<span class="msg-badge">' + m.unread + '</span>' : '';
-                
+
                 // Enhanced message preview with sender info and better formatting
                 var messagePreview = m.last_message || '—';
                 if (messagePreview.length > 50) {
                     messagePreview = messagePreview.substring(0, 50) + '...';
                 }
-                
+
                 // Determine sender type and format accordingly
                 var senderInfo = '';
                 if (m.sender_role === 'student') {
@@ -1717,6 +1726,92 @@ if ($_embed === 'json') {
                 sb.textContent = n > 999 ? Math.round(n / 1000) + 'k' : n;
                 sb.style.display = n > 0 ? '' : 'none';
             }
+        }
+
+        /* ════════════════════════════════════════════════════════
+           UPCOMING EVENTS DROPDOWN
+        ════════════════════════════════════════════════════════ */
+        function fetchAnnouncements() {
+            var body = document.getElementById('announcementBody');
+            if (!body) return;
+            body.innerHTML = '<div class="dp-loading"><i class="fas fa-spinner"></i> Loading…</div>';
+
+            // Fetch upcoming events from create_announcement.php API
+            fetch('<?= $adminBase ?>announcements/create_announcement.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'action=get_upcoming_events&limit=5&csrf_token=' + encodeURIComponent(getCSRFToken())
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' && data.events && data.events.length > 0) {
+                        renderAnnouncements(data.events);
+                    } else {
+                        renderAnnouncements([]);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching announcements:', error);
+                    renderAnnouncements([]);
+                });
+        }
+
+        function renderAnnouncements(list) {
+            var body = document.getElementById('announcementBody');
+            if (!body) return;
+
+            if (!list.length) {
+                body.innerHTML = '<div class="dp-empty"><i class="fas fa-calendar-alt"></i>No upcoming events.</div>';
+                return;
+            }
+
+            body.innerHTML = list.map(function(event) {
+                // Format event date
+                var eventDate = new Date(event.event_date);
+                var today = new Date();
+                var tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+
+                var dateLabel = '';
+                if (eventDate.toDateString() === today.toDateString()) {
+                    dateLabel = 'Today';
+                } else if (eventDate.toDateString() === tomorrow.toDateString()) {
+                    dateLabel = 'Tomorrow';
+                } else {
+                    dateLabel = eventDate.toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                    });
+                }
+
+                // Format time
+                var timeLabel = event.event_start_time || 'All day';
+
+                // Category colors
+                var categoryColors = {
+                    'academic': 'blue',
+                    'cultural': 'purple',
+                    'sports': 'green',
+                    'meeting': 'orange',
+                    'holiday': 'red',
+                    'other': 'gray'
+                };
+                var categoryClass = categoryColors[event.category] || 'blue';
+
+                return '<div class="notif-item" style="cursor:pointer;" onclick="window.location.href=\'<?= $adminBase ?>announcements/create_announcement.php\'">' +
+                    '<div class="notif-icon ' + categoryClass + '"><i class="fas fa-calendar-alt"></i></div>' +
+                    '<div class="notif-content">' +
+                    '<div class="notif-name">' + esc(event.title) + '</div>' +
+                    '<div class="notif-desc">' + dateLabel + ' at ' + esc(timeLabel) + '</div>' +
+                    '<div class="notif-meta">' +
+                    '<span class="notif-role">' + esc(event.category || 'event') + '</span>' +
+                    '<span class="notif-time">' + dateLabel + '</span>' +
+                    '</div>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
         }
 
         /* ════════════════════════════════════════════════════════
@@ -1771,9 +1866,12 @@ if ($_embed === 'json') {
         /* ════════════════════════════════════════════════════════
            SIDEBAR ANNOUNCEMENTS SUB-MENU
         ════════════════════════════════════════════════════════ */
-        var announceToggle = document.querySelector('.sidebar-dropdown-toggle');
+        var announceToggle = document.querySelector('[aria-controls="announcementsMenu"]');
         if (announceToggle) {
-            announceToggle.addEventListener('click', function() {
+            announceToggle.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
                 var menuId = this.getAttribute('aria-controls');
                 var menu = document.getElementById(menuId);
                 var arrow = this.querySelector('.sidebar-dropdown-arrow');
@@ -1868,6 +1966,16 @@ if ($_embed === 'json') {
 
     } /* end initAdminNav() */
 
+    // Global function for announcement badge - accessible from any page
+    function setAnnouncementBadge(n) {
+        var b = document.getElementById('announcementBadge');
+        if (b) {
+            b.textContent = n > 99 ? '99+' : n;
+            b.dataset.count = n;
+            b.style.display = n > 0 ? '' : 'none';
+        }
+    }
+
     /* ── Auto-run on DOMContentLoaded when PHP-included directly ── */
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
@@ -1881,6 +1989,9 @@ if ($_embed === 'json') {
             // No JavaScript path fixing needed for the main navigation
             // This function is kept for compatibility but doesn't need to modify hrefs
             console.log('Navigation initialized - PHP paths are already correct');
+
+            // Initialize announcement badge with sample count
+            setAnnouncementBadge(3);
         }
 
     } else {

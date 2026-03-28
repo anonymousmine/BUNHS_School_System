@@ -13,11 +13,9 @@ require_once '../session_config.php';
 include '../db_connection.php';
 
 // ── AUTHENTICATION GUARD ──────────────────────────────────────────────────────
-if (!isset($_SESSION['student_id'])) {
-    $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
-    header('Location: index.php');
-    exit;
-}
+// Student functionality has been removed
+header('Location: ../index.php');
+exit;
 
 $student_id   = $_SESSION['student_id'];
 $student_name = $_SESSION['student_name'] ?? 'Student';

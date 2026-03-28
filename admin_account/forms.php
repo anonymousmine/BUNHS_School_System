@@ -39,28 +39,35 @@ include '../db_connection.php';
         }
 
         * {
-            margin: 0;
+            margin-top: 0;
+            margin-right: 0;
+            margin-bottom: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
         html,
         body {
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: var(--light-color);
+            color: var(--text-primary);
+            line-height: 1.5;
+            margin: 0;
+            padding: 0;
             overflow-x: hidden;
         }
 
-        body {
-            font-family: 'Inter', sans-serif;
-            background: var(--light-color);
-            color: var(--text-primary);
+        /* Main layout — .main is opened by admin_nav.php */
+        .main {
+            margin-left: 240px;
+            min-height: 100vh;
+            width: calc(100% - 240px);
+            box-sizing: border-box;
         }
 
         .forms-page {
             padding: 24px 20px 24px 0;
             width: 100%;
-            max-width: 100%;
-            margin-left: 0;
-            margin-right: 0;
             overflow-x: hidden;
         }
 
@@ -77,6 +84,17 @@ include '../db_connection.php';
             font-size: 24px;
             font-weight: 700;
             color: var(--text-primary);
+            padding: 20px 20px 20px 0;
+        }
+
+        .heading {
+            padding: 0;
+            text-align: left;
+        }
+        
+        .heading-title {
+            margin: 0;
+            padding: 0;
         }
 
         .page-subtitle {
@@ -88,9 +106,10 @@ include '../db_connection.php';
         /* Stats Cards */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
             margin-bottom: 24px;
+            width: 100%;
         }
 
         .stat-card {
@@ -844,25 +863,17 @@ include '../db_connection.php';
         }
     </script>
 
-    <main class="main page-content" id="main-content" style="display: none; margin-left: 0; width: calc(100vw - 260px); max-width: 100%; padding: 0 20px; overflow-x: hidden;">
+    <main class="main page-content" id="main-content" style="display: block;">
         <div class="page-title">
             <div class="heading">
-                <div class="container">
-                    <div class="row d-flex justify-content-center text-center">
-                        <div class="col-lg-8">
-                            <h1 class="heading-title">Forms & Documents</h1>
-                            <p class="mb-0">Manage downloadable forms and process document requests</p>
-                        </div>
-                    </div>
-                </div>
+                <h1 class="heading-title">Forms & Documents</h1>
+                <p class="mb-0">Manage downloadable forms and process document requests</p>
             </div>
             <nav class="breadcrumbs">
-                <div class="container">
-                    <ol>
-                        <li><a href="admin_dashboard.php">Home</a></li>
-                        <li class="current">Forms & Documents</li>
-                    </ol>
-                </div>
+                <ol>
+                    <li><a href="../admin_dashboard.php"><i class="fas fa-home me-1"></i>Home</a></li>
+                    <li class="current">Forms & Documents</li>
+                </ol>
             </nav>
         </div>
 

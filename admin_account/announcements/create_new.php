@@ -2389,7 +2389,7 @@ Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.
         ============================================================ */
         .page-content {
             margin-left: 0;
-            width: calc(100vw - 260px);
+            width: calc(100vw - 240px);
             max-width: 100%;
             padding: 0 20px;
         }

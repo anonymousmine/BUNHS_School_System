@@ -136,7 +136,6 @@ $config = [
         ]
     ],
     'activities' => [
-        ['type' => 'student', 'icon' => 'fa-user-plus', 'text' => 'New student registered', 'timestamp' => '2024-01-15 10:30:00'],
         ['type' => 'success', 'icon' => 'fa-check-circle', 'text' => 'Course assignment completed', 'timestamp' => '2024-01-15 10:15:00'],
         ['type' => 'warning', 'icon' => 'fa-exclamation-triangle', 'text' => 'Payment reminder sent', 'timestamp' => '2024-01-15 09:00:00'],
         ['type' => 'event', 'icon' => 'fa-calendar', 'text' => 'New event scheduled', 'timestamp' => '2024-01-15 07:00:00']

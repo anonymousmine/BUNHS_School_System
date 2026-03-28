@@ -49,14 +49,74 @@ if (!$is_admin && !$is_student) {
     exit;
 }
 
+// CSRF Validation - Only for POST requests that modify data
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    if (!validateCSRFToken($csrf_token)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'CSRF validation failed']);
+        exit;
+    }
+}
+
 include '../db_connection.php';
 header('Content-Type: application/json');
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
+// ── Get admin ID dynamically ──────────────────────────────────
+function get_admin_id(mysqli $conn): int {
+    $stmt = $conn->prepare("SELECT id FROM admin LIMIT 1");
+    $stmt->execute();
+    $result = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    
+    if (!$result) {
+        // Fallback to default if no admin found
+        return 1;
+    }
+    
+    return (int) $result['id'];
+}
+
+// ── Rate limiting ──────────────────────────────────────────────
+function check_rate_limit(mysqli $conn, int $user_id, string $action): bool {
+    $time_window = 60; // 1 minute
+    $max_requests = 30; // 30 requests per minute
+    
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) as request_count 
+        FROM rate_limits 
+        WHERE user_id = ? AND action_type = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)
+    ");
+    $stmt->bind_param('isi', $user_id, $action, $time_window);
+    $stmt->execute();
+    $result = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    
+    $request_count = $result['request_count'] ?? 0;
+    
+    if ($request_count >= $max_requests) {
+        return false;
+    }
+    
+    // Log this request
+    $stmt = $conn->prepare("
+        INSERT INTO rate_limits (user_id, action_type, created_at) 
+        VALUES (?, ?, NOW())
+    ");
+    $stmt->bind_param('is', $user_id, $action);
+    $stmt->execute();
+    $stmt->close();
+    
+    return true;
+}
+
 // ── Get or create conversation ────────────────────────────────
-function get_or_create_conversation(mysqli $conn, int $student_id, int $admin_id = 1): int
+function get_or_create_conversation(mysqli $conn, int $student_id): int
 {
+    $admin_id = get_admin_id($conn);
+    
     $s = $conn->prepare(
         "SELECT id FROM chat_conversations WHERE student_id = ? AND admin_id = ? LIMIT 1"
     );
@@ -189,20 +249,32 @@ if ($action === 'fetch_messages') {
 // ── send_message ──────────────────────────────────────────────
 if ($action === 'send_message') {
     $message = trim($_POST['message'] ?? '');
+    
+    // Enhanced input validation
     if (empty($message)) {
         echo json_encode(['success' => false, 'message' => 'Empty message']);
         exit;
     }
     if (strlen($message) > 2000) {
-        echo json_encode(['success' => false, 'message' => 'Message too long']);
+        echo json_encode(['success' => false, 'message' => 'Message too long (max 2000 characters)']);
+        exit;
+    }
+    if (strlen($message) < 1) {
+        echo json_encode(['success' => false, 'message' => 'Message cannot be empty']);
         exit;
     }
 
     if ($is_student) {
         $sender_id   = (int) $_SESSION['student_id'];
         $sender_role = 'student';
-        $receiver_id = 1; // default admin
-        $conv_id     = get_or_create_conversation($conn, $sender_id, $receiver_id);
+        
+        // Rate limiting check
+        if (!check_rate_limit($conn, $sender_id, 'send_message')) {
+            echo json_encode(['success' => false, 'message' => 'Too many messages. Please wait a moment.']);
+            exit;
+        }
+        
+        $conv_id     = get_or_create_conversation($conn, $sender_id);
     } else {
         // Admin sending
         $conv_id = (int) ($_POST['conversation_id'] ?? 0);
@@ -225,6 +297,12 @@ if ($action === 'send_message') {
         $sender_id   = (int) $_SESSION['user_id'];
         $sender_role = 'admin';
         $receiver_id = (int) $conv['student_id'];
+        
+        // Rate limiting check for admins
+        if (!check_rate_limit($conn, $sender_id, 'send_message')) {
+            echo json_encode(['success' => false, 'message' => 'Too many messages. Please wait a moment.']);
+            exit;
+        }
     }
 
     // Insert message

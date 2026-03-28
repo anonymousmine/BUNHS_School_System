@@ -7,6 +7,9 @@
     };
 
     function initializeDropdownFunctionality() {
+        // Skip dropdowns that are handled by admin_nav.php's system
+        const skipDropdowns = ['announcementBtn', 'envelopeBtn', 'bellBtn', 'userBtn'];
+        
         // Dropdown toggle functionality with keyboard support
         function toggleDropdown(dropdown) {
             const isActive = dropdown.classList.contains('active');
@@ -19,20 +22,32 @@
                 if (t) t.setAttribute('aria-expanded', 'false');
             });
 
-            // Toggle the clicked dropdown
+            // Toggle clicked dropdown
             if (!isActive) {
                 dropdown.classList.add('active');
                 if (toggle) toggle.setAttribute('aria-expanded', 'true');
             }
         }
 
-        // Add event listeners to all dropdown toggles
+        // Add event listeners to all dropdown toggles (except those handled by admin_nav.php)
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+            // Skip if this toggle is for a button handled by admin_nav.php
+            const buttonId = toggle.getAttribute('id') || toggle.closest('button')?.getAttribute('id');
+            if (buttonId && skipDropdowns.includes(buttonId)) {
+                return; // Skip - handled by admin_nav.js
+            }
+            
             // Remove existing listeners to avoid duplicates
             toggle.replaceWith(toggle.cloneNode(true));
         });
 
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+            // Skip if this toggle is for a button handled by admin_nav.php
+            const buttonId = toggle.getAttribute('id') || toggle.closest('button')?.getAttribute('id');
+            if (buttonId && skipDropdowns.includes(buttonId)) {
+                return; // Skip - handled by admin_nav.js
+            }
+            
             toggle.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -182,8 +197,14 @@
         }
     }
 
-    // Add event listeners to all dropdown toggles
+    // Add event listeners to all dropdown toggles (except those handled by admin_nav.php)
     document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+        // Skip if this toggle is for a button handled by admin_nav.php
+        const buttonId = toggle.getAttribute('id') || toggle.closest('button')?.getAttribute('id');
+        if (buttonId && skipDropdowns.includes(buttonId)) {
+            return; // Skip - handled by admin_nav.js
+        }
+        
         toggle.addEventListener('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -230,7 +251,7 @@
     });
 
     // Update active state on menu click with visual feedback
-    document.querySelectorAll('.menu-item:not(.dropdown-toggle)').forEach(item => {
+    document.querySelectorAll('.menu-item:not(.dropdown-toggle):not(.sidebar-dropdown-toggle)').forEach(item => {
         item.addEventListener('click', function(e) {
             e.preventDefault();
             // Remove active from all menu items and toggles

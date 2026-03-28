@@ -30,61 +30,10 @@
                 </div>
 
                 <div class="col-lg-7">
-                    <div class="footer-nav-wrapper">
-                        <div class="row">
-
-                            <div class="col-6 col-lg-3">
-                                <div class="nav-column">
-                                    <h6>Studio</h6>
-                                    <nav class="footer-nav">
-                                        <a href="#">Our Story</a>
-                                        <a href="#">Design Process</a>
-                                        <a href="#">Portfolio</a>
-                                        <a href="#">Case Studies</a>
-                                        <a href="#">Awards</a>
-                                    </nav>
-                                </div>
-                            </div>
-
-                            <div class="col-6 col-lg-3">
-                                <div class="nav-column">
-                                    <h6>Services</h6>
-                                    <nav class="footer-nav">
-                                        <a href="#">Brand Identity</a>
-                                        <a href="#">Web Design</a>
-                                        <a href="#">Mobile Apps</a>
-                                        <a href="#">Digital Strategy</a>
-                                        <a href="#">Consultation</a>
-                                    </nav>
-                                </div>
-                            </div>
-
-                            <div class="col-6 col-lg-3">
-                                <div class="nav-column">
-                                    <h6>Resources</h6>
-                                    <nav class="footer-nav">
-                                        <a href="#">Design Blog</a>
-                                        <a href="#">Style Guide</a>
-                                        <a href="#">Free Assets</a>
-                                        <a href="#">Tutorials</a>
-                                        <a href="#">Inspiration</a>
-                                    </nav>
-                                </div>
-                            </div>
-
-                            <div class="col-6 col-lg-3">
-                                <div class="nav-column">
-                                    <h6>Connect</h6>
-                                    <nav class="footer-nav">
-                                        <a href="#">Start Project</a>
-                                        <a href="#">Schedule Call</a>
-                                        <a href="#">Join Newsletter</a>
-                                        <a href="#">Follow Updates</a>
-                                        <a href="#">Partnership</a>
-                                    </nav>
-                                </div>
-                            </div>
-
+                    <div class="map-section">
+                        <h3 class="mb-4">Location of the school</h3>
+                        <div class="map-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                            <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d435.06413780292615!2d123.74243301783169!3d13.203649902888731!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x33a100f2f713a311%3A0x810430d58fe2be0c!2sBUYOAN%20ELEMENTARY%20SCHOOL!5e0!3m2!1sen!2sph!4v1763344618733!5m2!1sen!2sph&maptype=satellite" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
                         </div>
                     </div>
                 </div>

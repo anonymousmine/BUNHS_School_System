@@ -274,8 +274,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
     <title>Admin Profile — Buyoan National High School</title>
 
     <!-- Shared Admin Styles -->
-    <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
-    <link rel="stylesheet" href="../overall_body.css">
+    <link rel="stylesheet" href="/BUNHS_School_System/admin_account/admin_assets/cs/admin_style.css">
+    <link rel="stylesheet" href="/BUNHS_School_System/overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

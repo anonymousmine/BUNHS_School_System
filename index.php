@@ -424,7 +424,7 @@ $conn->close();
     <link href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/glightbox/dist/css/glightbox.min.css" rel="stylesheet">
     <link href="assets/css/main.css" rel="stylesheet">
-    <link rel="shortcut icon" href="assets/img/logo.jpg" type="image/x-icon">
+    <link rel="shortcut icon" href="assets/img/Bagong_Pilipinas_logo.png" type="image/x-icon">
 
     <style>
         .verification-page {
@@ -706,8 +706,6 @@ $conn->close();
                         <h2 style="color:white;">Web-Based Information System for Buyoan National High School</h2>
                         <p></p>
                         <div class="cta-buttons">
-                            <a href="#" class="btn-apply" id="joinUsBtn">Join us</a>
-                            <a href="#" class="btn-tour" id="createAccountBtn">Create Account</a>
                         </div>
                         <div class="announcement">
                             <div class="announcement-badge">New</div>
@@ -1522,9 +1520,87 @@ $conn->close();
                         }, 4000);
                     }
 
-                    initOtp('loginOtpBoxes', 'loginOtpHidden');
-                    initOtp('signupOtpBoxes', 'signupOtpHidden');
+                    /* Password validation function for admin signup */
+                    window.validateSignupPassword = function(password) {
+                        const hasUppercase = /[A-Z]/.test(password);
+                        const hasLowercase = /[a-z]/.test(password);
+                        const hasNumber = /\d/.test(password);
+                        const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+                        
+                        // Update requirement indicators
+                        updateSignupRequirement('signupReqUppercase', hasUppercase);
+                        updateSignupRequirement('signupReqLowercase', hasLowercase);
+                        updateSignupRequirement('signupReqNumber', hasNumber);
+                        updateSignupRequirement('signupReqSpecial', hasSpecial);
+                    };
 
+                    function updateSignupRequirement(elementId, isValid) {
+                        const element = document.getElementById(elementId);
+                        const icon = element.querySelector('i');
+                        if (isValid) {
+                            icon.className = 'fas fa-check-circle';
+                            icon.style.color = '#28a745';
+                            element.style.color = '#28a745';
+                        } else {
+                            icon.className = 'fas fa-times-circle';
+                            icon.style.color = '#dc3545';
+                            element.style.color = '#6c757d';
+                        }
+                    }
+
+                    /* Form validation for admin signup */
+                    function validateSignupForm() {
+                        let isValid = true;
+                        
+                        // First Name
+                        const firstName = document.getElementById('firstName').value.trim();
+                        if (!firstName) {
+                            document.getElementById('firstNameError').style.display = 'block';
+                            isValid = false;
+                        } else {
+                            document.getElementById('firstNameError').style.display = 'none';
+                        }
+                        
+                        // Last Name
+                        const lastName = document.getElementById('lastName').value.trim();
+                        if (!lastName) {
+                            document.getElementById('lastNameError').style.display = 'block';
+                            isValid = false;
+                        } else {
+                            document.getElementById('lastNameError').style.display = 'none';
+                        }
+                        
+                        // Email/Phone
+                        const isEmail = document.getElementById('contactEmail').checked;
+                        if (isEmail) {
+                            const email = document.getElementById('email').value.trim();
+                            if (!email) {
+                                document.getElementById('emailError').style.display = 'block';
+                                isValid = false;
+                            } else {
+                                document.getElementById('emailError').style.display = 'none';
+                            }
+                        } else {
+                            const phone = document.getElementById('phone').value.trim();
+                            if (!phone) {
+                                document.getElementById('phoneError').style.display = 'block';
+                                isValid = false;
+                            } else {
+                                document.getElementById('phoneError').style.display = 'none';
+                            }
+                        }
+                        
+                        // Password
+                        const password = document.getElementById('signupPassword').value;
+                        if (!password) {
+                            document.getElementById('signupPasswordError').style.display = 'block';
+                            isValid = false;
+                        } else {
+                            document.getElementById('signupPasswordError').style.display = 'none';
+                        }
+                        
+                        return isValid;
+                    }
                     document.getElementById('toggleLoginPwd').addEventListener('click', function() {
                         var inp = document.getElementById('loginPassword');
                         var ico = document.getElementById('loginEyeIcon');
@@ -1667,6 +1743,18 @@ $conn->close();
                         }
                     });
 
+                    document.getElementById('toggleSignupConfirmPwd').addEventListener('click', function() {
+                        var inp = document.getElementById('signupConfirmPassword');
+                        var ico = document.getElementById('signupConfirmEyeIcon');
+                        if (inp.type === 'password') {
+                            inp.type = 'text';
+                            ico.className = 'fas fa-eye-slash';
+                        } else {
+                            inp.type = 'password';
+                            ico.className = 'fas fa-eye';
+                        }
+                    });
+
                     function toggleContact() {
                         const em = document.getElementById('contactEmail').checked;
                         document.getElementById('emailField').style.display = em ? '' : 'none';
@@ -1684,7 +1772,11 @@ $conn->close();
                         hideErr('signupErrBox');
                         document.getElementById('emailWarning').style.display = 'none';
 
-                        // ── Client-side validation ────────────────────────────
+                        // Run validation
+                        if (!validateSignupForm()) {
+                            return;
+                        }
+
                         const fn = document.getElementById('firstName').value.trim();
                         const ln = document.getElementById('lastName').value.trim();
                         const mi = document.getElementById('middleInitial') ? document.getElementById('middleInitial').value.trim() : '';
@@ -1696,10 +1788,6 @@ $conn->close();
                         const ph = document.getElementById('phone').value.trim();
                         const agr = document.getElementById('terms').checked;
 
-                        if (!fn || !ln) {
-                            showErr('signupErrBox', 'signupErrTxt', 'First and last name are required.');
-                            return;
-                        }
                         if (!/^[A-Za-z\s\-]+$/.test(fn) || !/^[A-Za-z\s\-]+$/.test(ln)) {
                             showErr('signupErrBox', 'signupErrTxt', 'Names must contain letters only.');
                             return;
@@ -1797,6 +1885,7 @@ $conn->close();
                         const fd = new FormData();
                         fd.append('action', 'verify_otp');
                         fd.append('otp', otp);
+                        fd.append('csrf_token', '<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>');
                         fetch('signup.php', {
                             method: 'POST',
                             body: fd
@@ -1838,6 +1927,7 @@ $conn->close();
                         rb.classList.remove('on');
                         const fd = new FormData();
                         fd.append('action', 'resend_otp');
+                        fd.append('csrf_token', '<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>');
                         fetch('signup.php', {
                             method: 'POST',
                             body: fd
@@ -1877,1314 +1967,13 @@ $conn->close();
                         toggleContact();
                     });
 
+                    // Initialize OTP boxes for admin forms
+                    initOtp('loginOtpBoxes', 'loginOtpHidden');
+                    initOtp('signupOtpBoxes', 'signupOtpHidden');
+
                 })();
             })
             .catch(err => console.error('Error loading modals:', err));
-    </script>
-
-
-    <!-- ═══════════════════════════════════════════════════════════════════
-     STUDENT LOGIN POPUP
-     Same visual design as the Dashboard.php Two-Step Verification modal.
-     Triggered by #joinUsBtn. Self-contained — no Bootstrap required.
-     Uses login_otp.php: login_verify_credentials → login_verify_otp.
-     On success redirects to user_account/Dashboard.php.
-═══════════════════════════════════════════════════════════════════ -->
-    <div id="slOverlay"
-        style="position:fixed;inset:0;z-index:99999;display:flex;align-items:center;
-            justify-content:center;padding:16px;background:rgba(8,20,14,.65);
-            backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
-            opacity:0;visibility:hidden;transition:opacity .3s ease,visibility .3s ease;">
-
-        <div id="slCard"
-            style="position:relative;background:#fff;border-radius:20px;
-                box-shadow:0 28px 72px rgba(26,58,42,.24),0 6px 20px rgba(26,58,42,.14);
-                width:100%;max-width:440px;font-family:'DM Sans','Segoe UI',sans-serif;
-                transform:translateY(28px) scale(.95);
-                transition:transform .38s cubic-bezier(.34,1.28,.64,1);overflow:hidden;">
-
-            <!-- Banner -->
-            <div style="position:relative;background:#1a3a2a;padding:30px 30px 24px;overflow:hidden;">
-                <div style="position:absolute;inset:0;opacity:.04;
-                        background-image:linear-gradient(rgba(255,255,255,1) 1px,transparent 1px),
-                                         linear-gradient(90deg,rgba(255,255,255,1) 1px,transparent 1px);
-                        background-size:28px 28px;"></div>
-                <!-- Close button -->
-                <button id="slCloseBtn"
-                    style="position:absolute;top:14px;right:16px;z-index:3;
-                       width:30px;height:30px;border-radius:50%;
-                       background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);
-                       color:rgba(255,255,255,.65);font-size:12px;cursor:pointer;
-                       display:flex;align-items:center;justify-content:center;"
-                    aria-label="Close">
-                    <i class="fas fa-times"></i>
-                </button>
-                <div style="position:relative;z-index:1;display:inline-flex;align-items:center;gap:5px;
-                        background:rgba(201,168,76,.18);border:1px solid rgba(201,168,76,.38);
-                        color:#f0d98a;font-size:10.5px;font-weight:700;letter-spacing:.09em;
-                        text-transform:uppercase;padding:3px 11px;border-radius:99px;margin-bottom:8px;">
-                    <i class="fas fa-shield-alt"></i> Student Sign In
-                </div>
-                <h2 style="position:relative;z-index:1;font-family:'Playfair Display',Georgia,serif;
-                       font-size:22px;font-weight:700;color:#fff;margin:0 0 4px;">
-                    Two-Step Verification
-                </h2>
-                <p style="position:relative;z-index:1;font-size:13px;color:rgba(255,255,255,.55);margin:0;">
-                    Sign in to your BUNHS student account.
-                </p>
-            </div>
-
-            <!-- Body -->
-            <div style="padding:26px 30px 30px;">
-
-                <!-- Step 1: Credentials -->
-                <div id="slStep1" style="text-align:center;">
-                    <div style="width:62px;height:62px;border-radius:50%;
-                            background:linear-gradient(135deg,rgba(82,183,136,.14),rgba(45,106,79,.08));
-                            border:2px solid rgba(82,183,136,.28);
-                            display:flex;align-items:center;justify-content:center;
-                            font-size:23px;color:#2d6a4f;margin:0 auto 10px;">
-                        <i class="fas fa-user-graduate"></i>
-                    </div>
-                    <p style="font-family:'Playfair Display',Georgia,serif;font-size:17px;
-                          font-weight:700;color:#1a3a2a;margin:0 0 5px;">Sign in to your account</p>
-                    <p style="font-size:12.5px;color:#6b7c72;margin:0 0 18px;">
-                        Enter your email and password to receive a verification code.
-                    </p>
-
-                    <!-- Error strip step 1 -->
-                    <div id="slS1Err"
-                        style="display:none;align-items:center;gap:8px;
-                            background:#fdf1f1;border:1px solid #f0d5d5;border-left:3px solid #e53935;
-                            border-radius:8px;padding:10px 14px;margin-bottom:14px;
-                            font-size:13px;color:#b94040;text-align:left;">
-                        <i class="fas fa-exclamation-circle"></i>
-                        <span id="slS1ErrTxt"></span>
-                    </div>
-
-                    <!-- Email -->
-                    <div style="margin-bottom:14px;text-align:left;">
-                        <label for="slUsername"
-                            style="display:block;font-size:12px;font-weight:600;
-                                  color:#1a3a2a;margin-bottom:6px;letter-spacing:.02em;">
-                            Email Address
-                        </label>
-                        <input type="email" id="slUsername" name="username"
-                            placeholder="yourname@gmail.com"
-                            autocomplete="username"
-                            style="width:100%;padding:11px 14px;border:2px solid #dde8e2;
-                                  border-radius:10px;font-family:'DM Sans',sans-serif;
-                                  font-size:14px;color:#1e2d24;background:#f8f5f0;
-                                  outline:none;transition:border-color .2s,box-shadow .2s;"
-                            onfocus="this.style.borderColor='#52b788';this.style.boxShadow='0 0 0 3.5px rgba(82,183,136,.18)';this.style.background='#fff';"
-                            onblur="this.style.borderColor='#dde8e2';this.style.boxShadow='';this.style.background='#f8f5f0';">
-                    </div>
-
-                    <!-- Password -->
-                    <div style="margin-bottom:20px;text-align:left;">
-                        <label for="slPassword"
-                            style="display:block;font-size:12px;font-weight:600;
-                                  color:#1a3a2a;margin-bottom:6px;letter-spacing:.02em;">
-                            Password
-                        </label>
-                        <div style="position:relative;">
-                            <input type="password" id="slPassword" name="password"
-                                placeholder="Enter your password"
-                                autocomplete="current-password"
-                                style="width:100%;padding:11px 42px 11px 14px;border:2px solid #dde8e2;
-                                      border-radius:10px;font-family:'DM Sans',sans-serif;
-                                      font-size:14px;color:#1e2d24;background:#f8f5f0;
-                                      outline:none;transition:border-color .2s,box-shadow .2s;"
-                                onfocus="this.style.borderColor='#52b788';this.style.boxShadow='0 0 0 3.5px rgba(82,183,136,.18)';this.style.background='#fff';"
-                                onblur="this.style.borderColor='#dde8e2';this.style.boxShadow='';this.style.background='#f8f5f0';">
-                            <button type="button" id="slTogglePwd" tabindex="-1"
-                                style="position:absolute;right:13px;top:50%;transform:translateY(-50%);
-                                       background:none;border:none;cursor:pointer;color:#6b7c72;font-size:14px;">
-                                <i class="fas fa-eye" id="slEyeIcon"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <button id="slSendCodeBtn"
-                        style="width:100%;padding:13px 20px;font-family:'DM Sans',sans-serif;
-                               font-size:13.5px;font-weight:700;color:#fff;cursor:pointer;
-                               background:linear-gradient(135deg,#3a8c6a,#1a3a2a);border:none;
-                               border-radius:12px;display:flex;align-items:center;justify-content:center;
-                               gap:8px;box-shadow:0 4px 16px rgba(26,58,42,.3);
-                               transition:transform .15s,box-shadow .15s,opacity .15s;">
-                        <i class="fas fa-paper-plane"></i>&ensp;Send Verification Code
-                    </button>
-                </div>
-
-                <!-- Step 2: OTP -->
-                <div id="slStep2" style="text-align:center;display:none;">
-                    <div style="width:62px;height:62px;border-radius:50%;
-                            background:linear-gradient(135deg,rgba(82,183,136,.14),rgba(45,106,79,.08));
-                            border:2px solid rgba(82,183,136,.28);
-                            display:flex;align-items:center;justify-content:center;
-                            font-size:23px;color:#2d6a4f;margin:0 auto 10px;">
-                        <i class="fas fa-shield-alt"></i>
-                    </div>
-                    <p style="font-family:'Playfair Display',Georgia,serif;font-size:17px;
-                          font-weight:700;color:#1a3a2a;margin:0 0 5px;">Enter Verification Code</p>
-                    <p style="font-size:12.5px;color:#6b7c72;margin:0 0 12px;" id="slOtpSubtitle">
-                        Enter the 6-digit code sent to your registered contact.
-                    </p>
-
-                    <!-- Timer pill -->
-                    <div style="margin-bottom:16px;">
-                        <span id="slTimerPill"
-                            style="display:inline-flex;align-items:center;gap:6px;padding:5px 13px;
-                                 border-radius:99px;font-size:12px;font-weight:600;
-                                 background:#fdf6ec;border:1px solid #f0e4cc;color:#8b5e1a;
-                                 transition:background .3s,border-color .3s,color .3s;">
-                            <i class="fas fa-clock"></i> <span id="slTimerVal">05:00</span>
-                        </span>
-                    </div>
-
-                    <!-- OTP boxes -->
-                    <div id="slOtpBoxes" style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;">
-                        <input class="sl-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]"
-                            style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;
-                                  background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;
-                                  color:#1e2d24;outline:none;transition:border-color .2s,box-shadow .2s;">
-                        <input class="sl-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]"
-                            style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;
-                                  background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;
-                                  color:#1e2d24;outline:none;transition:border-color .2s,box-shadow .2s;">
-                        <input class="sl-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]"
-                            style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;
-                                  background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;
-                                  color:#1e2d24;outline:none;transition:border-color .2s,box-shadow .2s;">
-                        <input class="sl-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]"
-                            style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;
-                                  background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;
-                                  color:#1e2d24;outline:none;transition:border-color .2s,box-shadow .2s;">
-                        <input class="sl-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]"
-                            style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;
-                                  background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;
-                                  color:#1e2d24;outline:none;transition:border-color .2s,box-shadow .2s;">
-                        <input class="sl-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]"
-                            style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;
-                                  background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;
-                                  color:#1e2d24;outline:none;transition:border-color .2s,box-shadow .2s;">
-                    </div>
-                    <input type="hidden" id="slOtpHidden">
-
-                    <!-- Error strip step 2 -->
-                    <div id="slS2Err"
-                        style="display:none;align-items:center;gap:8px;
-                            background:#fdf1f1;border:1px solid #f0d5d5;border-left:3px solid #e53935;
-                            border-radius:8px;padding:10px 14px;margin-bottom:14px;
-                            font-size:13px;color:#b94040;text-align:left;">
-                        <i class="fas fa-exclamation-circle"></i>
-                        <span id="slS2ErrTxt"></span>
-                    </div>
-
-                    <!-- Verify button -->
-                    <button id="slVerifyBtn"
-                        style="width:100%;padding:13px 20px;font-family:'DM Sans',sans-serif;
-                               font-size:13.5px;font-weight:700;color:#fff;cursor:pointer;
-                               background:linear-gradient(135deg,#3a8c6a,#1a3a2a);border:none;
-                               border-radius:12px;display:flex;align-items:center;justify-content:center;
-                               gap:8px;box-shadow:0 4px 16px rgba(26,58,42,.3);
-                               transition:transform .15s,box-shadow .15s,opacity .15s;">
-                        <i class="fas fa-check-circle"></i>&ensp;Verify &amp; Sign in
-                    </button>
-
-                    <!-- Resend + Back -->
-                    <div style="margin-top:14px;display:flex;align-items:center;justify-content:center;gap:12px;">
-                        <button id="slResendBtn" disabled
-                            style="background:none;border:none;padding:0;cursor:pointer;
-                                   font-family:'DM Sans',sans-serif;font-size:12.5px;color:#6b7c72;
-                                   font-weight:600;transition:color .2s;opacity:.5;">
-                            Resend · <span id="slResendTimer">30</span>s
-                        </button>
-                        <span style="color:#dde8e2;font-size:14px;">|</span>
-                        <button id="slBackBtn"
-                            style="background:none;border:none;padding:0;cursor:pointer;
-                                   font-family:'DM Sans',sans-serif;font-size:12.5px;color:#6b7c72;
-                                   font-weight:600;transition:color .2s;">
-                            <i class="fas fa-arrow-left" style="font-size:10px;"></i> Back
-                        </button>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-    </div><!-- /#slOverlay -->
-
-    <script>
-        (function() {
-            'use strict';
-
-            const ENDPOINT = 'login_otp.php';
-
-            const overlay = document.getElementById('slOverlay');
-            const card = document.getElementById('slCard');
-            const step1 = document.getElementById('slStep1');
-            const step2 = document.getElementById('slStep2');
-            const s1Err = document.getElementById('slS1Err');
-            const s1ErrTxt = document.getElementById('slS1ErrTxt');
-            const s2Err = document.getElementById('slS2Err');
-            const s2ErrTxt = document.getElementById('slS2ErrTxt');
-            const sendBtn = document.getElementById('slSendCodeBtn');
-            const verifyBtn = document.getElementById('slVerifyBtn');
-            const resendBtn = document.getElementById('slResendBtn');
-            const backBtn = document.getElementById('slBackBtn');
-            const closeBtn = document.getElementById('slCloseBtn');
-            const timerPill = document.getElementById('slTimerPill');
-            const timerVal = document.getElementById('slTimerVal');
-            const subtitle = document.getElementById('slOtpSubtitle');
-            const joinUsBtn = document.getElementById('joinUsBtn');
-
-            let _timerID = null;
-            let _resendID = null;
-            let _busy = false;
-
-            // ── Open / Close ──────────────────────────────────────────
-            function openModal() {
-                showStep(1);
-                overlay.style.display = 'flex';
-                requestAnimationFrame(() => requestAnimationFrame(() => {
-                    overlay.style.opacity = '1';
-                    overlay.style.visibility = 'visible';
-                    card.style.transform = 'translateY(0) scale(1)';
-                }));
-                document.body.style.overflow = 'hidden';
-                hideS1Err();
-                setTimeout(() => document.getElementById('slUsername').focus(), 380);
-            }
-
-            function closeModal() {
-                overlay.style.opacity = '0';
-                overlay.style.visibility = 'hidden';
-                card.style.transform = 'translateY(28px) scale(.95)';
-                document.body.style.overflow = '';
-                clearInterval(_timerID);
-                clearInterval(_resendID);
-                _busy = false;
-                showStep(1);
-                document.getElementById('slUsername').value = '';
-                document.getElementById('slPassword').value = '';
-                hideS1Err();
-                hideS2Err();
-                clearOtpBoxes();
-            }
-
-            // ── Step switcher ─────────────────────────────────────────
-            function showStep(n) {
-                step1.style.display = n === 1 ? 'block' : 'none';
-                step2.style.display = n === 2 ? 'block' : 'none';
-            }
-
-            // ── Error helpers ─────────────────────────────────────────
-            function showS1Err(msg) {
-                s1ErrTxt.textContent = msg;
-                s1Err.style.display = 'flex';
-            }
-
-            function hideS1Err() {
-                s1Err.style.display = 'none';
-            }
-
-            function showS2Err(msg) {
-                s2ErrTxt.textContent = msg;
-                s2Err.style.display = 'flex';
-            }
-
-            function hideS2Err() {
-                s2Err.style.display = 'none';
-            }
-
-            function setLoad(btn, on, loadHtml, idleHtml) {
-                btn.disabled = on;
-                btn.style.opacity = on ? '.7' : '1';
-                btn.innerHTML = on ? loadHtml : idleHtml;
-            }
-
-            // ── OTP boxes ─────────────────────────────────────────────
-            function wireOtpBoxes() {
-                const boxes = Array.from(document.querySelectorAll('#slOtpBoxes .sl-otp-box'));
-                const hid = document.getElementById('slOtpHidden');
-
-                function sync() {
-                    hid.value = boxes.map(b => b.value).join('');
-                }
-
-                boxes.forEach((box, i) => {
-                    box.addEventListener('input', () => {
-                        box.value = box.value.replace(/\D/g, '').slice(-1);
-                        sync();
-                        if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
-                    });
-                    box.addEventListener('keydown', e => {
-                        if (e.key === 'Backspace' && !box.value && i > 0) {
-                            boxes[i - 1].value = '';
-                            boxes[i - 1].focus();
-                            sync();
-                        }
-                        if (e.key === 'ArrowLeft' && i > 0) boxes[i - 1].focus();
-                        if (e.key === 'ArrowRight' && i < boxes.length - 1) boxes[i + 1].focus();
-                    });
-                    box.addEventListener('paste', e => {
-                        e.preventDefault();
-                        const text = (e.clipboardData || window.clipboardData)
-                            .getData('text').replace(/\D/g, '').slice(0, 6);
-                        text.split('').forEach((ch, j) => {
-                            if (boxes[j]) boxes[j].value = ch;
-                        });
-                        sync();
-                        boxes[Math.min(text.length, boxes.length - 1)].focus();
-                    });
-                    box.addEventListener('keypress', e => {
-                        if (!/\d/.test(e.key)) e.preventDefault();
-                    });
-                    box.addEventListener('focus', () => {
-                        box.style.borderColor = '#52b788';
-                        box.style.boxShadow = '0 0 0 3.5px rgba(82,183,136,.18)';
-                        box.style.background = '#fff';
-                    });
-                    box.addEventListener('blur', () => {
-                        box.style.borderColor = box.value ? '#2d6a4f' : '#dde8e2';
-                        box.style.boxShadow = '';
-                        box.style.background = box.value ? 'rgba(45,106,79,.06)' : '#f8f5f0';
-                    });
-                });
-            }
-
-            function clearOtpBoxes() {
-                document.querySelectorAll('#slOtpBoxes .sl-otp-box').forEach(b => {
-                    b.value = '';
-                    b.style.borderColor = '#dde8e2';
-                    b.style.boxShadow = '';
-                    b.style.background = '#f8f5f0';
-                });
-                document.getElementById('slOtpHidden').value = '';
-            }
-
-            function shakeOtpBoxes() {
-                document.querySelectorAll('#slOtpBoxes .sl-otp-box').forEach(b => {
-                    b.style.borderColor = '#e53935';
-                    setTimeout(() => {
-                        b.style.borderColor = '#dde8e2';
-                    }, 420);
-                });
-            }
-
-            // ── Timer — identical to Dashboard.php ────────────────────
-            function startTimer() {
-                clearInterval(_timerID);
-                let rem = 300;
-
-                function tick() {
-                    const m = String(Math.floor(rem / 60)).padStart(2, '0');
-                    const s = String(rem % 60).padStart(2, '0');
-                    timerVal.textContent = m + ':' + s;
-                    const urgent = rem <= 60;
-                    timerPill.style.background = urgent ? '#fff1f0' : '#fdf6ec';
-                    timerPill.style.borderColor = urgent ? '#ffd0cc' : '#f0e4cc';
-                    timerPill.style.color = urgent ? '#c62828' : '#8b5e1a';
-                    if (rem-- > 0) _timerID = setTimeout(tick, 1000);
-                }
-                tick();
-            }
-
-            // ── Resend countdown ──────────────────────────────────────
-            function startResendCountdown() {
-                resendBtn.disabled = true;
-                resendBtn.style.opacity = '.5';
-                resendBtn.innerHTML = 'Resend · <span id="slResendTimer">30</span>s';
-                let rem = 30;
-                _resendID = setInterval(() => {
-                    rem--;
-                    const el = document.getElementById('slResendTimer');
-                    if (el) el.textContent = rem;
-                    if (rem <= 0) {
-                        clearInterval(_resendID);
-                        resendBtn.disabled = false;
-                        resendBtn.style.opacity = '1';
-                        resendBtn.innerHTML = 'Resend code';
-                        resendBtn.classList.add('on');
-                    }
-                }, 1000);
-            }
-
-            // ══ Step 1 — credentials → send OTP ══════════════════════
-            sendBtn.addEventListener('click', () => {
-                hideS1Err();
-                const email = (document.getElementById('slUsername').value || '').trim();
-                const password = (document.getElementById('slPassword').value || '');
-                if (!email || !password) {
-                    showS1Err('Please enter your email and password.');
-                    return;
-                }
-                setLoad(sendBtn, true,
-                    '<i class="fas fa-spinner fa-spin"></i>&ensp;Sending…',
-                    '<i class="fas fa-paper-plane"></i>&ensp;Send Verification Code');
-
-                const fd = new FormData();
-                fd.append('action', 'login_verify_credentials');
-                fd.append('username', email);
-                fd.append('email', email);
-                fd.append('password', password);
-                fd.append('csrf_token', '<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>');
-
-                fetch(ENDPOINT, {
-                        method: 'POST',
-                        body: fd
-                    })
-                    .then(r => r.json())
-                    .then(d => {
-                        setLoad(sendBtn, false, '',
-                            '<i class="fas fa-paper-plane"></i>&ensp;Send Verification Code');
-                        if (d.success) {
-                            if (d.masked_contact) subtitle.textContent = 'Code sent to: ' + d.masked_contact;
-                            showStep(2);
-                            clearOtpBoxes();
-                            startTimer();
-                            startResendCountdown();
-                            hideS2Err();
-                            setTimeout(() => {
-                                const first = document.querySelector('#slOtpBoxes .sl-otp-box');
-                                if (first) first.focus();
-                            }, 200);
-                        } else {
-                            showS1Err(d.message || 'Invalid username or password.');
-                        }
-                    })
-                    .catch(() => {
-                        setLoad(sendBtn, false, '',
-                            '<i class="fas fa-paper-plane"></i>&ensp;Send Verification Code');
-                        showS1Err('Connection error. Please try again.');
-                    });
-            });
-
-            document.getElementById('slPassword').addEventListener('keydown', e => {
-                if (e.key === 'Enter') sendBtn.click();
-            });
-            document.getElementById('slTogglePwd').addEventListener('click', function() {
-                const inp = document.getElementById('slPassword'),
-                    icon = document.getElementById('slEyeIcon');
-                const show = inp.type === 'password';
-                inp.type = show ? 'text' : 'password';
-                icon.className = show ? 'fas fa-eye-slash' : 'fas fa-eye';
-            });
-
-
-
-            // ══ Step 2 — verify OTP ═══════════════════════════════════
-            verifyBtn.addEventListener('click', () => {
-                if (_busy) return;
-                hideS2Err();
-                const otp = document.getElementById('slOtpHidden').value;
-                if (otp.length !== 6) {
-                    shakeOtpBoxes();
-                    showS2Err('Please enter all 6 digits.');
-                    return;
-                }
-
-                _busy = true;
-                setLoad(verifyBtn, true,
-                    '<i class="fas fa-spinner fa-spin"></i>&ensp;Verifying…',
-                    '<i class="fas fa-check-circle"></i>&ensp;Verify &amp; Sign in');
-
-                const fd = new FormData();
-                fd.append('action', 'login_verify_otp');
-                fd.append('otp', otp);
-
-                fetch(ENDPOINT, {
-                        method: 'POST',
-                        body: fd
-                    })
-                    .then(r => r.json())
-                    .then(d => {
-                        setLoad(verifyBtn, false, '',
-                            '<i class="fas fa-check-circle"></i>&ensp;Verify &amp; Sign in');
-                        _busy = false;
-                        if (d.success) {
-                            clearInterval(_timerID);
-                            // Route by role — same logic as the existing loginModal
-                            if (d.user_type === 'student') {
-                                window.location.href = 'user_account/Dashboard.php';
-                            } else {
-                                window.location.href = 'admin_account/admin_dashboard.php';
-                            }
-                        } else {
-                            shakeOtpBoxes();
-                            showS2Err(d.message || 'Invalid code. Please try again.');
-                            clearOtpBoxes();
-                            const first = document.querySelector('#slOtpBoxes .sl-otp-box');
-                            if (first) first.focus();
-                        }
-                    })
-                    .catch(() => {
-                        setLoad(verifyBtn, false, '',
-                            '<i class="fas fa-check-circle"></i>&ensp;Verify &amp; Sign in');
-                        _busy = false;
-                        showS2Err('Connection error. Please try again.');
-                    });
-            });
-
-            // ── Resend ────────────────────────────────────────────────
-            resendBtn.addEventListener('click', () => {
-                resendBtn.disabled = true;
-                resendBtn.classList.remove('on');
-                const fd = new FormData();
-                fd.append('action', 'login_resend_otp');
-                fetch(ENDPOINT, {
-                        method: 'POST',
-                        body: fd
-                    })
-                    .then(r => r.json())
-                    .then(d => {
-                        if (d.success) {
-                            clearOtpBoxes();
-                            startTimer();
-                            startResendCountdown();
-                            hideS2Err();
-                            if (d.masked_contact) subtitle.textContent = 'New code sent to ' + d.masked_contact;
-                            // Green flash — identical to Dashboard.php
-                            s2ErrTxt.textContent = '✓ ' + (d.message || 'New code sent.');
-                            s2Err.style.background = 'rgba(82,183,136,.08)';
-                            s2Err.style.borderColor = 'rgba(82,183,136,.3)';
-                            s2Err.style.borderLeft = '3px solid #2d6a4f';
-                            s2Err.style.color = '#2d6a4f';
-                            s2Err.style.display = 'flex';
-                            if (d.dev_otp) console.log('[DEV] Resend OTP:', d.dev_otp);
-                            setTimeout(() => {
-                                hideS2Err();
-                                s2Err.style.cssText = '';
-                            }, 3500);
-                            setTimeout(() => {
-                                const first = document.querySelector('#slOtpBoxes .sl-otp-box');
-                                if (first) first.focus();
-                            }, 150);
-                        } else {
-                            resendBtn.disabled = false;
-                            resendBtn.style.opacity = '1';
-                            showS2Err(d.message || 'Failed to resend. Please try again.');
-                        }
-                    })
-                    .catch(() => {
-                        resendBtn.disabled = false;
-                        resendBtn.style.opacity = '1';
-                        showS2Err('Connection error. Could not resend.');
-                    });
-            });
-
-            // ── Back ──────────────────────────────────────────────────
-            backBtn.addEventListener('click', () => {
-                clearInterval(_timerID);
-                clearInterval(_resendID);
-                clearOtpBoxes();
-                hideS2Err();
-                showStep(1);
-                setTimeout(() => document.getElementById('slUsername').focus(), 150);
-            });
-
-            // ── Close button + backdrop click + Escape ─────────────────
-            closeBtn.addEventListener('click', closeModal);
-            overlay.addEventListener('click', e => {
-                if (e.target === overlay) closeModal();
-            });
-            document.addEventListener('keydown', e => {
-                if (e.key === 'Escape' && overlay.style.visibility === 'visible') closeModal();
-            });
-
-            // ── Open trigger ──────────────────────────────────────────
-            if (joinUsBtn) {
-                joinUsBtn.addEventListener('click', e => {
-                    e.preventDefault();
-                    openModal();
-                });
-            }
-
-            // ── Init ──────────────────────────────────────────────────
-            wireOtpBoxes();
-
-        })();
-    </script>
-
-    <!-- ═══════════════════════════════════════════════════════════════════
-     STUDENT SIGNUP POPUP  (sc- prefix)
-     Triggered by #createAccountBtn. Backend: user_account/student_signup.php
-═══════════════════════════════════════════════════════════════════ -->
-    <div id="scOverlay"
-        style="position:fixed;inset:0;z-index:99999;display:flex;align-items:center;
-            justify-content:center;padding:16px;background:rgba(8,20,14,.65);
-            backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
-            opacity:0;visibility:hidden;transition:opacity .3s ease,visibility .3s ease;
-            overflow-y:auto;">
-        <div id="scCard"
-            style="position:relative;background:#fff;border-radius:20px;
-                box-shadow:0 28px 72px rgba(26,58,42,.24),0 6px 20px rgba(26,58,42,.14);
-                width:100%;max-width:480px;font-family:'DM Sans','Segoe UI',sans-serif;
-                transform:translateY(28px) scale(.95);margin:auto;
-                transition:transform .38s cubic-bezier(.34,1.28,.64,1);overflow:hidden;">
-
-            <!-- Banner -->
-            <div style="position:relative;background:#1a3a2a;padding:30px 30px 24px;overflow:hidden;">
-                <div style="position:absolute;inset:0;opacity:.04;
-                        background-image:linear-gradient(rgba(255,255,255,1) 1px,transparent 1px),
-                                         linear-gradient(90deg,rgba(255,255,255,1) 1px,transparent 1px);
-                        background-size:28px 28px;"></div>
-                <button id="scCloseBtn"
-                    style="position:absolute;top:14px;right:16px;z-index:3;width:30px;height:30px;
-                           border-radius:50%;background:rgba(255,255,255,.1);
-                           border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.65);
-                           font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;">
-                    <i class="fas fa-times"></i>
-                </button>
-                <div style="position:relative;z-index:1;display:inline-flex;align-items:center;gap:5px;
-                        background:rgba(201,168,76,.18);border:1px solid rgba(201,168,76,.38);
-                        color:#f0d98a;font-size:10.5px;font-weight:700;letter-spacing:.09em;
-                        text-transform:uppercase;padding:3px 11px;border-radius:99px;margin-bottom:8px;">
-                    <i class="fas fa-user-plus"></i> Create Account
-                </div>
-                <h2 style="position:relative;z-index:1;font-family:'Playfair Display',Georgia,serif;
-                       font-size:22px;font-weight:700;color:#fff;margin:0 0 4px;">
-                    Student Registration
-                </h2>
-                <p style="position:relative;z-index:1;font-size:13px;color:rgba(255,255,255,.55);margin:0;">
-                    Create your BUNHS student account.
-                </p>
-                <!-- Step pills -->
-                <div style="position:relative;z-index:1;display:flex;align-items:center;gap:6px;margin-top:16px;">
-                    <div id="scPill1" style="display:flex;align-items:center;gap:5px;padding:4px 12px;
-                     border-radius:99px;background:rgba(255,255,255,.15);font-size:11px;font-weight:600;color:#fff;">
-                        <span style="width:18px;height:18px;border-radius:50%;background:#52b788;
-                                 display:flex;align-items:center;justify-content:center;font-size:10px;">1</span>
-                        Details
-                    </div>
-                    <div style="flex:1;height:1px;background:rgba(255,255,255,.15);"></div>
-                    <div id="scPill2" style="display:flex;align-items:center;gap:5px;padding:4px 12px;
-                     border-radius:99px;background:rgba(255,255,255,.06);font-size:11px;font-weight:600;color:rgba(255,255,255,.4);">
-                        <span style="width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.15);
-                                 display:flex;align-items:center;justify-content:center;font-size:10px;">2</span>
-                        Verify
-                    </div>
-                </div>
-            </div>
-
-            <!-- Body -->
-            <div style="padding:24px 30px 30px;">
-
-                <!-- Step 1: Registration form -->
-                <div id="scStep1">
-                    <div id="scFormErr"
-                        style="display:none;align-items:center;gap:8px;background:#fdf1f1;
-                            border:1px solid #f0d5d5;border-left:3px solid #e53935;
-                            border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#b94040;">
-                        <i class="fas fa-exclamation-circle"></i><span id="scFormErrTxt"></span>
-                    </div>
-
-                    <!-- Name row -->
-                    <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:10px;margin-bottom:12px;">
-                        <div>
-                            <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">First Name <span style="color:#e53935;">*</span></label>
-                            <input id="scFirstName" type="text" placeholder="Juan"
-                                style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;transition:border-color .2s,box-shadow .2s;">
-                        </div>
-                        <div>
-                            <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">M.I.</label>
-                            <input id="scMiddleInitial" type="text" placeholder="A." maxlength="3"
-                                style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;transition:border-color .2s,box-shadow .2s;text-transform:uppercase;">
-                        </div>
-                        <div>
-                            <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">Last Name <span style="color:#e53935;">*</span></label>
-                            <input id="scLastName" type="text" placeholder="Dela Cruz"
-                                style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;transition:border-color .2s,box-shadow .2s;">
-                        </div>
-                    </div>
-
-                    <!-- Suffix + Age + Gender -->
-                    <div style="display:grid;grid-template-columns:90px 80px 1fr;gap:10px;margin-bottom:12px;">
-                        <div>
-                            <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">Suffix</label>
-                            <select id="scSuffix" style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;">
-                                <option value="">None</option>
-                                <option value="Jr.">Jr.</option>
-                                <option value="Sr.">Sr.</option>
-                                <option value="II">II</option>
-                                <option value="III">III</option>
-                                <option value="IV">IV</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">Age <span style="color:#e53935;">*</span></label>
-                            <input id="scAge" type="number" placeholder="16" min="10" max="25"
-                                style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;">
-                        </div>
-                        <div>
-                            <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">Gender <span style="color:#e53935;">*</span></label>
-                            <select id="scGender" style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;">
-                                <option value="">Select…</option>
-                                <option value="Male">Male</option>
-                                <option value="Female">Female</option>
-                                <option value="Other">Other</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Contact -->
-                    <div style="margin-bottom:20px;">
-
-                        <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:7px;">Contact for OTP <span style="color:#e53935;">*</span></label>
-                        <div style="display:flex;gap:16px;margin-bottom:8px;">
-                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#1a3a2a;font-weight:500;">
-                                <input type="radio" name="scContact" id="scContactEmail" value="email" checked style="accent-color:#2d6a4f;width:15px;height:15px;">
-                                <i class="fas fa-envelope" style="color:#2d6a4f;"></i> Email
-                            </label>
-                            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#1a3a2a;font-weight:500;">
-                                <input type="radio" name="scContact" id="scContactPhone" value="phone" style="accent-color:#2d6a4f;width:15px;height:15px;">
-                                <i class="fas fa-mobile-alt" style="color:#2d6a4f;"></i> Phone
-                            </label>
-                        </div>
-                        <div id="scEmailWrap">
-                            <input id="scEmail" type="email" placeholder="yourname@gmail.com"
-                                style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;">
-                        </div>
-                        <div id="scPhoneWrap" style="display:none;">
-                            <input id="scPhone" type="tel" placeholder="09XXXXXXXXX"
-                                style="width:100%;padding:10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;">
-                        </div>
-                    </div>
-
-
-
-                    <!-- Password -->
-                    <div style="margin-bottom:12px;">
-                        <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">Password <span style="color:#e53935;">*</span></label>
-                        <div style="position:relative;">
-                            <input id="scPassword" type="password" placeholder="At least 8 characters"
-                                style="width:100%;padding:10px 42px 10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;">
-                            <button type="button" id="scTogglePwd" tabindex="-1"
-                                style="position:absolute;right:13px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#6b7c72;font-size:13px;">
-                                <i class="fas fa-eye" id="scEyeIcon"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Confirm Password -->
-                    <div style="margin-bottom:20px;">
-                        <label style="display:block;font-size:11.5px;font-weight:600;color:#1a3a2a;margin-bottom:5px;">Confirm Password <span style="color:#e53935;">*</span></label>
-                        <div style="position:relative;">
-                            <input id="scConfirmPassword" type="password" placeholder="Re-enter password"
-                                style="width:100%;padding:10px 42px 10px 13px;border:2px solid #dde8e2;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:#1e2d24;background:#f8f5f0;outline:none;">
-                            <button type="button" id="scToggleConfirm" tabindex="-1"
-                                style="position:absolute;right:13px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#6b7c72;font-size:13px;">
-                                <i class="fas fa-eye" id="scConfirmEyeIcon"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <button id="scSubmitBtn"
-                        style="width:100%;padding:13px 20px;font-family:'DM Sans',sans-serif;font-size:13.5px;font-weight:700;color:#fff;cursor:pointer;background:linear-gradient(135deg,#3a8c6a,#1a3a2a);border:none;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 4px 16px rgba(26,58,42,.3);">
-                        <i class="fas fa-paper-plane"></i>&ensp;Create Account &amp; Send Code
-                    </button>
-                    <p style="text-align:center;margin-top:14px;font-size:12.5px;color:#6b7c72;">
-                        Already have an account?
-                        <a href="#" id="scSwitchToLogin" style="color:#2d6a4f;font-weight:600;text-decoration:none;">Sign in</a>
-                    </p>
-                </div>
-
-                <!-- Step 2: OTP -->
-                <div id="scStep2" style="display:none;text-align:center;">
-                    <div style="width:62px;height:62px;border-radius:50%;background:linear-gradient(135deg,rgba(82,183,136,.14),rgba(45,106,79,.08));border:2px solid rgba(82,183,136,.28);display:flex;align-items:center;justify-content:center;font-size:23px;color:#2d6a4f;margin:0 auto 10px;">
-                        <i class="fas fa-shield-alt"></i>
-                    </div>
-                    <p style="font-family:'Playfair Display',Georgia,serif;font-size:17px;font-weight:700;color:#1a3a2a;margin:0 0 5px;">Verify your contact</p>
-                    <p style="font-size:12.5px;color:#6b7c72;margin:0 0 12px;" id="scOtpSubtitle">Enter the 6-digit code we sent.</p>
-                    <div style="margin-bottom:16px;">
-                        <span id="scTimerPill" style="display:inline-flex;align-items:center;gap:6px;padding:5px 13px;border-radius:99px;font-size:12px;font-weight:600;background:#fdf6ec;border:1px solid #f0e4cc;color:#8b5e1a;">
-                            <i class="fas fa-clock"></i> <span id="scTimerVal">05:00</span>
-                        </span>
-                    </div>
-                    <div id="scOtpBoxes" style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;">
-                        <input class="sc-otp-box" type="text" maxlength="1" inputmode="numeric" style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;color:#1e2d24;outline:none;">
-                        <input class="sc-otp-box" type="text" maxlength="1" inputmode="numeric" style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;color:#1e2d24;outline:none;">
-                        <input class="sc-otp-box" type="text" maxlength="1" inputmode="numeric" style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;color:#1e2d24;outline:none;">
-                        <input class="sc-otp-box" type="text" maxlength="1" inputmode="numeric" style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;color:#1e2d24;outline:none;">
-                        <input class="sc-otp-box" type="text" maxlength="1" inputmode="numeric" style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;color:#1e2d24;outline:none;">
-                        <input class="sc-otp-box" type="text" maxlength="1" inputmode="numeric" style="width:46px;height:54px;border-radius:10px;border:2px solid #dde8e2;background:#f8f5f0;font-size:22px;font-weight:700;text-align:center;color:#1e2d24;outline:none;">
-                    </div>
-                    <input type="hidden" id="scOtpHidden">
-                    <div id="scOtpErr" style="display:none;align-items:center;gap:8px;background:#fdf1f1;border:1px solid #f0d5d5;border-left:3px solid #e53935;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#b94040;text-align:left;">
-                        <i class="fas fa-exclamation-circle"></i><span id="scOtpErrTxt"></span>
-                    </div>
-                    <button id="scVerifyBtn" style="width:100%;padding:13px 20px;font-family:'DM Sans',sans-serif;font-size:13.5px;font-weight:700;color:#fff;cursor:pointer;background:linear-gradient(135deg,#3a8c6a,#1a3a2a);border:none;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 4px 16px rgba(26,58,42,.3);">
-                        <i class="fas fa-check-circle"></i>&ensp;Verify &amp; Create Account
-                    </button>
-                    <div style="margin-top:14px;display:flex;align-items:center;justify-content:center;gap:12px;">
-                        <button id="scResendBtn" disabled style="background:none;border:none;padding:0;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:12.5px;color:#6b7c72;font-weight:600;opacity:.5;">
-                            Resend · <span id="scResendTimer">30</span>s
-                        </button>
-                        <span style="color:#dde8e2;">|</span>
-                        <button id="scBackBtn" style="background:none;border:none;padding:0;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:12.5px;color:#6b7c72;font-weight:600;">
-                            <i class="fas fa-arrow-left" style="font-size:10px;"></i> Back
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        (function() {
-            'use strict';
-            const SIGNUP_URL = 'user_account/student_signup.php';
-            const overlay = document.getElementById('scOverlay');
-            const card = document.getElementById('scCard');
-            const step1 = document.getElementById('scStep1');
-            const step2 = document.getElementById('scStep2');
-            const formErr = document.getElementById('scFormErr');
-            const formErrTxt = document.getElementById('scFormErrTxt');
-            const otpErr = document.getElementById('scOtpErr');
-            const otpErrTxt = document.getElementById('scOtpErrTxt');
-            const submitBtn = document.getElementById('scSubmitBtn');
-            const verifyBtn = document.getElementById('scVerifyBtn');
-            const resendBtn = document.getElementById('scResendBtn');
-            const backBtn = document.getElementById('scBackBtn');
-            const closeBtn = document.getElementById('scCloseBtn');
-            const timerPill = document.getElementById('scTimerPill');
-            const timerVal = document.getElementById('scTimerVal');
-            const subtitle = document.getElementById('scOtpSubtitle');
-            const triggerBtn = document.getElementById('createAccountBtn');
-            let _timerID = null,
-                _resendID = null,
-                _busy = false;
-
-            /* focus style */
-            document.querySelectorAll('#scStep1 input, #scStep1 select').forEach(el => {
-                el.addEventListener('focus', () => {
-                    el.style.borderColor = '#52b788';
-                    el.style.boxShadow = '0 0 0 3.5px rgba(82,183,136,.18)';
-                    el.style.background = '#fff';
-                });
-                el.addEventListener('blur', () => {
-                    el.style.borderColor = '#dde8e2';
-                    el.style.boxShadow = '';
-                    el.style.background = '#f8f5f0';
-                });
-            });
-
-            /* password toggles */
-            document.getElementById('scTogglePwd').addEventListener('click', function() {
-                const i = document.getElementById('scPassword'),
-                    ic = document.getElementById('scEyeIcon');
-                const s = i.type === 'password';
-                i.type = s ? 'text' : 'password';
-                ic.className = s ? 'fas fa-eye-slash' : 'fas fa-eye';
-            });
-            document.getElementById('scToggleConfirm').addEventListener('click', function() {
-                const i = document.getElementById('scConfirmPassword'),
-                    ic = document.getElementById('scConfirmEyeIcon');
-                const s = i.type === 'password';
-                i.type = s ? 'text' : 'password';
-                ic.className = s ? 'fas fa-eye-slash' : 'fas fa-eye';
-            });
-
-            /* contact toggle */
-            document.querySelectorAll('input[name="scContact"]').forEach(r => {
-                r.addEventListener('change', () => {
-                    const em = document.getElementById('scContactEmail').checked;
-                    document.getElementById('scEmailWrap').style.display = em ? '' : 'none';
-                    document.getElementById('scPhoneWrap').style.display = em ? 'none' : '';
-                });
-            });
-
-
-
-            /* open/close */
-            function openModal() {
-                overlay.style.display = 'flex';
-                requestAnimationFrame(() => requestAnimationFrame(() => {
-                    overlay.style.opacity = '1';
-                    overlay.style.visibility = 'visible';
-                    card.style.transform = 'translateY(0) scale(1)';
-                }));
-                document.body.style.overflow = 'hidden';
-                setTimeout(() => document.getElementById('scFirstName').focus(), 380);
-            }
-
-            function closeModal() {
-                overlay.style.opacity = '0';
-                overlay.style.visibility = 'hidden';
-                card.style.transform = 'translateY(28px) scale(.95)';
-                document.body.style.overflow = '';
-                clearInterval(_timerID);
-                clearInterval(_resendID);
-                _busy = false;
-                resetForm();
-            }
-
-            function resetForm() {
-                ['scFirstName', 'scMiddleInitial', 'scLastName', 'scAge', 'scEmail', 'scPhone', 'scPassword', 'scConfirmPassword']
-                .forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.value = '';
-                });
-                document.getElementById('scSuffix').value = '';
-                document.getElementById('scGender').value = '';
-                document.getElementById('scContactEmail').checked = true;
-                document.getElementById('scEmailWrap').style.display = '';
-                document.getElementById('scPhoneWrap').style.display = 'none';
-                hideFormErr();
-                hideOtpErr();
-                clearOtpBoxes();
-                showStep(1);
-            }
-
-            /* step */
-            function showStep(n) {
-                step1.style.display = n === 1 ? 'block' : 'none';
-                step2.style.display = n === 2 ? 'block' : 'none';
-            }
-
-            /* errors */
-            function showFormErr(m) {
-                formErrTxt.textContent = m;
-                formErr.style.display = 'flex';
-            }
-
-            function hideFormErr() {
-                formErr.style.display = 'none';
-            }
-
-            function showOtpErr(m) {
-                otpErrTxt.textContent = m;
-                otpErr.style.display = 'flex';
-            }
-
-            function hideOtpErr() {
-                otpErr.style.display = 'none';
-            }
-
-            function setLoad(btn, on, lh, ih) {
-                btn.disabled = on;
-                btn.style.opacity = on ? '.7' : '1';
-                btn.innerHTML = on ? lh : ih;
-            }
-
-            /* OTP boxes */
-            function wireOtpBoxes() {
-                const boxes = Array.from(document.querySelectorAll('#scOtpBoxes .sc-otp-box'));
-                const hid = document.getElementById('scOtpHidden');
-
-                function sync() {
-                    hid.value = boxes.map(b => b.value).join('');
-                }
-                boxes.forEach((box, i) => {
-                    box.addEventListener('input', () => {
-                        box.value = box.value.replace(/\D/g, '').slice(-1);
-                        sync();
-                        if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
-                    });
-                    box.addEventListener('keydown', e => {
-                        if (e.key === 'Backspace' && !box.value && i > 0) {
-                            boxes[i - 1].value = '';
-                            boxes[i - 1].focus();
-                            sync();
-                        }
-                        if (e.key === 'ArrowLeft' && i > 0) boxes[i - 1].focus();
-                        if (e.key === 'ArrowRight' && i < boxes.length - 1) boxes[i + 1].focus();
-                    });
-                    box.addEventListener('paste', e => {
-                        e.preventDefault();
-                        const t = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
-                        t.split('').forEach((ch, j) => {
-                            if (boxes[j]) boxes[j].value = ch;
-                        });
-                        sync();
-                        boxes[Math.min(t.length, boxes.length - 1)].focus();
-                    });
-                    box.addEventListener('keypress', e => {
-                        if (!/\d/.test(e.key)) e.preventDefault();
-                    });
-                    box.addEventListener('focus', () => {
-                        box.style.borderColor = '#52b788';
-                        box.style.boxShadow = '0 0 0 3.5px rgba(82,183,136,.18)';
-                        box.style.background = '#fff';
-                    });
-                    box.addEventListener('blur', () => {
-                        box.style.borderColor = box.value ? '#2d6a4f' : '#dde8e2';
-                        box.style.boxShadow = '';
-                        box.style.background = box.value ? 'rgba(45,106,79,.06)' : '#f8f5f0';
-                    });
-                });
-            }
-
-            function clearOtpBoxes() {
-                document.querySelectorAll('#scOtpBoxes .sc-otp-box').forEach(b => {
-                    b.value = '';
-                    b.style.borderColor = '#dde8e2';
-                    b.style.boxShadow = '';
-                    b.style.background = '#f8f5f0';
-                });
-                const h = document.getElementById('scOtpHidden');
-                if (h) h.value = '';
-            }
-
-            function shakeOtpBoxes() {
-                document.querySelectorAll('#scOtpBoxes .sc-otp-box').forEach(b => {
-                    b.style.borderColor = '#e53935';
-                    setTimeout(() => {
-                        b.style.borderColor = '#dde8e2';
-                    }, 420);
-                });
-            }
-
-            /* timer */
-            function startTimer() {
-                clearInterval(_timerID);
-                let rem = 300;
-
-                function tick() {
-                    const m = String(Math.floor(rem / 60)).padStart(2, '0'),
-                        s = String(rem % 60).padStart(2, '0');
-                    timerVal.textContent = m + ':' + s;
-                    const u = rem <= 60;
-                    timerPill.style.background = u ? '#fff1f0' : '#fdf6ec';
-                    timerPill.style.borderColor = u ? '#ffd0cc' : '#f0e4cc';
-                    timerPill.style.color = u ? '#c62828' : '#8b5e1a';
-                    if (rem-- > 0) _timerID = setTimeout(tick, 1000);
-                }
-                tick();
-            }
-
-            function startResendCountdown() {
-                resendBtn.disabled = true;
-                resendBtn.style.opacity = '.5';
-                resendBtn.innerHTML = 'Resend · <span id="scResendTimer">30</span>s';
-                let rem = 30;
-                _resendID = setInterval(() => {
-                    rem--;
-                    const el = document.getElementById('scResendTimer');
-                    if (el) el.textContent = rem;
-                    if (rem <= 0) {
-                        clearInterval(_resendID);
-                        resendBtn.disabled = false;
-                        resendBtn.style.opacity = '1';
-                        resendBtn.innerHTML = 'Resend code';
-                        resendBtn.classList.add('on');
-                    }
-                }, 1000);
-            }
-
-            /* Step 1 submit */
-            submitBtn.addEventListener('click', () => {
-                hideFormErr();
-                const fn = (document.getElementById('scFirstName').value || '').trim();
-                const ln = (document.getElementById('scLastName').value || '').trim();
-                const age = (document.getElementById('scAge').value || '').trim();
-                const gender = document.getElementById('scGender').value;
-
-                const isEmail = document.getElementById('scContactEmail').checked;
-                const email = (document.getElementById('scEmail').value || '').trim();
-                const phone = (document.getElementById('scPhone').value || '').trim();
-                const pw = document.getElementById('scPassword').value;
-                const cpw = document.getElementById('scConfirmPassword').value;
-                if (!fn) {
-                    showFormErr('First name is required.');
-                    return;
-                }
-                if (!ln) {
-                    showFormErr('Last name is required.');
-                    return;
-                }
-                if (!age || isNaN(age) || +age < 10 || +age > 25) {
-                    showFormErr('Enter a valid age (10–25).');
-                    return;
-                }
-                if (!gender) {
-                    showFormErr('Please select a gender.');
-                    return;
-                }
-                if (isEmail && !email) {
-                    showFormErr('Please enter your email address.');
-                    return;
-                }
-                if (isEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                    showFormErr('Enter a valid email address.');
-                    return;
-                }
-                if (!isEmail && !phone) {
-                    showFormErr('Please enter your phone number.');
-                    return;
-                }
-                if (!pw) {
-                    showFormErr('Please enter a password.');
-                    return;
-                }
-                if (pw.length < 8) {
-                    showFormErr('Password must be at least 8 characters.');
-                    return;
-                }
-                if (pw !== cpw) {
-                    showFormErr('Passwords do not match.');
-                    return;
-                }
-
-                setLoad(submitBtn, true, '<i class="fas fa-spinner fa-spin"></i>&ensp;Creating account…', '<i class="fas fa-paper-plane"></i>&ensp;Create Account &amp; Send Code');
-                const fd = new FormData();
-                fd.append('action', 'sc_register');
-                fd.append('first_name', fn);
-                fd.append('middle_initial', (document.getElementById('scMiddleInitial').value || '').trim());
-                fd.append('last_name', ln);
-                fd.append('suffix', document.getElementById('scSuffix').value);
-                fd.append('age', age);
-                fd.append('gender', gender);
-                fd.append('contact_method', isEmail ? 'email' : 'phone');
-                fd.append('password', pw);
-                fd.append('user_type', 'student');
-                fd.append('confirm_password', cpw);
-                fd.append('email', isEmail ? email : '');
-                fd.append('phone', isEmail ? '' : phone);
-
-                fetch(SIGNUP_URL, {
-
-                    method: 'POST',
-                    body: fd
-                }).then(r => r.json()).then(d => {
-                    setLoad(submitBtn, false, '', '<i class="fas fa-paper-plane"></i>&ensp;Create Account &amp; Send Code');
-                    if (d.success) {
-                        subtitle.textContent = 'Code sent to: ' + (isEmail ? email : phone);
-                        if (d.dev_otp) console.log('[DEV] Signup OTP:', d.dev_otp);
-                        showStep(2);
-                        clearOtpBoxes();
-                        startTimer();
-                        startResendCountdown();
-                        hideOtpErr();
-                        setTimeout(() => {
-                            const f = document.querySelector('#scOtpBoxes .sc-otp-box');
-                            if (f) f.focus();
-                        }, 200);
-                    } else {
-                        showFormErr(d.message || 'Registration failed. Please try again.');
-                    }
-                }).catch(() => {
-                    setLoad(submitBtn, false, '', '<i class="fas fa-paper-plane"></i>&ensp;Create Account &amp; Send Code');
-                    showFormErr('Connection error. Please try again.');
-                });
-            });
-
-            /* Step 2 verify */
-            verifyBtn.addEventListener('click', () => {
-                if (_busy) return;
-                hideOtpErr();
-                const otp = document.getElementById('scOtpHidden').value;
-                if (otp.length !== 6) {
-                    shakeOtpBoxes();
-                    showOtpErr('Please enter all 6 digits.');
-                    return;
-                }
-                _busy = true;
-                setLoad(verifyBtn, true, '<i class="fas fa-spinner fa-spin"></i>&ensp;Verifying…', '<i class="fas fa-check-circle"></i>&ensp;Verify &amp; Create Account');
-                const fd = new FormData();
-                fd.append('action', 'sc_verify_otp');
-                fd.append('otp', otp);
-                fetch(SIGNUP_URL, {
-                    method: 'POST',
-                    body: fd
-                }).then(r => r.json()).then(d => {
-                    setLoad(verifyBtn, false, '', '<i class="fas fa-check-circle"></i>&ensp;Verify &amp; Create Account');
-                    _busy = false;
-                    if (d.success) {
-                        clearInterval(_timerID);
-                        window.location.href = 'user_account/Dashboard.php';
-                    } else {
-                        shakeOtpBoxes();
-                        showOtpErr(d.message || 'Invalid code. Please try again.');
-                        clearOtpBoxes();
-                        const f = document.querySelector('#scOtpBoxes .sc-otp-box');
-                        if (f) f.focus();
-                    }
-                }).catch(() => {
-                    setLoad(verifyBtn, false, '', '<i class="fas fa-check-circle"></i>&ensp;Verify &amp; Create Account');
-                    _busy = false;
-                    showOtpErr('Connection error. Please try again.');
-                });
-            });
-
-            /* Resend */
-            resendBtn.addEventListener('click', () => {
-                resendBtn.disabled = true;
-                resendBtn.classList.remove('on');
-                const fd = new FormData();
-                fd.append('action', 'sc_resend_otp');
-                fetch(SIGNUP_URL, {
-                    method: 'POST',
-                    body: fd
-                }).then(r => r.json()).then(d => {
-                    if (d.success) {
-                        clearOtpBoxes();
-                        startTimer();
-                        startResendCountdown();
-                        hideOtpErr();
-                        otpErrTxt.textContent = '✓ ' + (d.message || 'New code sent.');
-                        otpErr.style.background = 'rgba(82,183,136,.08)';
-                        otpErr.style.borderColor = 'rgba(82,183,136,.3)';
-                        otpErr.style.borderLeft = '3px solid #2d6a4f';
-                        otpErr.style.color = '#2d6a4f';
-                        otpErr.style.display = 'flex';
-                        if (d.dev_otp) console.log('[DEV] Resend OTP:', d.dev_otp);
-                        setTimeout(() => {
-                            hideOtpErr();
-                            otpErr.style.cssText = '';
-                        }, 3500);
-                        setTimeout(() => {
-                            const f = document.querySelector('#scOtpBoxes .sc-otp-box');
-                            if (f) f.focus();
-                        }, 150);
-                    } else {
-                        resendBtn.disabled = false;
-                        resendBtn.style.opacity = '1';
-                        showOtpErr(d.message || 'Failed to resend.');
-                    }
-                }).catch(() => {
-                    resendBtn.disabled = false;
-                    resendBtn.style.opacity = '1';
-                    showOtpErr('Connection error.');
-                });
-            });
-
-            /* Back */
-            backBtn.addEventListener('click', () => {
-                clearInterval(_timerID);
-                clearInterval(_resendID);
-                clearOtpBoxes();
-                hideOtpErr();
-                showStep(1);
-                setTimeout(() => document.getElementById('scFirstName').focus(), 150);
-            });
-
-            /* Close / backdrop / Escape */
-            closeBtn.addEventListener('click', closeModal);
-            overlay.addEventListener('click', e => {
-                if (e.target === overlay) closeModal();
-            });
-            document.addEventListener('keydown', e => {
-                if (e.key === 'Escape' && overlay.style.visibility === 'visible') closeModal();
-            });
-
-            /* Switch to login */
-            document.getElementById('scSwitchToLogin').addEventListener('click', e => {
-                e.preventDefault();
-                closeModal();
-                const b = document.getElementById('joinUsBtn');
-                if (b) b.click();
-            });
-
-            /* Open trigger */
-            if (triggerBtn) triggerBtn.addEventListener('click', e => {
-                e.preventDefault();
-                openModal();
-            });
-
-            wireOtpBoxes();
-            showStep(1);
-        })();
     </script>
 
 </body>

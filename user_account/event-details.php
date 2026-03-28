@@ -13,11 +13,9 @@ require_once '../session_config.php';
 include '../db_connection.php';
 
 // ── Auth guard ───────────────────────────────────────────────
-if (!isset($_SESSION['student_id'])) {
-    $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
-    header('Location: index.php');
-    exit;
-}
+// Student functionality has been removed
+header('Location: ../index.php');
+exit;
 
 $student_id   = $_SESSION['student_id'];
 $student_name = $_SESSION['student_name'] ?? 'Student';
@@ -228,6 +226,8 @@ $ev_image       = $event['image']              ?? null;
 $ev_org_name    = $event['organizer_name']     ?? 'Prof. Michael Anderson';
 $ev_org_pos     = $event['organizer_position'] ?? 'Head of Science Department';
 $ev_org_contact = $event['organizer_contact']  ?? 'admin@bunhs.edu';
+$ev_source      = $event['source']              ?? null;
+$ev_is_official = $event['is_official']        ?? 0;
 
 // Format date & time for display
 $date_obj     = new DateTime($ev_date);
@@ -285,9 +285,9 @@ if (empty($schedule)) {
 
 // Related events
 $related = [];
-if ($event_id > 0) {
-    $s = $conn->prepare("SELECT id, title, event_date, location FROM events WHERE id != ? ORDER BY ABS(DATEDIFF(event_date, ?)) ASC LIMIT 3");
-    $s->bind_param("is", $event_id, $ev_date);
+if ($event_id > 0 && !empty($ev_category)) {
+    $s = $conn->prepare("SELECT id, title, event_date, location FROM events WHERE category = ? AND id != ? AND event_date >= CURDATE() ORDER BY event_date ASC LIMIT 3");
+    $s->bind_param("is", $ev_category, $event_id);
     $s->execute();
     $r = $s->get_result();
     while ($row = $r->fetch_assoc()) $related[] = $row;
@@ -494,7 +494,82 @@ $event_img_src = $ev_image
             padding: 32px;
         }
 
+        .event-header-section {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
         .event-body h2 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1e293b;
+            margin: 0;
+        }
+
+        .official-event-indicator {
+            display: flex;
+            align-items: center;
+        }
+
+        .official-badge {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+
+        .official-badge i {
+            font-size: 11px;
+        }
+
+        .source-information {
+            background: #f0f9ff;
+            border-left: 4px solid #3b82f6;
+            padding: 12px 16px;
+            margin-bottom: 24px;
+            border-radius: 8px;
+        }
+
+        .source-information p {
+            margin: 0;
+            color: #1e40af;
+            font-size: 14px;
+        }
+
+        .source-information i {
+            color: #3b82f6;
+            margin-right: 8px;
+        }
+
+        .official-event-notice {
+            background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+            border: 1px solid #bae6fd;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+
+        .official-event-notice i {
+            color: #0284c7;
+            margin-bottom: 8px;
+            font-size: 20px;
+        }
+
+        .official-event-notice p {
+            margin: 0;
+            color: #0c4a6e;
+            font-size: 14px;
+            line-height: 1.5;
+        }
             font-size: 24px;
             font-weight: 700;
             color: #1e293b;
@@ -973,9 +1048,9 @@ $event_img_src = $ev_image
                 <h1>Event Details</h1>
                 <p>View event information and register to attend</p>
                 <div class="breadcrumbs">
-                    <a href="Dashboard.php">Home</a>
+                    <a href="../Dashboard.php">Home</a>
                     <span>/</span>
-                    <a href="#">Events</a>
+                    <a href="../events.php">Events</a>
                     <span>/</span>
                     <current>Event Details</current>
                 </div>
@@ -1004,7 +1079,24 @@ $event_img_src = $ev_image
                 </div>
 
                 <div class="event-body">
-                    <h2><?php echo htmlspecialchars($ev_title); ?></h2>
+                    <div class="event-header-section">
+                        <h2><?php echo htmlspecialchars($ev_title); ?></h2>
+                        <?php if ($ev_is_official): ?>
+                            <div class="official-event-indicator">
+                                <span class="official-badge">
+                                    <i class="fas fa-certificate"></i>
+                                    Official DepEd Event
+                                </span>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <?php if ($ev_source): ?>
+                        <div class="source-information">
+                            <p><i class="fas fa-info-circle"></i> <strong>Source:</strong> <?php echo htmlspecialchars($ev_source); ?></p>
+                        </div>
+                    <?php endif; ?>
+                    
                     <?php if ($ev_description): ?>
                         <p><?php echo nl2br(htmlspecialchars($ev_description)); ?></p>
                     <?php else: ?>
@@ -1096,11 +1188,26 @@ $event_img_src = $ev_image
                 <div class="sidebar-card">
                     <h3>Register for this Event</h3>
 
+                    <?php if ($ev_is_official): ?>
+                        <!-- Official Event Notice -->
+                        <div class="official-event-notice">
+                            <i class="fas fa-info-circle"></i>
+                            <p><strong>This is an official DepEd event.</strong> Registration may be automatically managed based on your student status and enrollment.</p>
+                        </div>
+                    <?php endif; ?>
+
                     <?php if ($my_application): ?>
                         <!-- Already applied -->
                         <div class="reg-alert <?php echo $my_application['status'] === 'Approved' ? 'success' : ($my_application['status'] === 'Rejected' ? 'error' : 'warning'); ?>">
                             <i class="fas fa-<?php echo $my_application['status'] === 'Approved' ? 'check-circle' : ($my_application['status'] === 'Rejected' ? 'times-circle' : 'clock'); ?>"></i>
                             Your application status: <strong><?php echo $my_application['status']; ?></strong>
+                        </div>
+                    <?php elseif ($ev_is_official): ?>
+                        <!-- Official events may not require manual registration -->
+                        <div class="reg-alert info">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Automatic Registration</strong><br>
+                            This official DepEd event may not require manual registration. Check with your school administration for participation details.
                         </div>
                     <?php else: ?>
                         <div id="regAlert" style="display:none;"></div>

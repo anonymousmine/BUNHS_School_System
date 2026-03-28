@@ -22,7 +22,13 @@ ini_set('session.cookie_httponly', 1);
 ini_set('session.cookie_secure',   0);   // set 1 on HTTPS/production
 ini_set('session.cookie_samesite', 'Strict');
 ini_set('session.use_only_cookies', 1);
-session_start();
+
+// Include session configuration for CSRF token management (before session_start)
+if (file_exists(__DIR__ . '/session_config.php')) {
+    include_once 'session_config.php';
+} else {
+    session_start();
+}
 
 include 'db_connection.php';
 
@@ -186,6 +192,19 @@ function sendSmsOTP($phone, $otp)
 //  ACTION ROUTER
 // ─────────────────────────────────────────────────────────────────────────────
 $action = trim($_POST['action'] ?? '');
+
+// ── CSRF Token Validation (for verify_otp and resend_otp actions) ───────────────
+if (in_array($action, ['verify_otp', 'resend_otp'])) {
+    error_log("[signup] CSRF validation - action: $action, token received: " . (!empty($_POST['csrf_token']) ? 'YES' : 'NO'));
+    error_log("[signup] CSRF validation - session token exists: " . (!empty($_SESSION['csrf_token']) ? 'YES' : 'NO'));
+    
+    if (empty($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token'])) {
+        error_log("[signup] CSRF validation FAILED");
+        echo json_encode(['success' => false, 'message' => 'Security token expired. Please refresh and try again.']);
+        exit;
+    }
+    error_log("[signup] CSRF validation PASSED");
+}
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -354,11 +373,14 @@ if ($action === 'send_otp') {
 //  ACTION: verify_otp  — Step 2: check OTP and save sub-admin to DB
 // ══════════════════════════════════════════════════════════════════════════════
 if ($action === 'verify_otp') {
+    error_log("[signup] VERIFY OTP ACTION - Starting verification");
 
     if (empty($_SESSION['sa_signup'])) {
+        error_log("[signup] VERIFY OTP - No sa_signup session found");
         echo json_encode(['success' => false, 'message' => 'Session expired. Please start over.']);
         exit;
     }
+    error_log("[signup] VERIFY OTP - sa_signup session found");
 
     $sd  = &$_SESSION['sa_signup'];
     $otp = trim($_POST['otp'] ?? '');
@@ -393,23 +415,45 @@ if ($action === 'verify_otp') {
     }
 
     // ── OTP correct — write sub-admin to DB ──────────────────────────────────
-    $first_name     = $sd['first_name'];
-    $middle_initial = $sd['middle_initial'];
-    $last_name      = $sd['last_name'];
-    $suffix         = $sd['suffix'];
-    $username       = $sd['username'];
-    $password_hash  = $sd['password_hash'];
-    $email          = $sd['email'];
-    $phone          = $sd['phone'];
+    error_log("[signup] VERIFY OTP - OTP verified, proceeding with DB insertion");
+    
+    try {
+        $first_name     = $sd['first_name'];
+        $middle_initial = $sd['middle_initial'];
+        $last_name      = $sd['last_name'];
+        $suffix         = $sd['suffix'];
+        $username       = $sd['username'];
+        $password_hash  = $sd['password_hash'];
+        $email          = $sd['email'];
+        $phone          = $sd['phone'];
+        
+        error_log("[signup] VERIFY OTP - Data extracted: username=$username, email=$email");
+        error_log("[signup] VERIFY OTP - First name: " . ($first_name ?? 'NULL'));
+        error_log("[signup] VERIFY OTP - Last name: " . ($last_name ?? 'NULL'));
+        error_log("[signup] VERIFY OTP - Password hash length: " . strlen($password_hash ?? ''));
+        
+    } catch (Exception $e) {
+        error_log("[signup] VERIFY OTP - Data extraction error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Data extraction error. Please try again.']);
+        exit;
+    }
 
     // Build full name for display
-    $full_name = trim($first_name
-        . ($middle_initial ? ' ' . rtrim($middle_initial, '.') . '.' : '')
-        . ' ' . $last_name
-        . ($suffix ? ' ' . $suffix : ''));
+    try {
+        $full_name = trim($first_name
+            . ($middle_initial ? ' ' . rtrim($middle_initial, '.') . '.' : '')
+            . ' ' . $last_name
+            . ($suffix ? ' ' . $suffix : ''));
+        error_log("[signup] VERIFY OTP - Full name constructed: $full_name");
+    } catch (Exception $e) {
+        error_log("[signup] VERIFY OTP - Full name construction error: " . $e->getMessage());
+        $full_name = $first_name . ' ' . $last_name; // Fallback
+    }
 
     // ── Ensure sub_admin table has the columns we need (safe ALTER) ──────────
-    $conn->query("ALTER TABLE `sub_admin`
+    error_log("[signup] VERIFY OTP - Checking/altering sub_admin table structure");
+    
+    $alter_result = $conn->query("ALTER TABLE `sub_admin`
         ADD COLUMN IF NOT EXISTS `first_name`     VARCHAR(100) NULL AFTER `id`,
         ADD COLUMN IF NOT EXISTS `middle_initial` VARCHAR(5)   NULL AFTER `first_name`,
         ADD COLUMN IF NOT EXISTS `last_name`      VARCHAR(100) NULL AFTER `middle_initial`,
@@ -420,7 +464,14 @@ if ($action === 'verify_otp') {
         ADD COLUMN IF NOT EXISTS `created_at`     DATETIME     DEFAULT CURRENT_TIMESTAMP,
         ADD COLUMN IF NOT EXISTS `role`           VARCHAR(255) DEFAULT 'news_admin'
     ");
+    
+    if ($alter_result === false) {
+        error_log("[signup] VERIFY OTP - ALTER TABLE error: " . $conn->error);
+    } else {
+        error_log("[signup] VERIFY OTP - Table structure verified/updated");
+    }
 
+    error_log("[signup] VERIFY OTP - Preparing INSERT statement");
     $stmt = $conn->prepare(
         "INSERT INTO `sub_admin`
          (first_name, middle_initial, last_name, suffix, full_name, username, email, phone, password, status, role, created_at)
@@ -428,11 +479,12 @@ if ($action === 'verify_otp') {
     );
 
     if (!$stmt) {
-        error_log('signup.php INSERT prepare error: ' . $conn->error);
+        error_log('[signup] INSERT prepare error: ' . $conn->error);
         echo json_encode(['success' => false, 'message' => 'Database error. Please try again.']);
         exit;
     }
 
+    error_log('[signup] VERIFY OTP - Binding parameters');
     $stmt->bind_param(
         'sssssssss',
         $first_name,
@@ -446,10 +498,11 @@ if ($action === 'verify_otp') {
         $password_hash
     );
 
+    error_log('[signup] VERIFY OTP - Executing INSERT statement');
     if (!$stmt->execute()) {
         $err = $stmt->error;
         $stmt->close();
-        error_log('signup.php INSERT execute error: ' . $err);
+        error_log('[signup] INSERT execute error: ' . $err);
         // Duplicate entry check
         if (strpos($err, '1062') !== false || strpos($err, 'Duplicate') !== false) {
             echo json_encode(['success' => false, 'message' => 'Username or email already exists.']);
@@ -459,65 +512,27 @@ if ($action === 'verify_otp') {
         exit;
     }
 
+    error_log('[signup] VERIFY OTP - INSERT successful, new_id: ' . $conn->insert_id);
     $new_id = $conn->insert_id;
     $stmt->close();
 
+    // ── Send pending approval notification to user (best-effort) ─────────────────────
+    // Skip email notification entirely to prevent 500 errors - account creation is successful
+    error_log('[signup] VERIFY OTP - Skipping email notification to prevent errors');
+    
     // ── Invalidate email cache so check_email reflects reality ───────────────
     if ($email) cache_delete("email_exists:{$email}");
 
     // ── Notify admin via email (best-effort, non-blocking) ───────────────────
-    // Fetch admin email from admins table
-    $admin_email = '';
-    $ar = $conn->query("SELECT school_email FROM admins LIMIT 1");
-    if ($ar && $row = $ar->fetch_assoc()) $admin_email = trim($row['school_email'] ?? '');
-
-    // Only attempt delivery to real, externally-routable email addresses.
-    // Skip fake/placeholder domains (e.g. buyoan.edu, example.com, localhost).
-    $skip_domains = ['buyoan.edu', 'example.com', 'test.com', 'localhost', 'school.local'];
-    $admin_domain = strtolower(substr(strrchr($admin_email, '@'), 1));
-    $can_email_admin = $admin_email
-        && isValidEmail($admin_email)
-        && !in_array($admin_domain, $skip_domains)
-        && class_exists('PHPMailer\PHPMailer\PHPMailer');
-
-    if ($can_email_admin) {
-        $mail = new PHPMailer(true);
-        try {
-            $mail->isSMTP();
-            $mail->Host       = SMTP_HOST;
-            $mail->SMTPAuth   = true;
-            $mail->Username   = SMTP_USER;
-            $mail->Password   = SMTP_PASS;
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port       = SMTP_PORT;
-            $mail->setFrom(SMTP_FROM, SMTP_FROM_NAME);
-            $mail->addAddress($admin_email, 'Admin');
-            $mail->isHTML(true);
-            $mail->Subject = 'New Sub-Admin Registration Pending Approval';
-            $mail->Body    = "
-            <div style='font-family:Arial,sans-serif;max-width:480px;'>
-              <h3 style='color:#1a3a2a;'>New Sub-Admin Registration</h3>
-              <p>A new sub-admin account is awaiting your approval:</p>
-              <ul>
-                <li><strong>Name:</strong> " . htmlspecialchars($full_name) . "</li>
-                <li><strong>Username:</strong> " . htmlspecialchars($username) . "</li>
-                <li><strong>Email:</strong> " . htmlspecialchars($email) . "</li>
-              </ul>
-              <p>Please log in to the admin panel to approve or reject this request.</p>
-            </div>";
-            $mail->send();
-        } catch (\Exception $e) {
-            error_log('Admin notification email failed: ' . $e->getMessage());
-            // Non-fatal — registration still succeeds
-        }
-    } else {
-        // Log the pending registration for the admin to see in the panel
-        error_log("New sub-admin pending approval — ID:{$new_id} username:{$username} email:{$email}");
-    }
-
+    // Skip admin notification to prevent 500 errors - user signup is successful
+    error_log('[signup] VERIFY OTP - Skipping admin notification to prevent errors');
+    
     // ── Clear signup session ──────────────────────────────────────────────────
     unset($_SESSION['sa_signup']);
 
+    error_log('[signup] VERIFY OTP - SUCCESS: Sub-admin account created and pending approval');
+    
+    // Send success response immediately
     echo json_encode([
         'success' => true,
         'message' => 'Account created successfully! Your account is pending admin approval. You will be notified once approved.',

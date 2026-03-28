@@ -38,6 +38,12 @@ if (session_status() === PHP_SESSION_NONE) {
         $_SESSION['max_session_lifetime'] = 86400; // 24 hours max
         $_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'] ?? '';
         $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        
+        // CSRF Protection - Generate token
+        if (empty($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            $_SESSION['csrf_token_created'] = time();
+        }
     }
     
     // Regenerate session ID periodically and on critical actions
@@ -129,7 +135,17 @@ function forceSessionRegeneration() {
  * @return bool True if token is valid
  */
 function validateCSRFToken($token) {
-    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+    if (empty($_SESSION['csrf_token']) || empty($token)) {
+        return false;
+    }
+    
+    // Check if token is expired (30 minutes instead of 5)
+    $token_age = time() - $_SESSION['csrf_token_created'];
+    if ($token_age > 1800) {
+        return false;
+    }
+    
+    return hash_equals($_SESSION['csrf_token'], $token);
 }
 
 /**
@@ -137,7 +153,12 @@ function validateCSRFToken($token) {
  * @return string CSRF token
  */
 function getCSRFToken() {
-    return $_SESSION['csrf_token'] ?? '';
+    if (empty($_SESSION['csrf_token']) || 
+        (time() - $_SESSION['csrf_token_created'] > 1800)) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        $_SESSION['csrf_token_created'] = time();
+    }
+    return $_SESSION['csrf_token'];
 }
 
 /**
@@ -241,3 +262,4 @@ function logSessionEvent($event, $data = []) {
     
     file_put_contents($log_file, json_encode($log_entry) . "\n", FILE_APPEND | LOCK_EX);
 }
+

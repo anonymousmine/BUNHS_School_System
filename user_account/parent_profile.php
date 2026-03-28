@@ -50,11 +50,9 @@ $conn->query("CREATE TABLE IF NOT EXISTS parent_profiles (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
 // Auth guard
-if (!isset($_SESSION['student_id']) || $_SESSION['user_type'] !== 'parent') {
-    $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
-    header('Location: student_login.php');
-    exit;
-}
+// Student functionality has been removed
+header('Location: ../index.php');
+exit;
 
 $parent_id = $_SESSION['student_id'];
 $parent_name = $_SESSION['student_name'] ?? 'Parent';

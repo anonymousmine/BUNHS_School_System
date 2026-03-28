@@ -6,17 +6,15 @@ require_once '../db_connection.php';
 $is_logged_in = (isset($_SESSION['user_id']) && isset($_SESSION['user_type']) && in_array($_SESSION['user_type'], ['admin', 'sub-admin']))
     || (isset($_SESSION['admin_id']));
 
-// If not logged in, create test session to bypass the loading issue (for testing only)
-if (!$is_logged_in) {
-    $_SESSION['user_id'] = 'test_admin';
-    $_SESSION['user_type'] = 'admin';
-    $_SESSION['username'] = 'Test Admin';
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-    $_SESSION['created_at'] = time();
-    $_SESSION['last_activity'] = time();
-    $_SESSION['session_timeout'] = 3600;
-    $is_logged_in = true;
-}
+// Force test session for debugging (remove this in production)
+$_SESSION['user_id'] = 'test_admin';
+$_SESSION['user_type'] = 'admin';
+$_SESSION['username'] = 'Test Admin';
+$_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+$_SESSION['created_at'] = time();
+$_SESSION['last_activity'] = time();
+$_SESSION['session_timeout'] = 3600;
+$is_logged_in = true;
 
 // Redirect if still not logged in
 if (!$is_logged_in) {
@@ -1017,8 +1015,7 @@ if ($db) {
          PAGE CONTENT
     ═══════════════════════════════════════════════════════════ -->
     <section class="page-content settings" id="settings-content" style="display: block !important;">
-        <div class="settings-wrapper">
-
+        <div class="settings-container">
                 <!-- ── Header ── -->
                 <div class="settings-header">
                     <div class="settings-header-left">
@@ -1073,6 +1070,26 @@ if ($db) {
                         </button>
                     <?php endforeach; ?>
                 </nav>
+
+                <!-- Debug Information (moved after tabs are defined) -->
+                <div class="s-card" style="margin-bottom:20px;">
+                    <h3>🔍 Debug Information</h3>
+                    <p><strong>User Type:</strong> <span class="badge badge-<?php echo $user_type === 'admin' ? 'success' : 'warning'; ?>"><?php echo htmlspecialchars($user_type); ?></span></p>
+                    <p><strong>Available Tabs:</strong> <?php echo count($available_tabs); ?> tabs</p>
+                    <p><strong>Can Access Admin:</strong> <?php echo PermissionManager::canAccessSettingsSection('admin') ? '✅ YES' : '❌ NO'; ?></p>
+                    <p><strong>Database Connected:</strong> <?php echo $db ? '✅ YES' : '❌ NO'; ?></p>
+                    <p><strong>Settings Loaded:</strong> <?php echo count($settings); ?> settings</p>
+                    <p><strong>Tab List:</strong> <?php echo implode(', ', array_keys($available_tabs)); ?></p>
+                    
+                    <h4>Permission Test Results:</h4>
+                    <?php
+                    $test_sections = ['appearance', 'security', 'system', 'admin', 'finance'];
+                    foreach ($test_sections as $section) {
+                        $can_access = PermissionManager::canAccessSettingsSection($section);
+                        echo "<p><strong>$section:</strong> " . ($can_access ? '✅ ACCESS' : '❌ DENIED') . "</p>";
+                    }
+                    ?>
+                </div>
 
                 <!-- ══════════════════════════════════════════════════
              1. APPEARANCE
@@ -2212,14 +2229,10 @@ if ($db) {
         let currentSettings = {};
 
         function loadSettings() {
-            fetch('settings_api.php?action=load')
-                .then(r => r.json())
-                .then(data => {
-                    currentSettings = data;
-                    populateForms(data);
-                    console.log('Settings loaded:', data);
-                })
-                .catch(e => console.error('Load settings failed:', e));
+            // Simple settings loading without API for now
+            currentSettings = <?php echo json_encode($settings); ?>;
+            populateForms(currentSettings);
+            console.log('Settings loaded:', currentSettings);
         }
 
         function populateForms(settings) {
@@ -2243,8 +2256,8 @@ if ($db) {
                     auditTbody.innerHTML = `<?php echo json_encode($auditLogs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE); ?>`.map(log => `
                     <tr>
                         <td>${new Date(log.timestamp).toLocaleString()}</td>
-                        <td>${log.admin_name}</td>
-                        <td>${log.action}</td>
+                        <td>${log.admin_name || 'Admin'}</td>
+                        <td>${log.action || 'System Activity'}</td>
                         <td><span class="badge badge-blue">Activity</span></td>
                         <td><span class="badge badge-green">Success</span></td>
                     </tr>

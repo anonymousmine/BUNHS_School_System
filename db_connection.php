@@ -5,7 +5,12 @@
  * Added mysqli extension check + fallback for deployment safety
  */
 
+// Prevent multiple inclusions
+if (!defined('DB_CONNECTION_LOADED')) {
+    define('DB_CONNECTION_LOADED', true);
+
 // ── Safe mysqli check ─────────────────────────────────────────────────────────
+if (!function_exists('check_mysqli_loaded')) {
 function check_mysqli_loaded()
 {
     if (!function_exists('mysqli_connect')) {
@@ -15,8 +20,10 @@ function check_mysqli_loaded()
     }
     return true;
 }
+}
 
 // ── Safe DB connect with validation ───────────────────────────────────────────
+if (!function_exists('safe_db_connect')) {
 function safe_db_connect($host, $user, $pass, $dbname, $port = null)
 {
     check_mysqli_loaded();
@@ -43,6 +50,7 @@ function safe_db_connect($host, $user, $pass, $dbname, $port = null)
 
     return $conn;
 }
+}
 
 // ── MAIN CONNECTION ──────────────────────────────────────────────────────────
 $host    = getenv('DB_HOST')    ?: 'localhost';
@@ -57,3 +65,5 @@ $conn = safe_db_connect($host, $db_user, $db_pass, $db_name, $db_port);
 if (getenv('APP_DEBUG') === 'true') {
     error_log('DB Connected: ' . $host . ':' . ($db_port ?: 3306) . '/' . $db_name);
 }
+
+} // End of DB_CONNECTION_LOADED check

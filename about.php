@@ -5,6 +5,7 @@
  * Fetches all data from database: principal, teachers, students, settings, clubs
  */
 require_once 'db_connection.php';
+session_start();
 
 // ── Helper ──────────────────────────────────────────────────────────────────
 function h($v)
@@ -82,6 +83,112 @@ if ($clRes) {
 
 // ── Core values as array ─────────────────────────────────────────────────────
 $coreValuesArr = array_filter(array_map('trim', explode("\n", $coreValues)));
+
+/* ── SCHOOL RATING FUNCTIONALITY ─────────────────────────────────────────── */
+/* Database connection normalization */
+$pdo = null;
+if (isset($conn) && $conn instanceof mysqli) {
+    $use_mysqli = true;
+} elseif (isset($pdo) && $pdo instanceof PDO) {
+    $use_mysqli = false;
+} else {
+    $use_mysqli = false;
+}
+
+/* Session / User identification */
+$student_id   = $_SESSION['student_id']   ?? null;
+$student_name = $_SESSION['student_name'] ?? 'Guest';
+$is_logged_in = !empty($student_id);
+$user_identifier = $is_logged_in ? $student_id : null;
+
+/* Query helper function */
+function sr_query(string $sql, string $types = '', array $params = [])
+{
+    global $conn, $pdo, $use_mysqli;
+    if ($use_mysqli) {
+        $stmt = $conn->prepare($sql);
+        if ($stmt === false) return false;
+        if ($types && $params) {
+            $stmt->bind_param($types, ...$params);
+        }
+        $stmt->execute();
+        return $stmt;
+    } else {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params ?: null);
+        return $stmt;
+    }
+}
+
+/* Create table if not exists - Updated for guest ratings */
+$create_sql = "
+    CREATE TABLE IF NOT EXISTS school_ratings (
+        id              INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        visitor_id      VARCHAR(255) NOT NULL,
+        ip_address      VARCHAR(45)  NOT NULL,
+        rating          TINYINT      NOT NULL,
+        feedback        TEXT         NULL,
+        created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_visitor_ip (visitor_id, ip_address)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+";
+sr_query($create_sql);
+
+/* Fetch aggregate rating data */
+$avg_rating  = 0.0;
+$total_count = 0;
+$distribution = [5 => 0, 4 => 0, 3 => 0, 2 => 0, 1 => 0];
+
+if ($use_mysqli) {
+    $agg = sr_query("SELECT AVG(rating) AS avg_r, COUNT(*) AS total FROM school_ratings");
+    if ($agg) {
+        $row         = $agg->get_result()->fetch_assoc();
+        $avg_rating  = round((float)($row['avg_r'] ?? 0), 1);
+        $total_count = (int)($row['total'] ?? 0);
+    }
+    $dist = sr_query("SELECT rating, COUNT(*) AS cnt FROM school_ratings GROUP BY rating");
+    if ($dist) {
+        $res = $dist->get_result();
+        while ($r = $res->fetch_assoc()) {
+            $distribution[(int)$r['rating']] = (int)$r['cnt'];
+        }
+    }
+} else {
+    $agg = sr_query("SELECT AVG(rating) AS avg_r, COUNT(*) AS total FROM school_ratings");
+    if ($agg) {
+        $row         = $agg->fetch(PDO::FETCH_ASSOC);
+        $avg_rating  = round((float)($row['avg_r'] ?? 0), 1);
+        $total_count = (int)($row['total'] ?? 0);
+    }
+    $dist = sr_query("SELECT rating, COUNT(*) AS cnt FROM school_ratings GROUP BY rating");
+    if ($dist) {
+        foreach ($dist->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $distribution[(int)$r['rating']] = (int)$r['cnt'];
+        }
+    }
+}
+
+/* Helper functions */
+function render_stars(float $value, string $size = '20px'): string
+{
+    $html = '';
+    for ($i = 1; $i <= 5; $i++) {
+        if ($value >= $i) {
+            $html .= '<i class="fas fa-star" style="color:#f59e0b;font-size:' . $size . '"></i>';
+        } elseif ($value >= $i - 0.5) {
+            $html .= '<i class="fas fa-star-half-alt" style="color:#f59e0b;font-size:' . $size . '"></i>';
+        } else {
+            $html .= '<i class="far fa-star" style="color:#d1d5db;font-size:' . $size . '"></i>';
+        }
+    }
+    return $html;
+}
+
+function anonymise_id(string $id): string
+{
+    if (strlen($id) <= 4) return str_repeat('*', strlen($id));
+    return substr($id, 0, 2) . str_repeat('*', max(strlen($id) - 4, 3)) . substr($id, -2);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -113,6 +220,284 @@ $coreValuesArr = array_filter(array_map('trim', explode("\n", $coreValues)));
 
     <!-- Main CSS File -->
     <link href="assets/css/main.css" rel="stylesheet">
+
+    <!-- School Rating Styles -->
+    <style>
+        /* Rating Design tokens */
+        :root {
+            --sr-green: #3b975e;
+            --sr-green-light: #d1fae5;
+            --sr-green-dark: #276643;
+            --sr-gold: #f59e0b;
+            --sr-gold-light: #fef3c7;
+            --sr-slate: #1e293b;
+            --sr-muted: #64748b;
+            --sr-border: #e2e8f0;
+            --sr-bg: #f8fafc;
+            --sr-card-bg: #ffffff;
+            --sr-radius: 16px;
+            --sr-radius-sm: 10px;
+            --sr-shadow: 0 4px 24px rgba(0, 0, 0, .07);
+            --sr-shadow-lg: 0 12px 48px rgba(0, 0, 0, .12);
+            --sr-font: 'Plus Jakarta Sans', 'Poppins', system-ui, sans-serif;
+            --sr-transition: all .25s cubic-bezier(.4, 0, .2, 1);
+        }
+
+        /* Rating Summary Card */
+        .sr-summary-card {
+            background: var(--sr-card-bg);
+            border-radius: var(--sr-radius);
+            box-shadow: var(--sr-shadow);
+            border: 1px solid var(--sr-border);
+            padding: 40px 36px;
+            transition: var(--sr-transition);
+            margin-top: 2rem;
+        }
+
+        .sr-summary-card:hover {
+            box-shadow: var(--sr-shadow-lg);
+            transform: translateY(-2px);
+        }
+
+        .sr-avg-number {
+            font-size: clamp(3rem, 8vw, 5rem);
+            font-weight: 800;
+            color: var(--sr-slate);
+            line-height: 1;
+            letter-spacing: -2px;
+        }
+
+        .sr-avg-number span {
+            font-size: .4em;
+            font-weight: 500;
+            color: var(--sr-muted);
+            letter-spacing: 0;
+        }
+
+        .sr-stars-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin: 8px 0 4px;
+        }
+
+        .sr-review-count {
+            font-size: .9rem;
+            color: var(--sr-muted);
+            font-weight: 500;
+        }
+
+        .sr-divider {
+            border: none;
+            border-top: 1px solid var(--sr-border);
+            margin: 28px 0;
+        }
+
+        .sr-dist-row {
+            display: grid;
+            grid-template-columns: 28px 1fr 44px;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .sr-dist-label {
+            font-size: .78rem;
+            font-weight: 700;
+            color: var(--sr-muted);
+            text-align: right;
+        }
+
+        .sr-dist-track {
+            height: 8px;
+            background: var(--sr-border);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .sr-dist-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--sr-gold), #fbbf24);
+            border-radius: 99px;
+            transition: width .8s cubic-bezier(.4, 0, .2, 1);
+            width: 0;
+        }
+
+        .sr-dist-pct {
+            font-size: .75rem;
+            font-weight: 600;
+            color: var(--sr-muted);
+            text-align: right;
+        }
+
+        /* Rating Form Card */
+        .sr-rating-form-card {
+            background: var(--sr-card-bg);
+            border-radius: var(--sr-radius);
+            box-shadow: var(--sr-shadow);
+            border: 1px solid var(--sr-border);
+            padding: 40px 36px;
+            transition: var(--sr-transition);
+            margin-top: 2rem;
+        }
+
+        .sr-rating-form-card:hover {
+            box-shadow: var(--sr-shadow-lg);
+            transform: translateY(-2px);
+        }
+
+        .sr-form-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .sr-form-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--sr-slate);
+            margin-bottom: 8px;
+        }
+
+        .sr-form-subtitle {
+            font-size: 0.9rem;
+            color: var(--sr-muted);
+            margin: 0;
+        }
+
+        .sr-star-input-group {
+            margin-bottom: 24px;
+        }
+
+        .sr-input-label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--sr-slate);
+            margin-bottom: 12px;
+        }
+
+        .sr-star-rating {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+
+        .sr-star {
+            font-size: 2rem;
+            color: var(--sr-border);
+            cursor: pointer;
+            transition: var(--sr-transition);
+        }
+
+        .sr-star:hover {
+            color: var(--sr-gold);
+            transform: scale(1.1);
+        }
+
+        .sr-star.active {
+            color: var(--sr-gold);
+        }
+
+        .sr-star.hover {
+            color: var(--sr-gold);
+            opacity: 0.7;
+        }
+
+        .sr-feedback-group {
+            margin-bottom: 24px;
+        }
+
+        .sr-feedback-textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--sr-border);
+            border-radius: var(--sr-radius-sm);
+            font-size: 0.9rem;
+            font-family: inherit;
+            resize: vertical;
+            transition: var(--sr-transition);
+        }
+
+        .sr-feedback-textarea:focus {
+            outline: none;
+            border-color: var(--sr-green);
+            box-shadow: 0 0 0 3px rgba(59, 151, 94, 0.1);
+        }
+
+        .sr-submit-btn {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, var(--sr-green), var(--sr-green-dark));
+            color: white;
+            border: none;
+            border-radius: var(--sr-radius-sm);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--sr-transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .sr-submit-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 151, 94, 0.3);
+        }
+
+        .sr-submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .sr-message {
+            margin-top: 16px;
+            padding: 12px 16px;
+            border-radius: var(--sr-radius-sm);
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .sr-message.success {
+            background: var(--sr-green-light);
+            color: var(--sr-green-dark);
+            border: 1px solid var(--sr-green);
+        }
+
+        .sr-message.error {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+
+        .sr-already-rated {
+            margin-top: 16px;
+            padding: 16px;
+            background: var(--sr-green-light);
+            color: var(--sr-green-dark);
+            border-radius: var(--sr-radius-sm);
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-align: center;
+            border: 1px solid var(--sr-green);
+        }
+
+        @media (max-width: 768px) {
+            .sr-summary-card,
+            .sr-rating-form-card {
+                padding: 24px 18px;
+                margin-top: 1rem;
+            }
+            
+            .sr-star-rating {
+                gap: 6px;
+            }
+            
+            .sr-star {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
 
 </head>
 
@@ -431,6 +816,102 @@ $coreValuesArr = array_filter(array_map('trim', explode("\n", $coreValues)));
                     </div>
                 </div>
 
+                <!-- School Rating Section -->
+                <div class="row">
+                    <div class="col-lg-7">
+                        <div class="sr-summary-card h-100">
+                            <!-- Overall score -->
+                            <div class="text-center mb-4">
+                                <div class="sr-avg-number">
+                                    <?= number_format($avg_rating, 1) ?>
+                                    <span>/ 5</span>
+                                </div>
+                                <div class="sr-stars-row justify-content-center">
+                                    <?= render_stars($avg_rating, '22px') ?>
+                                </div>
+                                <p class="sr-review-count">
+                                    <i class="fas fa-users me-1"></i>
+                                    <?= number_format($total_count) ?>
+                                    <?= $total_count === 1 ? 'rating' : 'ratings' ?> submitted
+                                </p>
+                            </div>
+
+                            <hr class="sr-divider">
+
+                            <!-- Distribution bars -->
+                            <div>
+                                <p class="mb-3" style="font-size:.82rem;font-weight:700;color:var(--sr-muted);text-transform:uppercase;letter-spacing:.06em;">
+                                    Rating Breakdown
+                                </p>
+                                <?php foreach ([5, 4, 3, 2, 1] as $star):
+                                    $count = $distribution[$star];
+                                    $pct   = $total_count > 0 ? round(($count / $total_count) * 100) : 0;
+                                ?>
+                                    <div class="sr-dist-row" data-pct="<?= $pct ?>">
+                                        <span class="sr-dist-label"><?= $star ?>★</span>
+                                        <div class="sr-dist-track">
+                                            <div class="sr-dist-fill" style="width:0%"></div>
+                                        </div>
+                                        <span class="sr-dist-pct"><?= $pct ?>%</span>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+
+                            <?php if ($total_count === 0): ?>
+                                <p class="text-center mt-4" style="font-size:.85rem;color:var(--sr-muted);">
+                                    <i class="far fa-comment-dots me-1"></i>
+                                    No ratings yet — be the first!
+                                </p>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    
+                    <div class="col-lg-5">
+                        <div class="sr-rating-form-card h-100">
+                            <div class="sr-form-header">
+                                <h4 class="sr-form-title">Rate Our Website</h4>
+                                <p class="sr-form-subtitle">Share your feedback about Buyoan National High School</p>
+                            </div>
+                            
+                            <div id="rating-form-container">
+                                <!-- Star Rating Input -->
+                                <div class="sr-star-input-group">
+                                    <label class="sr-input-label">Your Rating</label>
+                                    <div class="sr-star-rating" id="starRating">
+                                        <span class="sr-star" data-rating="1"><i class="far fa-star"></i></span>
+                                        <span class="sr-star" data-rating="2"><i class="far fa-star"></i></span>
+                                        <span class="sr-star" data-rating="3"><i class="far fa-star"></i></span>
+                                        <span class="sr-star" data-rating="4"><i class="far fa-star"></i></span>
+                                        <span class="sr-star" data-rating="5"><i class="far fa-star"></i></span>
+                                    </div>
+                                    <input type="hidden" id="ratingValue" value="0">
+                                </div>
+
+                                <!-- Feedback Textarea -->
+                                <div class="sr-feedback-group">
+                                    <label class="sr-input-label" for="feedbackText">Feedback (Optional)</label>
+                                    <textarea id="feedbackText" class="sr-feedback-textarea" rows="3" placeholder="Tell us about your experience..."></textarea>
+                                </div>
+
+                                <!-- Submit Button -->
+                                <button type="button" id="submitRating" class="sr-submit-btn">
+                                    <span class="sr-btn-text">Submit Rating</span>
+                                    <span class="sr-btn-loading" style="display:none;">
+                                        <i class="fas fa-spinner fa-spin"></i> Submitting...
+                                    </span>
+                                </button>
+
+                                <!-- Messages -->
+                                <div id="ratingMessage" class="sr-message" style="display:none;"></div>
+                                <div id="alreadyRatedMessage" class="sr-already-rated" style="display:none;">
+                                    <i class="fas fa-check-circle me-2"></i>
+                                    You have already rated our website. Thank you for your feedback!
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
         </section><!-- /Leadership Section -->
@@ -455,6 +936,9 @@ $coreValuesArr = array_filter(array_map('trim', explode("\n", $coreValues)));
 
     <!-- Main JS File -->
     <script src="assets/js/main.js"></script>
+
+    <!-- School Rating System -->
+    <script src="assets/js/rating-system.js"></script>
 
     <!-- Include Navigation -->
     <script>
@@ -498,6 +982,21 @@ $coreValuesArr = array_filter(array_map('trim', explode("\n", $coreValues)));
                 });
             })
             .catch(error => console.error('Error loading modals:', error));
+    </script>
+
+    <!-- School Rating Animation -->
+    <script>
+        // Animate rating distribution bars when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                const distFills = document.querySelectorAll('.sr-dist-fill');
+                distFills.forEach(function(fill) {
+                    const row = fill.closest('.sr-dist-row');
+                    const pct = row ? row.getAttribute('data-pct') : 0;
+                    fill.style.width = pct + '%';
+                });
+            }, 500);
+        });
     </script>
 
 </body>

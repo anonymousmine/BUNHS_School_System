@@ -30,6 +30,220 @@ include '../db_connection.php';
 */
 
 /* ── Helpers ──────────────────────────────────────────── */
+function generateCSRFToken() {
+    if (!isset($_SESSION['csrf_token']) || empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function validateAdminCSRFToken($token) {
+    if (!isset($_SESSION['csrf_token']) || hash_equals($_SESSION['csrf_token'], $token) === false) {
+        return false;
+    }
+    return true;
+}
+
+/* ── Notification Functions ─────────────────────────────── */
+function sendNotification($email, $phone, $subject, $message, $type = 'email') {
+    $success = false;
+    
+    // Send email notification
+    if (!empty($email) && ($type === 'email' || $type === 'both')) {
+        $success = sendEmailNotification($email, $subject, $message);
+    }
+    
+    // Send SMS notification (if phone number provided and SMS service is available)
+    if (!empty($phone) && ($type === 'sms' || $type === 'both')) {
+        $smsSuccess = sendSMSNotification($phone, $message);
+        if ($smsSuccess) $success = true;
+    }
+    
+    return $success;
+}
+
+function sendEmailNotification($email, $subject, $message) {
+    try {
+        // Use PHPMailer for email sending
+        require_once '../vendor/autoload.php';
+        
+        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+        
+        $mail->isSMTP();
+        $mail->Host = 'smtp.gmail.com';
+        $mail->SMTPAuth = true;
+        $mail->Username = 'bunhs.deped@gmail.com';
+        $mail->Password = 'svhiovmxalojxzxg';
+        $mail->SMTPSecure = 'tls';
+        $mail->Port = 587;
+        
+        $mail->setFrom('bunhs.deped@gmail.com', 'Buyoan National High School');
+        $mail->addAddress($email);
+        
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        $mail->Body = $message;
+        
+        $mail->send();
+        return true;
+    } catch (Exception $e) {
+        error_log("Email sending failed: " . $e->getMessage());
+        return false;
+    }
+}
+
+function sendSMSNotification($phone, $message) {
+    // Implement SMS sending using a service like Twilio, Semaphore, etc.
+    // For now, this is a placeholder that logs the SMS
+    error_log("SMS to $phone: $message");
+    return true; // Placeholder
+}
+
+function getNotificationMessage($action, $firstName, $lastName, $reason = '') {
+    $fullName = $firstName . ' ' . $lastName;
+    
+    switch ($action) {
+        case 'pending':
+            return [
+                'subject' => 'Sub-Admin Account Pending Approval - BUNHS School System',
+                'message' => "
+                    <h2>Sub-Admin Account Registration</h2>
+                    <p>Dear $fullName,</p>
+                    <p>Thank you for your interest in becoming a Sub-Admin at BUNHS School System. Your account has been successfully created and is now pending approval from our system administrators.</p>
+                    <p><strong>Account Details:</strong></p>
+                    <ul>
+                        <li>Name: $fullName</li>
+                        <li>Status: Pending Approval</li>
+                        <li>Registration Date: " . date('F d, Y') . "</li>
+                    </ul>
+                    <p>You will receive another notification once your account has been reviewed. This process typically takes 24-48 hours.</p>
+                    <p>If you have any questions, please contact the system administrator.</p>
+                    <p>Best regards,<br>BUNHS School System Administration</p>
+                "
+            ];
+            
+        case 'approved':
+            return [
+                'subject' => 'Sub-Admin Account Approved - BUNHS School System',
+                'message' => "
+                    <h2>Account Approved!</h2>
+                    <p>Dear $fullName,</p>
+                    <p>Congratulations! Your Sub-Admin account has been approved and is now active.</p>
+                    <p><strong>Account Details:</strong></p>
+                    <ul>
+                        <li>Name: $fullName</li>
+                        <li>Status: Approved</li>
+                        <li>Approval Date: " . date('F d, Y') . "</li>
+                    </ul>
+                    <p>You can now log in to your account and access the Sub-Admin dashboard.</p>
+                    <p><a href='" . $_SERVER['HTTP_HOST'] . "/BUNHS_School_System/login.php'>Click here to login</a></p>
+                    <p>Best regards,<br>BUNHS School System Administration</p>
+                "
+            ];
+            
+        case 'rejected':
+            return [
+                'subject' => 'Sub-Admin Application Status - BUNHS School System',
+                'message' => "
+                    <h2>Application Status Update</h2>
+                    <p>Dear $fullName,</p>
+                    <p>After careful review, we regret to inform you that your Sub-Admin application has been rejected.</p>
+                    <p><strong>Application Details:</strong></p>
+                    <ul>
+                        <li>Name: $fullName</li>
+                        <li>Status: Rejected</li>
+                        <li>Review Date: " . date('F d, Y') . "</li>
+                    </ul>
+                    <p><strong>Reason:</strong> " . htmlspecialchars($reason) . "</p>
+                    <p>If you believe this is an error or would like to appeal this decision, please contact the system administrator.</p>
+                    <p>Best regards,<br>BUNHS School System Administration</p>
+                "
+            ];
+            
+        case 'suspended':
+            return [
+                'subject' => 'Sub-Admin Account Suspended - Buyoan National High School',
+                'message' => "
+                    <h2>Account Suspension Notice</h2>
+                    <p>Dear $fullName,</p>
+                    <p>Your Sub-Admin account has been temporarily suspended due to policy violations or security concerns.</p>
+                    <p><strong>Suspension Details:</strong></p>
+                    <ul>
+                        <li>Name: $fullName</li>
+                        <li>Status: Suspended</li>
+                        <li>Suspension Date: " . date('F d, Y') . "</li>
+                    </ul>
+                    <p><strong>Reason:</strong> " . htmlspecialchars($reason) . "</p>
+                    <p>Your account access has been restricted. Please contact the system administrator for more information or to appeal this suspension.</p>
+                    <p>Best regards,<br>Buyoan National High School Administration</p>
+                "
+            ];
+            
+        case 'unsuspend':
+            return [
+                'subject' => 'Account Suspension Cancelled - Buyoan National High School',
+                'message' => "
+                    <h2>Suspension Cancelled!</h2>
+                    <p>Dear $fullName,</p>
+                    <p>Good news! Your Sub-Admin account suspension has been cancelled and your access has been restored.</p>
+                    <p><strong>Account Details:</strong></p>
+                    <ul>
+                        <li>Name: $fullName</li>
+                        <li>Status: Approved</li>
+                        <li>Suspension Cancelled Date: " . date('F d, Y') . "</li>
+                    </ul>
+                    <p>You can now log in to your account and access the Sub-Admin dashboard normally.</p>
+                    <p><a href='" . $_SERVER['HTTP_HOST'] . "/BUNHS_School_System/login.php'>Click here to login</a></p>
+                    <p>Best regards,<br>Buyoan National High School Administration</p>
+                "
+            ];
+            
+        case 'revoked':
+            return [
+                'subject' => 'Sub-Admin Access Revoked - BUNHS School System',
+                'message' => "
+                    <h2>Account Access Revoked</h2>
+                    <p>Dear $fullName,</p>
+                    <p>Your Sub-Admin account access has been permanently revoked.</p>
+                    <p><strong>Revocation Details:</strong></p>
+                    <ul>
+                        <li>Name: $fullName</li>
+                        <li>Status: Access Revoked</li>
+                        <li>Revocation Date: " . date('F d, Y') . "</li>
+                    </ul>
+                    <p><strong>Reason:</strong> " . htmlspecialchars($reason) . "</p>
+                    <p>Your account access has been permanently terminated. If you believe this is an error, please contact the system administrator immediately.</p>
+                    <p>Best regards,<br>BUNHS School System Administration</p>
+                "
+            ];
+            
+        case 'deleted':
+            return [
+                'subject' => 'Sub-Admin Account Deleted - BUNHS School System',
+                'message' => "
+                    <h2>Account Deletion Notice</h2>
+                    <p>Dear $fullName,</p>
+                    <p>Your Sub-Admin account has been permanently deleted from our system.</p>
+                    <p><strong>Deletion Details:</strong></p>
+                    <ul>
+                        <li>Name: $fullName</li>
+                        <li>Status: Account Deleted</li>
+                        <li>Deletion Date: " . date('F d, Y') . "</li>
+                    </ul>
+                    <p><strong>Reason:</strong> " . htmlspecialchars($reason) . "</p>
+                    <p>All your account data has been permanently removed. If you believe this is an error, please contact the system administrator immediately.</p>
+                    <p>Best regards,<br>BUNHS School System Administration</p>
+                "
+            ];
+            
+        default:
+            return [
+                'subject' => 'Account Status Update - BUNHS School System',
+                'message' => "<p>Dear $fullName,</p><p>Your account status has been updated.</p>"
+            ];
+    }
+}
+
 function logAction($conn, $admin_id, $action, $description)
 {
     $stmt = $conn->prepare("INSERT INTO admin_logs (admin_id, action, description) VALUES (?, ?, ?)");
@@ -101,13 +315,130 @@ function timeAgo($datetime)
 $actingAdminId = $_SESSION['admin_id'] ?? 0;
 
 /* ═══════════════════════════════════════════════════════
+   EXPORT HANDLER
+═══════════════════════════════════════════════════════ */
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export_format'])) {
+    // CSRF Protection
+    if (!isset($_GET['csrf_token']) || !validateAdminCSRFToken($_GET['csrf_token'])) {
+        die('Security validation failed.');
+    }
+    
+    $format = $_GET['export_format'];
+    $tab = $_GET['export_tab'] ?? 'pending';
+    
+    // Get data based on tab
+    $data = [];
+    if ($tab === 'pending') {
+        $data = $pending_subadmins;
+    } elseif ($tab === 'approved') {
+        $data = $approved_subadmins;
+    } elseif ($tab === 'rejected') {
+        $data = $rejected_subadmins;
+    }
+    
+    if (empty($data)) {
+        die('No data to export.');
+    }
+    
+    // Prepare headers
+    $filename = "sub_admins_{$tab}_" . date('Y-m-d_H-i-s');
+    
+    if ($format === 'csv') {
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename="' . $filename . '.csv"');
+        
+        $output = fopen('php://output', 'w');
+        
+        // CSV headers
+        if ($tab === 'pending' || $tab === 'rejected') {
+            fputcsv($output, ['ID', 'Name', 'Email', 'Username', 'Date Applied', ($tab === 'rejected' ? 'Date Rejected' : 'Status')]);
+        } else {
+            fputcsv($output, ['ID', 'Name', 'Email', 'Username', 'Role', 'Status', 'Last Active', 'Created At']);
+        }
+        
+        // CSV data
+        foreach ($data as $row) {
+            if ($tab === 'pending' || $tab === 'rejected') {
+                $rowData = [
+                    $row['id'],
+                    $row['first_name'] . ' ' . $row['last_name'],
+                    $row['email'],
+                    $row['username'],
+                    $row['created_at'] ?? '',
+                    ($tab === 'rejected' ? ($row['rejected_at'] ?? '') : $row['status'])
+                ];
+            } else {
+                $rowData = [
+                    $row['id'],
+                    $row['first_name'] . ' ' . $row['last_name'],
+                    $row['email'],
+                    $row['username'],
+                    roleLabel($row['role']),
+                    $row['status'],
+                    $row['last_active'] ?? '',
+                    $row['created_at'] ?? ''
+                ];
+            }
+            fputcsv($output, $rowData);
+        }
+        
+        fclose($output);
+        exit;
+    } elseif ($format === 'excel') {
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $filename . '.xlsx"');
+        
+        // Simple HTML table for Excel (basic implementation)
+        echo '<table>';
+        
+        // Headers
+        if ($tab === 'pending' || $tab === 'rejected') {
+            echo '<tr><th>ID</th><th>Name</th><th>Email</th><th>Username</th><th>Date Applied</th><th>' . ($tab === 'rejected' ? 'Date Rejected' : 'Status') . '</th></tr>';
+        } else {
+            echo '<tr><th>ID</th><th>Name</th><th>Email</th><th>Username</th><th>Role</th><th>Status</th><th>Last Active</th><th>Created At</th></tr>';
+        }
+        
+        // Data
+        foreach ($data as $row) {
+            echo '<tr>';
+            echo '<td>' . $row['id'] . '</td>';
+            echo '<td>' . htmlspecialchars($row['first_name'] . ' ' . $row['last_name']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['email']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['username']) . '</td>';
+            
+            if ($tab === 'pending' || $tab === 'rejected') {
+                echo '<td>' . ($row['created_at'] ?? '') . '</td>';
+                echo '<td>' . ($tab === 'rejected' ? ($row['rejected_at'] ?? '') : $row['status']) . '</td>';
+            } else {
+                echo '<td>' . htmlspecialchars(roleLabel($row['role'])) . '</td>';
+                echo '<td>' . $row['status'] . '</td>';
+                echo '<td>' . ($row['last_active'] ?? '') . '</td>';
+                echo '<td>' . ($row['created_at'] ?? '') . '</td>';
+            }
+            
+            echo '</tr>';
+        }
+        
+        echo '</table>';
+        exit;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════
    POST HANDLER
 ═══════════════════════════════════════════════════════ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    // CSRF Protection
+    if (!isset($_POST['csrf_token']) || !validateAdminCSRFToken($_POST['csrf_token'])) {
+        $_SESSION['error'] = "Security validation failed. Please try again.";
+        header("Location: admins.php");
+        exit();
+    }
+    
     $action = $_POST['action'];
 
     /* ── Single-record actions ── */
-    if (in_array($action, ['approve', 'reject', 'delete', 'edit', 'revoke', 'suspend'])) {
+    if (in_array($action, ['approve', 'reject', 'delete', 'edit', 'revoke', 'suspend', 'unsuspend'])) {
 
         $stmt_id = $conn->prepare("SELECT id FROM sub_admin WHERE id = ?");
         $raw_id  = (int)($_POST['subadmin_id'] ?? 0);
@@ -124,10 +455,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         if ($action === 'approve') {
+            // Get user details for notification
+            $user_stmt = $conn->prepare("SELECT first_name, last_name, email, phone FROM sub_admin WHERE id = ?");
+            $user_stmt->bind_param('i', $raw_id);
+            $user_stmt->execute();
+            $user_data = $user_stmt->get_result()->fetch_assoc();
+            $user_stmt->close();
+            
             $stmt = $conn->prepare("UPDATE sub_admin SET status='approved', approved_at=NOW() WHERE id=?");
             $stmt->bind_param('i', $raw_id);
             if ($stmt->execute()) {
                 logAction($conn, $actingAdminId, 'approve', "Approved sub-admin ID #$raw_id");
+                
+                // Send approval notification
+                if ($user_data) {
+                    $notification = getNotificationMessage('approved', $user_data['first_name'], $user_data['last_name']);
+                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                }
+                
                 $_SESSION['success'] = "Sub-admin approved successfully.";
             } else {
                 $_SESSION['error'] = "Approval failed: " . $conn->error;
@@ -135,24 +480,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->close();
         } elseif ($action === 'reject') {
             $reason = trim($_POST['reject_reason'] ?? '');
+            
+            // Get user details for notification
+            $user_stmt = $conn->prepare("SELECT first_name, last_name, email, phone FROM sub_admin WHERE id = ?");
+            $user_stmt->bind_param('i', $raw_id);
+            $user_stmt->execute();
+            $user_data = $user_stmt->get_result()->fetch_assoc();
+            $user_stmt->close();
+            
             $stmt = $conn->prepare("UPDATE sub_admin SET status='rejected', reject_reason=?, rejected_at=NOW() WHERE id=?");
             $stmt->bind_param('si', $reason, $raw_id);
             if ($stmt->execute()) {
                 logAction($conn, $actingAdminId, 'reject', "Rejected sub-admin ID #$raw_id. Reason: $reason");
+                
+                // Send rejection notification
+                if ($user_data) {
+                    $notification = getNotificationMessage('rejected', $user_data['first_name'], $user_data['last_name'], $reason);
+                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                }
+                
                 $_SESSION['success'] = "Sub-admin has been rejected.";
             } else {
                 $_SESSION['error'] = "Rejection failed: " . $conn->error;
             }
             $stmt->close();
         } elseif ($action === 'delete') {
+            // Get user details for notification before deleting
+            $user_stmt = $conn->prepare("SELECT first_name, last_name, email, phone FROM sub_admin WHERE id = ?");
+            $user_stmt->bind_param('i', $raw_id);
+            $user_stmt->execute();
+            $user_data = $user_stmt->get_result()->fetch_assoc();
+            $user_stmt->close();
+            
             // fetch name for log before deleting
             $n = $conn->query("SELECT CONCAT(first_name,' ',last_name) AS nm FROM sub_admin WHERE id=$raw_id")->fetch_assoc();
             $nm = $n['nm'] ?? "ID #$raw_id";
             $stmt = $conn->prepare("DELETE FROM sub_admin WHERE id=?");
             $stmt->bind_param('i', $raw_id);
             if ($stmt->execute()) {
-                logAction($conn, $actingAdminId, 'delete', "Deleted sub-admin $nm");
-                $_SESSION['success'] = "Sub-admin deleted successfully.";
+                logAction($conn, $actingAdminId, 'delete', "Deleted sub-admin #$raw_id ($nm)");
+                
+                // Send deletion notification
+                if ($user_data) {
+                    $notification = getNotificationMessage('deleted', $user_data['first_name'], $user_data['last_name'], 'Account deleted by administrator');
+                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                }
+                
+                $_SESSION['success'] = "Sub-admin deleted permanently.";
             } else {
                 $_SESSION['error'] = "Delete failed: " . $conn->error;
             }
@@ -177,23 +551,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             $stmt->close();
         } elseif ($action === 'revoke') {
+            // Get user details for notification
+            $user_stmt = $conn->prepare("SELECT first_name, last_name, email, phone FROM sub_admin WHERE id = ?");
+            $user_stmt->bind_param('i', $raw_id);
+            $user_stmt->execute();
+            $user_data = $user_stmt->get_result()->fetch_assoc();
+            $user_stmt->close();
+            
             $stmt = $conn->prepare("UPDATE sub_admin SET status='pending' WHERE id=?");
             $stmt->bind_param('i', $raw_id);
             if ($stmt->execute()) {
                 logAction($conn, $actingAdminId, 'revoke', "Revoked access for sub-admin ID #$raw_id");
+                
+                // Send revocation notification
+                if ($user_data) {
+                    $notification = getNotificationMessage('revoked', $user_data['first_name'], $user_data['last_name'], 'Access revoked by administrator');
+                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                }
+                
                 $_SESSION['success'] = "Sub-admin access has been revoked.";
             } else {
                 $_SESSION['error'] = "Revoke failed: " . $conn->error;
             }
             $stmt->close();
         } elseif ($action === 'suspend') {
+            $reason = trim($_POST['suspend_reason'] ?? '');
+            
+            // Get user details for notification
+            $user_stmt = $conn->prepare("SELECT first_name, last_name, email, phone FROM sub_admin WHERE id = ?");
+            $user_stmt->bind_param('i', $raw_id);
+            $user_stmt->execute();
+            $user_data = $user_stmt->get_result()->fetch_assoc();
+            $user_stmt->close();
+            
             $stmt = $conn->prepare("UPDATE sub_admin SET status='suspended' WHERE id=?");
             $stmt->bind_param('i', $raw_id);
             if ($stmt->execute()) {
-                logAction($conn, $actingAdminId, 'suspend', "Suspended sub-admin ID #$raw_id");
+                logAction($conn, $actingAdminId, 'suspend', "Suspended sub-admin ID #$raw_id. Reason: $reason");
+                
+                // Send suspension notification
+                if ($user_data) {
+                    $notification = getNotificationMessage('suspended', $user_data['first_name'], $user_data['last_name'], $reason);
+                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                }
+                
                 $_SESSION['success'] = "Sub-admin has been suspended.";
             } else {
                 $_SESSION['error'] = "Suspend failed: " . $conn->error;
+            }
+            $stmt->close();
+        } elseif ($action === 'unsuspend') {
+            // Get user details for notification
+            $user_stmt = $conn->prepare("SELECT first_name, last_name, email, phone FROM sub_admin WHERE id = ?");
+            $user_stmt->bind_param('i', $raw_id);
+            $user_stmt->execute();
+            $user_data = $user_stmt->get_result()->fetch_assoc();
+            $user_stmt->close();
+            
+            $stmt = $conn->prepare("UPDATE sub_admin SET status='approved' WHERE id=?");
+            $stmt->bind_param('i', $raw_id);
+            if ($stmt->execute()) {
+                logAction($conn, $actingAdminId, 'unsuspend', "Unsuspended sub-admin ID #$raw_id");
+                
+                // Send suspension cancellation notification
+                if ($user_data) {
+                    $notification = getNotificationMessage('unsuspend', $user_data['first_name'], $user_data['last_name'], 'Account suspension has been cancelled');
+                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                }
+                
+                $_SESSION['success'] = "Suspension has been cancelled.";
+            } else {
+                $_SESSION['error'] = "Failed to cancel suspension: " . $conn->error;
             }
             $stmt->close();
         }
@@ -248,6 +676,24 @@ $filter_last_active = trim($_GET['filter_active'] ?? '');
 $filter_date_from   = trim($_GET['date_from']     ?? '');
 $filter_date_to     = trim($_GET['date_to']       ?? '');
 $search_q           = trim($_GET['search']        ?? '');
+
+/* ── Pagination Helper ───────────────────────────── */
+function getPaginationData($current_page, $total_records, $per_page = 20) {
+    $total_pages = ceil($total_records / $per_page);
+    $offset = ($current_page - 1) * $per_page;
+    
+    return [
+        'offset' => $offset,
+        'per_page' => $per_page,
+        'current_page' => $current_page,
+        'total_pages' => $total_pages,
+        'total_records' => $total_records
+    ];
+}
+
+/* ── Pagination Parameters ── */
+$current_page = max(1, intval($_GET['page'] ?? 1));
+$per_page = 20;
 
 /* ── Stats ── */
 $count_pending   = $conn->query("SELECT COUNT(*) c FROM sub_admin WHERE status='pending'")->fetch_assoc()['c']  ?? 0;
@@ -304,10 +750,11 @@ function buildWhereClause($conn, $filter_role, $filter_status, $filter_last_acti
     return [$where, $types, $params];
 }
 
-/* ── Fetch pending ── */
+/* ── Fetch pending (with pagination) ── */
 $pending_subadmins = [];
 [$w, $t, $p] = buildWhereClause($conn, $filter_role, '', $filter_last_active, $filter_date_from, $filter_date_to, $search_q, ['pending']);
-$sql = "SELECT * FROM sub_admin $w ORDER BY id DESC";
+$pagination_pending = getPaginationData($current_page, $count_pending, $per_page);
+$sql = "SELECT * FROM sub_admin $w ORDER BY id DESC LIMIT {$pagination_pending['per_page']} OFFSET {$pagination_pending['offset']}";
 $stmt = $conn->prepare($sql);
 if (!empty($p)) {
     $stmt->bind_param($t, ...$p);
@@ -317,10 +764,12 @@ $r = $stmt->get_result();
 while ($row = $r->fetch_assoc()) $pending_subadmins[] = $row;
 $stmt->close();
 
-/* ── Fetch approved + suspended ── */
+/* ── Fetch approved + suspended (with pagination) ── */
 $approved_subadmins = [];
 [$w, $t, $p] = buildWhereClause($conn, $filter_role, $filter_status, $filter_last_active, $filter_date_from, $filter_date_to, $search_q, ['approved', 'suspended']);
-$sql = "SELECT * FROM sub_admin $w ORDER BY id DESC";
+$count_approved_filtered = $conn->query("SELECT COUNT(*) FROM sub_admin $w")->fetch_row()[0] ?? 0;
+$pagination_approved = getPaginationData($current_page, $count_approved_filtered, $per_page);
+$sql = "SELECT * FROM sub_admin $w ORDER BY id DESC LIMIT {$pagination_approved['per_page']} OFFSET {$pagination_approved['offset']}";
 $stmt = $conn->prepare($sql);
 if (!empty($p)) {
     $stmt->bind_param($t, ...$p);
@@ -382,8 +831,8 @@ $all_permissions = [
             --border: #e2e5f0;
             --border-soft: #eceef6;
             --text-primary: #0f1523;
-            --text-secondary: #5a6282;
-            --text-muted: #9299b5;
+            --text-secondary: #4b5563;
+            --text-muted: #6b7280;
 
             --blue: #3b62f5;
             --blue-light: #eef1fe;
@@ -428,11 +877,20 @@ $all_permissions = [
             -webkit-font-smoothing: antialiased;
         }
 
+        /* Main layout — .main is opened by admin_nav.php */
+        .main {
+            margin-left: 240px;
+            min-height: 100vh;
+            width: calc(100% - 240px);
+            box-sizing: border-box;
+        }
+
         .page-content {
-            margin-left: 0;
-            width: calc(100vw - 260px);
-            max-width: 100%;
-            padding: 0 28px 40px;
+            padding: 28px 32px 48px;
+            width: 100%;
+            min-height: calc(100vh - 72px);
+            box-sizing: border-box;
+            background: #f8fafc;
         }
 
         /* ── Page Header ───────────────────────────── */
@@ -658,14 +1116,15 @@ $all_permissions = [
             padding: 10px 14px 0;
             border: 1px solid var(--border);
             border-bottom: none;
+            flex-wrap: wrap;
         }
 
         .tab-btn {
-            padding: 10px 18px;
+            padding: 10px 16px;
             border: none;
             background: none;
             font-family: 'DM Sans', sans-serif;
-            font-size: 13.5px;
+            font-size: 12px;
             font-weight: 600;
             color: var(--text-muted);
             border-radius: var(--radius-md) var(--radius-md) 0 0;
@@ -673,8 +1132,10 @@ $all_permissions = [
             transition: all .2s;
             display: flex;
             align-items: center;
-            gap: 7px;
+            gap: 6px;
             position: relative;
+            white-space: nowrap;
+            min-width: fit-content;
         }
 
         .tab-btn::after {
@@ -762,6 +1223,24 @@ $all_permissions = [
             color: #fff;
         }
 
+        @media (max-width: 768px) {
+            .tab-bar {
+                gap: 4px;
+                padding: 8px 10px 0;
+            }
+            
+            .tab-btn {
+                padding: 8px 12px;
+                font-size: 12px;
+                gap: 5px;
+            }
+            
+            .tab-btn .badge {
+                font-size: 9px;
+                padding: 1px 5px;
+            }
+        }
+
         /* ── Main Card ─────────────────────────────── */
         .main-card {
             background: var(--surface);
@@ -773,21 +1252,25 @@ $all_permissions = [
 
         .card-toolbar {
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            padding: 18px 22px;
+            align-items: center;
+            gap: 20px;
+            padding: 16px 22px;
             border-bottom: 1px solid var(--border-soft);
-            gap: 12px;
             flex-wrap: wrap;
             background: var(--surface);
+            min-height: 60px;
         }
 
         /* Search */
         .search-wrap {
             position: relative;
             flex: 1;
-            min-width: 200px;
-            max-width: 300px;
+            min-width: 250px;
+            max-width: 400px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .search-wrap i {
@@ -797,11 +1280,32 @@ $all_permissions = [
             transform: translateY(-50%);
             color: var(--text-muted);
             font-size: 13px;
+            z-index: 1;
+        }
+
+        .search-wrap .btn-icon {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 2;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all .2s;
+        }
+
+        .search-wrap .btn-icon:hover {
+            background: var(--border-soft);
+            color: var(--text-secondary);
         }
 
         .search-input {
             width: 100%;
-            padding: 9px 13px 9px 38px;
+            padding: 9px 45px 9px 38px;
             border: 1.5px solid var(--border);
             border-radius: var(--radius-md);
             font-family: 'DM Sans', sans-serif;
@@ -810,6 +1314,7 @@ $all_permissions = [
             transition: border-color .2s, box-shadow .2s;
             background: var(--surface-2);
             color: var(--text-primary);
+            flex: 1;
         }
 
         .search-input::placeholder {
@@ -824,9 +1329,11 @@ $all_permissions = [
 
         .toolbar-right {
             display: flex;
-            gap: 8px;
+            gap: 12px;
             align-items: center;
             flex-wrap: wrap;
+            justify-content: flex-end;
+            flex-shrink: 0;
         }
 
         /* Filter controls */
@@ -882,6 +1389,7 @@ $all_permissions = [
             padding: 12px 22px;
             background: linear-gradient(90deg, #eef1fe 0%, #f5f7ff 100%);
             border-bottom: 1px solid #d4dcff;
+            flex-wrap: wrap;
         }
 
         .bulk-bar.visible {
@@ -950,14 +1458,22 @@ $all_permissions = [
         }
 
         /* ── Data Table ────────────────────────────── */
+        .table-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+        }
+
         .data-table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
+            min-width: 900px;
         }
 
         .data-table th {
             background: var(--surface-2);
-            padding: 12px 20px;
+            padding: 12px 16px;
             text-align: left;
             font-family: 'DM Sans', sans-serif;
             font-size: 11px;
@@ -967,14 +1483,18 @@ $all_permissions = [
             letter-spacing: .07em;
             border-bottom: 1px solid var(--border);
             white-space: nowrap;
+            vertical-align: middle;
         }
 
         .data-table td {
-            padding: 15px 20px;
+            padding: 12px 16px;
             border-bottom: 1px solid var(--border-soft);
-            font-size: 13.5px;
+            font-size: 13px;
             vertical-align: middle;
             color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .data-table tbody tr {
@@ -990,7 +1510,9 @@ $all_permissions = [
         }
 
         .col-check {
-            width: 40px;
+            width: 60px;
+            min-width: 60px;
+            max-width: 60px;
         }
 
         .row-cb {
@@ -1000,11 +1522,50 @@ $all_permissions = [
             accent-color: var(--blue);
         }
 
+        /* Specific column widths using percentages */
+        .data-table th:nth-child(1), .data-table td:nth-child(1) { /* Checkbox */
+            width: 60px;
+            min-width: 60px;
+            max-width: 60px;
+        }
+
+        .data-table th:nth-child(2), .data-table td:nth-child(2) { /* Applicant */
+            width: 25%;
+            min-width: 200px;
+        }
+
+        .data-table th:nth-child(3), .data-table td:nth-child(3) { /* Email */
+            width: 25%;
+            min-width: 200px;
+        }
+
+        .data-table th:nth-child(4), .data-table td:nth-child(4) { /* Username */
+            width: 15%;
+            min-width: 120px;
+        }
+
+        .data-table th:nth-child(5), .data-table td:nth-child(5) { /* Last Active */
+            width: 18%;
+            min-width: 140px;
+        }
+
+        .data-table th:nth-child(6), .data-table td:nth-child(6) { /* Status */
+            width: 12%;
+            min-width: 100px;
+        }
+
+        .data-table th:nth-child(7), .data-table td:nth-child(7) { /* Actions */
+            width: 25%;
+            min-width: 220px;
+        }
+
         /* Avatar */
         .user-cell {
             display: flex;
             align-items: center;
             gap: 13px;
+            width: 100%;
+            height: 40px;
         }
 
         .avatar {
@@ -1023,16 +1584,33 @@ $all_permissions = [
             box-shadow: var(--shadow-xs);
         }
 
+        .user-info {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
         .user-name {
             font-weight: 600;
             color: var(--text-primary);
-            font-size: 13.5px;
+            font-size: 13px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.2;
         }
 
         .user-username {
-            font-size: 11.5px;
+            font-size: 11px;
             color: var(--text-muted);
-            margin-top: 2px;
+            margin-top: 1px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.2;
         }
 
         /* Status badges */
@@ -1200,23 +1778,37 @@ $all_permissions = [
         /* Pending approve/reject buttons */
         .action-group {
             display: flex;
-            gap: 8px;
+            gap: 6px;
             align-items: center;
+            flex-wrap: wrap;
+            width: 100%;
+            justify-content: flex-start;
+        }
+
+        .actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+            width: 100%;
+            justify-content: flex-start;
         }
 
         .btn-approve,
         .btn-reject {
-            padding: 7px 15px;
+            padding: 6px 12px;
             border-radius: var(--radius-sm);
             border: none;
             font-family: 'DM Sans', sans-serif;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
-            display: flex;
+            transition: all .2s;
+            display: inline-flex;
             align-items: center;
-            gap: 6px;
-            transition: all .18s;
+            gap: 5px;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .btn-approve {
@@ -1434,12 +2026,25 @@ $all_permissions = [
         }
 
         .modal-foot {
-            padding: 18px 26px;
+            padding: 20px 24px;
             border-top: 1px solid var(--border-soft);
+            background: var(--surface);
             display: flex;
-            gap: 10px;
-            justify-content: flex-end;
-            background: var(--surface-2);
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .modal-foot-left {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .modal-foot-right {
+            display: flex;
+            gap: 8px;
+            align-items: center;
         }
 
         /* ── Form Styles ───────────────────────────── */
@@ -1723,6 +2328,28 @@ $all_permissions = [
             min-width: 0;
         }
 
+        .last-active {
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .last-active-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .logout-time {
+            font-size: 10px;
+            color: var(--text-muted);
+            line-height: 1.2;
+        }
+
+        .logout-time small {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
         .log-action {
             font-size: 13px;
             font-weight: 600;
@@ -1841,9 +2468,20 @@ $all_permissions = [
             }
         }
 
-        @media (max-width: 640px) {
+        @media (max-width: 768px) {
+            .main {
+                margin-left: 0;
+            }
+
             .page-content {
-                padding: 76px 12px 32px !important;
+                padding: 22px 20px 40px;
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .page-content {
+                padding: 14px 14px 36px;
             }
 
             .stats-row {
@@ -1871,8 +2509,9 @@ $all_permissions = [
 
             /* Data table: make it horizontally scrollable */
             .table-wrap {
-                overflow-x: auto !important;
+                overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
+                border-radius: 0 0 var(--radius-lg) var(--radius-lg);
             }
 
             /* Keep at least name + action columns */
@@ -1910,6 +2549,57 @@ $all_permissions = [
             }
         }
 
+        @media (max-width: 768px) {
+            .card-toolbar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 12px;
+            }
+            
+            .search-wrap {
+                min-width: 100%;
+                max-width: 100%;
+            }
+            
+            .toolbar-right {
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
+            .btn-secondary {
+                font-size: 12px;
+                padding: 8px 12px;
+            }
+            
+            .bulk-bar {
+                padding: 10px 15px;
+                gap: 8px;
+            }
+            
+            .btn-bulk {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+            
+            .tab-bar {
+                gap: 1px;
+                padding: 8px 8px 0;
+            }
+            
+            .tab-btn {
+                padding: 8px 10px;
+                font-size: 11px;
+                gap: 4px;
+                min-width: 80px;
+                flex: 1;
+            }
+            
+            .tab-btn .badge {
+                font-size: 9px;
+                padding: 1px 4px;
+            }
+        }
+
         @media (max-width: 480px) {
             .stats-row {
                 grid-template-columns: 1fr 1fr;
@@ -1932,10 +2622,227 @@ $all_permissions = [
                 padding: 10px 12px !important;
             }
         }
+
+        /* Accessibility Enhancements */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* Focus indicators */
+        *:focus-visible {
+            outline: 2px solid var(--blue);
+            outline-offset: 2px;
+        }
+
+        .btn-icon:focus-visible,
+        .btn-approve:focus-visible,
+        .btn-reject:focus-visible,
+        .btn-primary:focus-visible,
+        .btn-secondary:focus-visible,
+        .btn-danger:focus-visible,
+        .btn-purple:focus-visible {
+            outline: 2px solid var(--blue);
+            outline-offset: 2px;
+            box-shadow: 0 0 0 4px rgba(59, 98, 245, 0.2);
+        }
+
+        /* High contrast mode support */
+        @media (prefers-contrast: high) {
+            :root {
+                --text-muted: #374151;
+                --border: #9ca3af;
+                --border-soft: #d1d5db;
+            }
+        }
+
+        /* Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        /* Loading states */
+        .loading {
+            position: relative;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Skip to main content link */
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 6px;
+            background: var(--blue);
+            color: white;
+            padding: 8px;
+            text-decoration: none;
+            border-radius: 4px;
+            z-index: 10000;
+        }
+
+        .skip-link:focus {
+            top: 6px;
+        }
+
+        /* Advanced Search Panel */
+        .advanced-search-panel {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-top: none;
+            padding: 16px 22px;
+            margin: 0;
+        }
+
+        .search-filters {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            align-items: end;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .filter-group label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: .07em;
+        }
+
+        .date-range {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .date-range span {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 8px;
+            align-items: end;
+        }
+
+        @media (max-width: 900px) {
+            .search-filters {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            
+            .filter-actions {
+                flex-wrap: wrap;
+            }
+        }
+
+        /* Pagination Styles */
+        .pagination-wrapper {
+            padding: 20px 22px;
+            border-top: 1px solid var(--border-soft);
+            background: var(--surface);
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .pagination-info {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .pagination-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            text-decoration: none;
+            font-size: 13px;
+            color: var(--text-secondary);
+            transition: all .2s;
+            background: var(--surface);
+        }
+
+        .pagination-link:hover {
+            background: var(--surface-2);
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        .pagination-link.active {
+            background: var(--blue);
+            color: #fff;
+            border-color: var(--blue);
+        }
+
+        @media (max-width: 768px) {
+            .pagination {
+                flex-direction: column;
+                gap: 12px;
+            }
+            
+            .pagination-controls {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+        }
     </style>
 </head>
 
 <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
     <?php include 'admin_nav.php'; ?>
     <script>
         // Initialize navigation functionality after include
@@ -1944,8 +2851,8 @@ $all_permissions = [
         }
     </script>
 
-    <main class="main page-content">
-        <div class="toast-stack" id="toastStack"></div>
+    <section class="page-content" id="main-content" role="main" aria-label="Sub-Admin Management">
+        <div class="toast-stack" id="toastStack" role="status" aria-live="polite" aria-label="Notifications"></div>
 
         <?php if (isset($_SESSION['success'])): ?>
             <script>
@@ -2013,20 +2920,20 @@ $all_permissions = [
 
 
         <!-- Tabs -->
-        <div class="tab-bar">
-            <button class="tab-btn pending-tab active" onclick="switchTab('pending',this)">
+        <div class="tab-bar" role="tablist" aria-label="Sub-Admin Sections">
+            <button class="tab-btn pending-tab active" role="tab" aria-selected="true" aria-controls="panel-pending" onclick="switchTab('pending',this)">
                 <i class="fas fa-user-clock"></i> Pending Requests
                 <span class="badge"><?php echo count($pending_subadmins); ?></span>
             </button>
-            <button class="tab-btn" onclick="switchTab('approved',this)">
+            <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-approved" onclick="switchTab('approved',this)">
                 <i class="fas fa-users-gear"></i> Approved Sub-Admins
                 <span class="badge"><?php echo count($approved_subadmins); ?></span>
             </button>
-            <button class="tab-btn rejected-tab" onclick="switchTab('rejected',this)">
+            <button class="tab-btn rejected-tab" role="tab" aria-selected="false" aria-controls="panel-rejected" onclick="switchTab('rejected',this)">
                 <i class="fas fa-ban"></i> Rejected
                 <span class="badge"><?php echo $count_rejected; ?></span>
             </button>
-            <button class="tab-btn logs-tab" onclick="switchTab('logs',this)">
+            <button class="tab-btn logs-tab" role="tab" aria-selected="false" aria-controls="panel-logs" onclick="switchTab('logs',this)">
                 <i class="fas fa-scroll"></i> Activity Logs
                 <span class="badge"><?php echo count($admin_logs); ?></span>
             </button>
@@ -2036,14 +2943,48 @@ $all_permissions = [
         <div class="main-card">
 
             <!-- ══ PENDING TAB ══ -->
-            <div class="tab-panel active" id="panel-pending">
+            <div class="tab-panel active" id="panel-pending" role="tabpanel" aria-labelledby="pending-tab" tabindex="0">
                 <div class="card-toolbar">
                     <div class="search-wrap">
                         <i class="fas fa-search"></i>
-                        <input type="text" class="search-input" placeholder="Search pending…" oninput="filterTable('pending-table',this.value)">
+                        <input type="text" class="search-input" id="advanced-search-pending" placeholder="Search pending…" aria-label="Search pending requests">
+                        <button class="btn-icon" onclick="toggleAdvancedSearch('pending')" aria-label="Advanced search options" title="Advanced Search">
+                            <i class="fas fa-filter"></i>
+                        </button>
                     </div>
                     <div class="toolbar-right">
                         <span style="font-size:13px;color:#6b7280;"><?php echo count($pending_subadmins); ?> request<?php echo count($pending_subadmins) !== 1 ? 's' : ''; ?> awaiting review</span>
+                    </div>
+                </div>
+
+                <!-- Advanced Search Panel -->
+                <div class="advanced-search-panel" id="advanced-search-pending" style="display: none;">
+                    <div class="search-filters">
+                        <div class="filter-group">
+                            <label>Date Range</label>
+                            <div class="date-range">
+                                <input type="date" id="pending-date-from" class="filter-date" placeholder="From">
+                                <span>to</span>
+                                <input type="date" id="pending-date-to" class="filter-date" placeholder="To">
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <label>Application Method</label>
+                            <select id="pending-method" class="filter-select">
+                                <option value="">All Methods</option>
+                                <option value="online">Online Application</option>
+                                <option value="invitation">Invitation</option>
+                                <option value="transfer">Transfer</option>
+                            </select>
+                        </div>
+                        <div class="filter-actions">
+                            <button class="btn-primary" onclick="applyAdvancedSearch('pending')">
+                                <i class="fas fa-search"></i> Apply Filters
+                            </button>
+                            <button class="btn-secondary" onclick="clearAdvancedSearch('pending')">
+                                <i class="fas fa-times"></i> Clear
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -2058,44 +2999,46 @@ $all_permissions = [
 
                 <?php if (count($pending_subadmins) > 0): ?>
                     <div class="table-wrap">
-                        <table class="data-table" id="pending-table">
+                        <table class="data-table" id="pending-table" role="table" aria-label="Pending Sub-Admin Requests">
                             <thead>
-                                <tr>
-                                    <th class="col-check"><input type="checkbox" class="row-cb" id="cb-all-pending" onchange="toggleAll('pending',this)"></th>
-                                    <th>Applicant</th>
-                                    <th>Email</th>
-                                    <th>Username</th>
-                                    <th>Date Applied</th>
-                                    <th>Actions</th>
+                                <tr role="row">
+                                    <th class="col-check" scope="col">
+                                        <input type="checkbox" class="row-cb" id="cb-all-pending" onchange="toggleAll('pending',this)" aria-label="Select all pending requests">
+                                    </th>
+                                    <th scope="col">Applicant</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">Username</th>
+                                    <th scope="col">Date Applied</th>
+                                    <th scope="col">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($pending_subadmins as $s): ?>
-                                    <tr class="row-pending" data-id="<?php echo $s['id']; ?>">
-                                        <td><input type="checkbox" class="row-cb pending-cb" value="<?php echo $s['id']; ?>" onchange="updateBulkBar('pending')"></td>
+                                    <tr class="row-pending" data-id="<?php echo $s['id']; ?>" role="row">
+                                        <td><input type="checkbox" class="row-cb pending-cb" value="<?php echo $s['id']; ?>" onchange="updateBulkBar('pending')" aria-label="Select <?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?>"></td>
                                         <td>
                                             <div class="user-cell">
                                                 <div class="avatar" style="background:<?php echo getAvatarColor($s['first_name']); ?>">
                                                     <?php echo getInitials($s['first_name'], $s['last_name']); ?>
                                                 </div>
-                                                <div>
+                                                <div class="user-info">
                                                     <div class="user-name"><?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?></div>
                                                     <div class="user-username">ID #<?php echo $s['id']; ?></div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td><?php echo htmlspecialchars($s['email']); ?></td>
-                                        <td style="color:#6b7280;">@<?php echo htmlspecialchars($s['username']); ?></td>
+                                        <td><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?php echo htmlspecialchars($s['email']); ?>"><?php echo htmlspecialchars($s['email']); ?></div></td>
+                                        <td style="color:#6b7280;"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@<?php echo htmlspecialchars($s['username']); ?>">@<?php echo htmlspecialchars($s['username']); ?></div></td>
                                         <td class="date-cell"><?php echo isset($s['created_at']) ? date('M d, Y', strtotime($s['created_at'])) : '—'; ?></td>
                                         <td>
                                             <div class="action-group">
-                                                <button class="btn-approve" onclick="openApproveModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')">
+                                                <button class="btn-approve" onclick="openApproveModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')" aria-label="Approve <?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?>">
                                                     <i class="fas fa-check"></i> Approve
                                                 </button>
-                                                <button class="btn-reject" onclick="openRejectModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')">
+                                                <button class="btn-reject" onclick="openRejectModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')" aria-label="Reject <?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?>">
                                                     <i class="fas fa-times"></i> Reject
                                                 </button>
-                                                <button class="btn-icon edit" title="Edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($s), ENT_QUOTES); ?>)">
+                                                <button class="btn-icon edit" title="Edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($s), ENT_QUOTES); ?>)" aria-label="Edit <?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?>">
                                                     <i class="fas fa-pen"></i>
                                                 </button>
                                             </div>
@@ -2105,6 +3048,41 @@ $all_permissions = [
                             </tbody>
                         </table>
                     </div><!-- /table-wrap -->
+                    
+                    <!-- Pagination for Pending -->
+                    <?php if ($pagination_pending['total_pages'] > 1): ?>
+                    <div class="pagination-wrapper">
+                        <div class="pagination">
+                            <span class="pagination-info">
+                                Showing <?php echo ($pagination_pending['offset'] + 1); ?>-<?php echo min($pagination_pending['offset'] + $pagination_pending['per_page'], $pagination_pending['total_records']); ?> 
+                                of <?php echo $pagination_pending['total_records']; ?> requests
+                            </span>
+                            <div class="pagination-controls">
+                                <?php if ($pagination_pending['current_page'] > 1): ?>
+                                    <a href="?tab=pending&page=<?php echo $pagination_pending['current_page'] - 1; ?>" class="pagination-link">
+                                        <i class="fas fa-chevron-left"></i> Previous
+                                    </a>
+                                <?php endif; ?>
+                                
+                                <?php
+                                $start_page = max(1, $pagination_pending['current_page'] - 2);
+                                $end_page = min($pagination_pending['total_pages'], $pagination_pending['current_page'] + 2);
+                                for ($i = $start_page; $i <= $end_page; $i++):
+                                ?>
+                                    <a href="?tab=pending&page=<?php echo $i; ?>" class="pagination-link <?php echo $i == $pagination_pending['current_page'] ? 'active' : ''; ?>">
+                                        <?php echo $i; ?>
+                                    </a>
+                                <?php endfor; ?>
+                                
+                                <?php if ($pagination_pending['current_page'] < $pagination_pending['total_pages']): ?>
+                                    <a href="?tab=pending&page=<?php echo $pagination_pending['current_page'] + 1; ?>" class="pagination-link">
+                                        Next <i class="fas fa-chevron-right"></i>
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 <?php else: ?>
                     <div class="empty-state">
                         <div class="empty-icon"><i class="fas fa-inbox"></i></div>
@@ -2194,13 +3172,13 @@ $all_permissions = [
                                                 <div class="avatar" style="background:<?php echo $isSuspended ? '#9ca3af' : getAvatarColor($s['first_name']); ?>;<?php echo $isSuspended ? 'filter:grayscale(1)' : ''; ?>">
                                                     <?php echo getInitials($s['first_name'], $s['last_name']); ?>
                                                 </div>
-                                                <div>
+                                                <div class="user-info">
                                                     <div class="user-name"><?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?></div>
                                                     <div class="user-username">@<?php echo htmlspecialchars($s['username']); ?></div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td><?php echo htmlspecialchars($s['email']); ?></td>
+                                        <td><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?php echo htmlspecialchars($s['email']); ?>"><?php echo htmlspecialchars($s['email']); ?></div></td>
                                         <td>
                                             <div class="role-multi">
                                                 <?php foreach ($roles as $r):
@@ -2212,10 +3190,21 @@ $all_permissions = [
                                             </div>
                                         </td>
                                         <td>
-                                            <span class="last-active <?php echo $activeClass; ?>">
-                                                <?php if ($activeClass === 'active-online'): ?><i class="fas fa-circle" style="font-size:8px;"></i> <?php endif; ?>
-                                                <?php echo timeAgo($lastActive); ?>
-                                            </span>
+                                            <div class="last-active-info">
+                                                <div class="last-active <?php echo $activeClass; ?>">
+                                                    <?php if ($activeClass === 'active-online'): ?><i class="fas fa-circle" style="font-size:8px;"></i> <?php endif; ?>
+                                                    <?php echo timeAgo($lastActive); ?>
+                                                </div>
+                                                <?php if ($lastActive): ?>
+                                                    <div class="logout-time">
+                                                        <small>Logout: <?php echo date('M d, Y h:i A', strtotime($lastActive)); ?></small>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <div class="logout-time">
+                                                        <small>No login history</small>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
                                         </td>
                                         <td>
                                             <span class="status-badge badge-<?php echo $isSuspended ? 'suspended' : 'approved'; ?>">
@@ -2223,24 +3212,17 @@ $all_permissions = [
                                             </span>
                                         </td>
                                         <td>
-                                            <div class="actions">
-                                                <button class="btn-icon edit" title="Edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($s), ENT_QUOTES); ?>)">
-                                                    <i class="fas fa-pen"></i>
-                                                </button>
-                                                <?php if (!$isSuspended): ?>
-                                                    <button class="btn-icon suspend" title="Suspend" onclick="openSuspendModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')">
-                                                        <i class="fas fa-ban"></i>
-                                                    </button>
-                                                    <button class="btn-icon revoke" title="Revoke Access" onclick="openRevokeModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')">
-                                                        <i class="fas fa-shield-halved"></i>
-                                                    </button>
-                                                <?php else: ?>
-                                                    <button class="btn-icon approve" title="Unsuspend (Re-approve)" onclick="openApproveModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')">
-                                                        <i class="fas fa-rotate-left"></i>
+                                            <div class="action-group">
+                                                <?php if ($isSuspended): ?>
+                                                    <button class="btn-approve" onclick="openUnsuspendModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')" aria-label="Cancel Suspension for <?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?>">
+                                                        <i class="fas fa-rotate-left"></i> Cancel Suspension
                                                     </button>
                                                 <?php endif; ?>
-                                                <button class="btn-icon delete" title="Delete" onclick="openDeleteModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')">
-                                                    <i class="fas fa-trash"></i>
+                                                <button class="btn-reject" onclick="openRejectModal('<?php echo $s['id']; ?>','<?php echo htmlspecialchars(addslashes($s['first_name'] . ' ' . $s['last_name'])); ?>')" aria-label="Reject <?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?>">
+                                                    <i class="fas fa-times"></i> Reject
+                                                </button>
+                                                <button class="btn-icon edit" title="Edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($s), ENT_QUOTES); ?>)" aria-label="Edit <?php echo htmlspecialchars($s['first_name'] . ' ' . $s['last_name']); ?>">
+                                                    <i class="fas fa-pen"></i>
                                                 </button>
                                             </div>
                                         </td>
@@ -2391,8 +3373,9 @@ $all_permissions = [
             <input type="hidden" name="action" value="bulk_action">
             <input type="hidden" name="bulk_type" id="bulk-form-type">
             <input type="hidden" name="bulk_ids" id="bulk-form-ids">
+            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
         </form>
-    </main>
+    </section>
 
     <!-- ════════════════════════════════
      MODALS
@@ -2411,6 +3394,7 @@ $all_permissions = [
                 <form method="post" style="display:contents;">
                     <input type="hidden" name="action" value="approve">
                     <input type="hidden" name="subadmin_id" id="approve-id">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                     <button type="submit" class="btn-primary"><i class="fas fa-check"></i> Yes, Approve</button>
                 </form>
             </div>
@@ -2429,6 +3413,7 @@ $all_permissions = [
                 <form method="post" id="reject-form">
                     <input type="hidden" name="action" value="reject">
                     <input type="hidden" name="subadmin_id" id="reject-id">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                     <div class="form-group">
                         <label>Reason for Rejection <span style="color:#9ca3af;font-weight:400;">(optional)</span></label>
                         <textarea name="reject_reason" placeholder="e.g. Incomplete credentials, duplicate account…"></textarea>
@@ -2453,6 +3438,7 @@ $all_permissions = [
                 <form method="post" id="edit-form">
                     <input type="hidden" name="action" value="edit">
                     <input type="hidden" name="subadmin_id" id="edit-id">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                     <div class="form-grid">
                         <div class="form-group">
                             <label>First Name</label>
@@ -2500,8 +3486,21 @@ $all_permissions = [
                 </form>
             </div>
             <div class="modal-foot">
-                <button class="btn-secondary" onclick="closeModal('modal-edit')">Cancel</button>
-                <button class="btn-primary" onclick="document.getElementById('edit-form').submit()"><i class="fas fa-save"></i> Save Changes</button>
+                <div class="modal-foot-left">
+                    <button type="button" class="btn-icon suspend" title="Suspend" onclick="openSuspendModal(document.getElementById('edit-id').value, (document.getElementById('edit-firstname').value + ' ' + document.getElementById('edit-lastname').value))">
+                        <i class="fas fa-ban"></i>
+                    </button>
+                    <button type="button" class="btn-icon revoke" title="Revoke Access" onclick="openRevokeModal(document.getElementById('edit-id').value, (document.getElementById('edit-firstname').value + ' ' + document.getElementById('edit-lastname').value))">
+                        <i class="fas fa-shield-halved"></i>
+                    </button>
+                    <button type="button" class="btn-icon delete" title="Delete" onclick="openDeleteModal(document.getElementById('edit-id').value, (document.getElementById('edit-firstname').value + ' ' + document.getElementById('edit-lastname').value))">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <div class="modal-foot-right">
+                    <button class="btn-secondary" onclick="closeModal('modal-edit')">Cancel</button>
+                    <button class="btn-primary" onclick="document.getElementById('edit-form').submit()"><i class="fas fa-save"></i> Save Changes</button>
+                </div>
             </div>
         </div>
     </div>
@@ -2516,12 +3515,41 @@ $all_permissions = [
                     <span style="color:#8b5cf6;font-weight:600;">They can be re-activated later.</span>
                 </p>
             </div>
+            <div class="modal-body" style="padding:20px 24px;">
+                <div class="form-group">
+                    <label for="suspend-reason" style="display:block;margin-bottom:8px;font-weight:600;color:#374151;">Reason for Suspension <span style="color:#ef4444;">*</span></label>
+                    <textarea id="suspend-reason" name="suspend_reason" rows="3" placeholder="Please provide a reason for suspending this sub-admin account..." required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;resize:vertical;"></textarea>
+                </div>
+            </div>
             <div class="modal-foot" style="border-top:1px solid #f3f4f6;padding-top:20px;">
                 <button class="btn-secondary" onclick="closeModal('modal-suspend')">Cancel</button>
                 <form method="post" style="display:contents;">
                     <input type="hidden" name="action" value="suspend">
                     <input type="hidden" name="subadmin_id" id="suspend-id">
-                    <button type="submit" class="btn-purple"><i class="fas fa-ban"></i> Suspend Account</button>
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                    <button type="submit" class="btn-purple" onclick="return validateSuspendForm();"><i class="fas fa-ban"></i> Suspend Account</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unsuspend Modal -->
+    <div class="modal-overlay" id="modal-unsuspend">
+        <div class="modal-box">
+            <div class="modal-icon-banner">
+                <div class="icon-circle green"><i class="fas fa-rotate-left"></i></div>
+                <h4>Cancel Suspension?</h4>
+                <p>This will restore <strong id="unsuspend-name"></strong>'s access to the Sub-Admin system.<br>
+                    <span style="color:#10b981;font-weight:600;">They will be able to log in again.</span>
+                </p>
+            </div>
+            <div class="modal-foot" style="border-top:1px solid #f3f4f6;padding-top:20px;">
+                <button class="btn-secondary" onclick="closeModal('modal-unsuspend')">Cancel</button>
+                <form method="post" style="display:contents;">
+                    <input type="hidden" name="action" value="unsuspend">
+                    <input type="hidden" name="subadmin_id" id="unsuspend-id">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                    <button type="submit" class="btn-primary"><i class="fas fa-rotate-left"></i> Cancel Suspension</button>
                 </form>
             </div>
         </div>
@@ -2540,6 +3568,7 @@ $all_permissions = [
                 <form method="post" style="display:contents;">
                     <input type="hidden" name="action" value="revoke">
                     <input type="hidden" name="subadmin_id" id="revoke-id">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                     <button type="submit" style="padding:10px 22px;border-radius:8px;border:none;background:#f59e0b;color:#fff;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;">
                         <i class="fas fa-shield-halved"></i> Revoke Access
                     </button>
@@ -2563,6 +3592,7 @@ $all_permissions = [
                 <form method="post" style="display:contents;">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="subadmin_id" id="delete-id">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                     <button type="submit" class="btn-danger"><i class="fas fa-trash"></i> Delete Forever</button>
                 </form>
             </div>
@@ -2718,7 +3748,41 @@ $all_permissions = [
         function openSuspendModal(id, name) {
             document.getElementById('suspend-id').value = id;
             document.getElementById('suspend-name').textContent = name;
+            document.getElementById('suspend-reason').value = '';
             openModal('modal-suspend');
+        }
+
+        function openUnsuspendModal(id, name) {
+            document.getElementById('unsuspend-id').value = id;
+            document.getElementById('unsuspend-name').textContent = name;
+            openModal('modal-unsuspend');
+        }
+
+        function validateSuspendForm() {
+            const reason = document.getElementById('suspend-reason').value.trim();
+            if (!reason) {
+                alert('Please provide a reason for suspension.');
+                document.getElementById('suspend-reason').focus();
+                return false;
+            }
+            return true;
+        }
+
+        // Enhanced form submission with loading states
+        function submitFormWithLoading(formId, buttonId) {
+            const form = document.getElementById(formId);
+            const button = document.getElementById(buttonId);
+            
+            if (!form || !button) return;
+            
+            // Add loading state
+            button.classList.add('loading');
+            button.disabled = true;
+            const originalText = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            
+            // Submit form
+            form.submit();
         }
 
         // ── Edit Modal with Roles + Permissions ─────
@@ -2796,9 +3860,129 @@ $all_permissions = [
             }
             const ids = Array.from(checked).map(cb => cb.value).join(',');
             if (!confirm('Apply "' + type + '" to ' + checked.length + ' record(s)?')) return;
+            
+            // Add loading state to bulk bar
+            const bulkBar = document.getElementById('bulk-bar-' + tab);
+            bulkBar.classList.add('loading');
+            
             document.getElementById('bulk-form-type').value = type;
             document.getElementById('bulk-form-ids').value = ids;
             document.getElementById('bulk-form').submit();
+        }
+
+        // ── Advanced Search ───────────────────────
+        function toggleAdvancedSearch(tab) {
+            const panel = document.getElementById('advanced-search-' + tab);
+            const isVisible = panel.style.display !== 'none';
+            panel.style.display = isVisible ? 'none' : 'block';
+            
+            // Update button icon
+            const button = event.currentTarget;
+            const icon = button.querySelector('i');
+            if (icon) {
+                icon.className = isVisible ? 'fas fa-filter' : 'fas fa-times';
+            }
+        }
+
+        function applyAdvancedSearch(tab) {
+            const searchInput = document.getElementById('advanced-search-' + tab);
+            const dateFrom = document.getElementById(tab + '-date-from');
+            const dateTo = document.getElementById(tab + '-date-to');
+            const method = document.getElementById(tab + '-method');
+            
+            // Build filter criteria
+            const filters = {
+                search: searchInput.value.toLowerCase(),
+                dateFrom: dateFrom.value,
+                dateTo: dateTo.value,
+                method: method.value
+            };
+            
+            // Filter table rows
+            const table = document.getElementById(tab + '-table');
+            const rows = table.querySelectorAll('tbody tr');
+            
+            rows.forEach(row => {
+                let show = true;
+                
+                // Text search
+                if (filters.search) {
+                    const text = row.textContent.toLowerCase();
+                    show = text.includes(filters.search);
+                }
+                
+                // Date range filter (simplified - would need actual date data)
+                if (show && (filters.dateFrom || filters.dateTo)) {
+                    // This would need actual date parsing from the row
+                    // For now, just log the filter
+                    console.log('Date filter applied:', filters.dateFrom, 'to', filters.dateTo);
+                }
+                
+                row.style.display = show ? '' : 'none';
+            });
+            
+            showToast('Filters applied', 'success');
+        }
+
+        function clearAdvancedSearch(tab) {
+            document.getElementById('advanced-search-' + tab).value = '';
+            document.getElementById(tab + '-date-from').value = '';
+            document.getElementById(tab + '-date-to').value = '';
+            document.getElementById(tab + '-method').value = '';
+            
+            // Reset table
+            const table = document.getElementById(tab + '-table');
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(row => row.style.display = '');
+            
+            showToast('Filters cleared', 'info');
+        }
+
+        // Enhanced search with real-time filtering
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInputs = document.querySelectorAll('[id^="advanced-search-"]');
+            searchInputs.forEach(input => {
+                input.addEventListener('input', function() {
+                    const tab = this.id.replace('advanced-search-', '');
+                    filterTable(tab + '-table', this.value);
+                });
+            });
+        });
+
+        // ── Export Functionality ─────────────────────
+        function exportData(format, tab = 'pending') {
+            // Show loading state
+            showToast('Preparing export...', 'info');
+            
+            // Get current filter parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const exportParams = new URLSearchParams();
+            
+            // Add current filters
+            if (tab === 'approved') {
+                urlParams.forEach((value, key) => {
+                    if (key.startsWith('filter_') || key === 'search') {
+                        exportParams.set(key, value);
+                    }
+                });
+            }
+            
+            exportParams.set('export_format', format);
+            exportParams.set('export_tab', tab);
+            exportParams.set('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+            
+            // Create download URL
+            const downloadUrl = 'admins.php?' + exportParams.toString();
+            
+            // Create temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showToast('Export started...', 'success');
         }
 
         // ── Toast ───────────────────────────────────
@@ -2818,6 +4002,17 @@ $all_permissions = [
                 setTimeout(() => t.remove(), 400);
             }, 3500);
         }
+    </script>
+
+    <script>
+        // Move page-content into .main (opened by admin_nav.php) — same pattern as admin_profile.php
+        (function() {
+            var mainDiv = document.querySelector('.main');
+            var pageContent = document.querySelector('.page-content');
+            if (mainDiv && pageContent && !mainDiv.contains(pageContent)) {
+                mainDiv.appendChild(pageContent);
+            }
+        })();
     </script>
     <script src="admin_assets/js/admin_script.js"></script>
 </body>

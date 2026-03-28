@@ -231,6 +231,8 @@ function fetch_user(mysqli $c, string $table, string $username, string $extra_wh
 // ══════════════════════════════════════════════════════════════════════════════
 if ($action === 'login_verify_credentials') {
 
+    $start_time = microtime(true);
+    
     $username = trim($_POST['username'] ?? '');
     $password = trim($_POST['password'] ?? '');
 
@@ -280,20 +282,7 @@ if ($action === 'login_verify_credentials') {
         }
     }
 
-    // 3. Students table (only query if the table actually exists)
-    if (!$user) {
-        try {
-            $st_check = $conn->query("SHOW TABLES LIKE 'students'");
-            if ($st_check && $st_check->num_rows > 0) {
-                $row = fetch_user($conn, 'students', $username);
-                if ($row && !empty($row['pw']) && password_verify($password, $row['pw'])) {
-                    $user      = $row;
-                    $user_role = 'student';
-                }
-            }
-        } catch (Throwable $e) { /* students table doesn't exist — skip */
-        }
-    }
+    // Student authentication has been removed
 
     error_log("[login_otp] final user_role: " . ($user_role ?? 'NULL — login failed'));
 
@@ -305,6 +294,8 @@ if ($action === 'login_verify_credentials') {
 
     // ── OTP VERIFICATION REQUIRED ────────────────────────────────────────────
     $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    
+    error_log("[login_otp] GENERATED OTP: {$otp} for username: {$username}, role: {$user_role}");
 
     $_SESSION['otp_pending'] = [
         'otp'       => password_hash($otp, PASSWORD_DEFAULT),
@@ -323,6 +314,8 @@ if ($action === 'login_verify_credentials') {
         // Use a single UNION query to try all possible email column names at once.
         // This avoids SHOW COLUMNS (which can fail due to XAMPP permissions).
         $uid = (int) $user['id'];
+        
+        // For admin/sub-admin, check their respective tables
         $tbl = ($user_role === 'sub-admin') ? ($sa_table ?? $admin_table) : $admin_table;
 
         if ($tbl) {
@@ -344,6 +337,14 @@ if ($action === 'login_verify_credentials') {
     }
 
     error_log("[login_otp] contact_email resolved: " . ($contact_email ?: 'NONE'));
+
+    // Create masked email for response
+    if (!empty($contact_email)) {
+        [$u, $d] = explode('@', $contact_email, 2);
+        $masked = substr($u, 0, 2) . str_repeat('*', max(1, strlen($u) - 2)) . '@' . $d;
+    } else {
+        $masked = 'your registered email';
+    }
 
     // ── SEND OTP IMMEDIATELY (no delays) ───────────────────────────────────
     $mail_start = microtime(true);
@@ -383,21 +384,29 @@ if ($action === 'login_verify_credentials') {
 // ══════════════════════════════════════════════════════════════════════════════
 if ($action === 'login_verify_otp') {
 
+    error_log("[login_otp] VERIFY ATTEMPT - Session exists: " . (isset($_SESSION['otp_pending']) ? 'YES' : 'NO'));
+    
     if (!isset($_SESSION['otp_pending'])) {
         send(['success' => false, 'message' => 'Session expired. Please log in again.']);
     }
 
     $pending   = $_SESSION['otp_pending'];
     $otp_input = trim($_POST['otp'] ?? '');
+    
+    error_log("[login_otp] VERIFY - OTP input: '{$otp_input}', expires: " . date('Y-m-d H:i:s', $pending['expires']) . ", current: " . date('Y-m-d H:i:s'));
 
     if (time() > $pending['expires']) {
+        error_log("[login_otp] VERIFY - OTP EXPIRED");
         unset($_SESSION['otp_pending']);
         send(['success' => false, 'message' => 'OTP expired. Please log in again.']);
     }
 
     if (!password_verify($otp_input, $pending['otp'])) {
+        error_log("[login_otp] VERIFY - OTP MISMATCH - stored hash length: " . strlen($pending['otp']));
         send(['success' => false, 'message' => 'Invalid OTP. Please try again.']);
     }
+    
+    error_log("[login_otp] VERIFY - OTP SUCCESS for user: " . $pending['username']);
 
     session_regenerate_id(true);
     unset($_SESSION['otp_pending']);
@@ -410,8 +419,6 @@ if ($action === 'login_verify_otp') {
     if (in_array($pending['user_type'], ['admin', 'sub-admin'])) {
         $_SESSION['admin_id']       = $pending['user_id'];
         $_SESSION['admin_username'] = $pending['username'];
-    } else {
-        $_SESSION['student_id'] = $pending['user_id'];
     }
 
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));

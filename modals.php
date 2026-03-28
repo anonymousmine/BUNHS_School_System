@@ -737,6 +737,7 @@ if (empty($_SESSION['csrf_token'])) {
                         </div>
 
                         <form id="loginOtpForm">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>">
                             <div class="bm-otp-row" id="loginOtpBoxes">
                                 <input class="bm-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]">
                                 <input class="bm-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]">
@@ -810,108 +811,65 @@ if (empty($_SESSION['csrf_token'])) {
                         <!-- ✅ FIX: action changed from "signup" to "send_otp" -->
                         <input type="hidden" name="action" value="send_otp">
 
-                        <!-- ── Name row: First · M.I. · Last ── -->
-                        <div style="display:grid;grid-template-columns:1fr 72px 1fr;gap:8px;">
+                        <!-- ── Name row: First · Middle Name ── -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
                             <div class="bm-field">
                                 <label class="bm-label" for="firstName">First Name <span style="color:#e53935;">*</span></label>
                                 <div class="bm-input-wrap">
                                     <i class="fas fa-user bm-field-icon"></i>
                                     <input class="bm-input" type="text" id="firstName" name="first_name"
                                         placeholder="Juan" required
-                                        oninput="this.value=this.value.replace(/[^A-Za-z\s\-]/g,'')">
+                                        oninput="this.value=this.value.replace(/[^A-Za-z\s\-]/g,'').replace(/\b\w/g, c => c.toUpperCase())">
                                 </div>
                             </div>
                             <div class="bm-field">
-                                <label class="bm-label" for="middleInitial">M.I.</label>
+                                <label class="bm-label" for="middleInitial">Middle Name</label>
                                 <div class="bm-input-wrap">
+                                    <i class="fas fa-user bm-field-icon"></i>
                                     <input class="bm-input" type="text" id="middleInitial" name="middle_initial"
-                                        placeholder="A." maxlength="3"
-                                        style="padding-left:13px;text-transform:uppercase;"
-                                        oninput="this.value=this.value.replace(/[^A-Za-z\.]/g,'').toUpperCase()">
+                                        placeholder="Santos" maxlength="50"
+                                        oninput="this.value=this.value.replace(/[^A-Za-z\s\-]/g,'').replace(/\b\w/g, c => c.toUpperCase())">
                                 </div>
                             </div>
+                        </div>
+                        <!-- Validation indicators for name fields -->
+                        <div id="firstNameError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">First name is required</div>
+                        <div id="middleNameError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Middle name is optional</div>
+
+                        <!-- ── Last Name and Suffix row ── -->
+                        <div style="display:grid;grid-template-columns:1fr 180px;gap:10px;margin-bottom:16px;">
                             <div class="bm-field">
                                 <label class="bm-label" for="lastName">Last Name <span style="color:#e53935;">*</span></label>
                                 <div class="bm-input-wrap">
                                     <i class="fas fa-user bm-field-icon"></i>
                                     <input class="bm-input" type="text" id="lastName" name="last_name"
                                         placeholder="Dela Cruz" required
-                                        oninput="this.value=this.value.replace(/[^A-Za-z\s\-]/g,'')">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ── Suffix row ── -->
-                        <div class="bm-field" style="max-width:160px;">
-                            <label class="bm-label" for="signupSuffix">Suffix</label>
-                            <div class="bm-input-wrap">
-                                <i class="fas fa-id-badge bm-field-icon"></i>
-                                <select class="bm-input" id="signupSuffix" name="suffix"
-                                    style="padding-left:38px;-webkit-appearance:none;appearance:none;cursor:pointer;">
-                                    <option value="">None</option>
-                                    <option value="Jr.">Jr.</option>
-                                    <option value="Sr.">Sr.</option>
-                                    <option value="II">II</option>
-                                    <option value="III">III</option>
-                                    <option value="IV">IV</option>
-                                    <option value="V">V</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- ── Username ── -->
-                        <div class="bm-field">
-                            <label class="bm-label" for="signupUsername">Username <span style="color:#e53935;">*</span></label>
-                            <div class="bm-input-wrap">
-                                <i class="fas fa-at bm-field-icon"></i>
-                                <input class="bm-input" type="text" id="signupUsername" name="username"
-                                    placeholder="Choose a username (3–50 chars)" required minlength="3" maxlength="50"
-                                    oninput="this.value=this.value.replace(/[^A-Za-z0-9_\-\.]/g,'')">
-                            </div>
-                            <div id="usernameHint" style="font-size:11px;color:var(--bunhs-muted);margin-top:3px;padding-left:2px;">
-                                Letters, numbers, underscore, hyphen, dot only.
-                            </div>
-                        </div>
-
-                        <!-- ── Password + Confirm ── -->
-                        <div class="bm-row">
-                            <div class="bm-field">
-                                <label class="bm-label" for="signupPassword">Password <span style="color:#e53935;">*</span></label>
-                                <div class="bm-input-wrap">
-                                    <i class="fas fa-lock bm-field-icon"></i>
-                                    <input class="bm-input has-toggle" type="password" id="signupPassword" name="password"
-                                        placeholder="Min. 8 characters" required minlength="8"
-                                        oninput="bmCheckPwStrength(this.value)">
-                                    <button type="button" class="bm-toggle-pwd" id="toggleSignupPwd" tabindex="-1">
-                                        <i class="fas fa-eye" id="signupEyeIcon"></i>
-                                    </button>
-                                </div>
-                                <!-- Password strength bar -->
-                                <div id="pwStrengthWrap" style="margin-top:6px;display:none;">
-                                    <div style="display:flex;gap:3px;margin-bottom:3px;">
-                                        <div id="pws1" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
-                                        <div id="pws2" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
-                                        <div id="pws3" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
-                                        <div id="pws4" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
-                                    </div>
-                                    <div id="pwStrengthLabel" style="font-size:10.5px;color:var(--bunhs-muted);"></div>
-                                </div>
-                                <div style="font-size:10.5px;color:var(--bunhs-muted);margin-top:3px;padding-left:2px;">
-                                    Must include uppercase, lowercase, number &amp; special char.
+                                        oninput="this.value=this.value.replace(/[^A-Za-z\s\-]/g,'').replace(/\b\w/g, c => c.toUpperCase())">
                                 </div>
                             </div>
                             <div class="bm-field">
-                                <label class="bm-label" for="signupConfirmPassword">Confirm <span style="color:#e53935;">*</span></label>
-                                <div class="bm-input-wrap">
-                                    <i class="fas fa-lock bm-field-icon"></i>
-                                    <input class="bm-input" type="password" id="signupConfirmPassword" name="confirm_password"
-                                        placeholder="Repeat password" required>
+                                <label class="bm-label" for="signupSuffix">Suffix</label>
+                                <div class="bm-input-wrap" style="position:relative;">
+                                    <i class="fas fa-id-badge bm-field-icon"></i>
+                                    <select class="bm-input" id="signupSuffix" name="suffix"
+                                        style="padding-left:38px;padding-right:35px;-webkit-appearance:none;appearance:none;cursor:pointer;">
+                                        <option value="">None</option>
+                                        <option value="Jr.">Jr.</option>
+                                        <option value="Sr.">Sr.</option>
+                                        <option value="II">II</option>
+                                        <option value="III">III</option>
+                                        <option value="IV">IV</option>
+                                        <option value="V">V</option>
+                                    </select>
+                                    <i class="fas fa-chevron-down" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);color:#6b7c72;font-size:12px;pointer-events:none;"></i>
                                 </div>
-                                <div id="pwMatchHint" style="font-size:11px;margin-top:3px;padding-left:2px;display:none;"></div>
                             </div>
                         </div>
+                        <!-- Validation indicator for last name -->
+                        <div id="lastNameError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Last name is required</div>
+                        <div id="suffixError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Suffix is optional</div>
 
-                        <!-- ── Verification method ── -->
+                        <!-- ── Email/Phone fields ── -->
                         <div style="margin-bottom:14px;">
                             <label class="bm-label" style="margin-bottom:7px;">Verification Method <span style="color:#e53935;">*</span></label>
                             <div class="bm-contact-wrap">
@@ -935,10 +893,13 @@ if (empty($_SESSION['csrf_token'])) {
                             <div class="bm-input-wrap">
                                 <i class="fas fa-envelope bm-field-icon"></i>
                                 <input class="bm-input" type="email" id="email" name="email"
-                                    placeholder="your@gmail.com" required>
+                                    placeholder="your@gmail.com" required
+                                    autocomplete="email">
                             </div>
-                            <div id="emailWarning" style="display:none;font-size:11.5px;color:#c62828;margin-top:4px;padding-left:2px;"></div>
                         </div>
+                        <div id="emailError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Email is required</div>
+                        <div id="emailWarning" style="display:none;font-size:11.5px;color:#c62828;margin-top:4px;margin-bottom:8px;padding-left:2px;"></div>
+                        <div id="emailFormatError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Please enter a valid email address</div>
 
                         <div id="phoneField" class="bm-field" style="display:none;">
                             <label class="bm-label" for="phone">Phone Number <span style="color:#e53935;">*</span></label>
@@ -946,9 +907,93 @@ if (empty($_SESSION['csrf_token'])) {
                                 <i class="fas fa-phone bm-field-icon"></i>
                                 <input class="bm-input" type="tel" id="phone" name="phone"
                                     placeholder="09xxxxxxxxx" maxlength="11"
+                                    autocomplete="tel"
                                     oninput="this.value=this.value.replace(/\D/g,'').slice(0,11)">
                             </div>
                             <div style="font-size:11px;color:var(--bunhs-muted);margin-top:3px;padding-left:2px;">Philippine format: 09xxxxxxxxx</div>
+                        </div>
+                        <div id="phoneError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Phone is required</div>
+                        <div id="phoneFormatError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Please enter a valid Philippine phone number</div>
+
+                        <!-- ── Username ── -->
+                        <div class="bm-field">
+                            <label class="bm-label" for="signupUsername">Username <span style="color:#e53935;">*</span></label>
+                            <div class="bm-input-wrap">
+                                <i class="fas fa-at bm-field-icon"></i>
+                                <input class="bm-input" type="text" id="signupUsername" name="username"
+                                    placeholder="Choose a username (3–50 chars)" required minlength="3" maxlength="50"
+                                    autocomplete="username"
+                                    oninput="this.value=this.value.replace(/[^A-Za-z0-9_\-\.]/g,'')">
+                            </div>
+                            <div id="usernameHint" style="font-size:11px;color:var(--bunhs-muted);margin-top:3px;padding-left:2px;">
+                                Letters, numbers, underscore, hyphen, dot only.
+                            </div>
+                        </div>
+                        <div id="usernameError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Username is required</div>
+                        <div id="usernameLengthError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Username must be 3-50 characters</div>
+                        <div id="usernameFormatError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Invalid characters in username</div>
+
+                        <!-- ── Password + Confirm ── -->
+                        <div class="bm-row">
+                            <div class="bm-field">
+                                <label class="bm-label" for="signupPassword">Password <span style="color:#e53935;">*</span></label>
+                                <div class="bm-input-wrap">
+                                    <i class="fas fa-lock bm-field-icon"></i>
+                                    <input class="bm-input has-toggle" type="password" id="signupPassword" name="password"
+                                        placeholder="Min. 8 characters" required minlength="8"
+                                        autocomplete="new-password"
+                                        oninput="validateSignupPassword(this.value)">
+                                    <button type="button" class="bm-toggle-pwd" id="toggleSignupPwd" tabindex="-1">
+                                        <i class="fas fa-eye" id="signupEyeIcon"></i>
+                                    </button>
+                                </div>
+                                <!-- Password strength bar -->
+                                <div id="pwStrengthWrap" style="margin-top:6px;display:none;">
+                                    <div style="display:flex;gap:3px;margin-bottom:3px;">
+                                        <div id="pws1" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
+                                        <div id="pws2" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
+                                        <div id="pws3" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
+                                        <div id="pws4" style="flex:1;height:3px;border-radius:99px;background:#dde8e2;transition:background .2s;"></div>
+                                    </div>
+                                    <div id="pwStrengthLabel" style="font-size:10.5px;color:var(--bunhs-muted);"></div>
+                                </div>
+                                <div style="font-size:10.5px;color:var(--bunhs-muted);margin-top:3px;padding-left:2px;">
+                                    Must include uppercase, lowercase, number &amp; special char.
+                                </div>
+                            </div>
+                            <div class="bm-field">
+                                <label class="bm-label" for="signupConfirmPassword">Confirm <span style="color:#e53935;">*</span></label>
+                                <div class="bm-input-wrap">
+                                    <i class="fas fa-lock bm-field-icon"></i>
+                                    <input class="bm-input" type="password" id="signupConfirmPassword" name="confirm_password"
+                                        placeholder="Repeat password" required
+                                        autocomplete="new-password">
+                                    <button type="button" class="bm-toggle-pwd" id="toggleSignupConfirmPwd" tabindex="-1">
+                                        <i class="fas fa-eye" id="signupConfirmEyeIcon"></i>
+                                    </button>
+                                </div>
+                                <div id="pwMatchHint" style="font-size:11px;margin-top:3px;padding-left:2px;display:none;"></div>
+                            </div>
+                        </div>
+                        <!-- Password error indicators moved outside grid -->
+                        <div id="signupPasswordError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Password is required</div>
+                        <div id="signupConfirmPasswordError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Please confirm your password</div>
+                        <div id="passwordMismatchError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Passwords do not match</div>
+                        <!-- Password Requirements - moved outside bm-row to span full width -->
+                        <div id="signupPasswordRequirements" style="margin-top:6px;padding:8px;background:#f8f9fa;border-radius:6px;border:1px solid #e9ecef;width:100%;box-sizing:border-box;">
+                            <div style="font-size:10.5px;font-weight:600;color:#495057;margin-bottom:5px;">Password Requirements:</div>
+                            <div id="signupReqUppercase" style="font-size:10px;color:#6c757d;margin-bottom:2px;display:flex;align-items:center;gap:4px;">
+                                <i class="fas fa-times-circle" style="color:#dc3545;font-size:9px;"></i> Must include at least one uppercase letter
+                            </div>
+                            <div id="signupReqLowercase" style="font-size:10px;color:#6c757d;margin-bottom:2px;display:flex;align-items:center;gap:4px;">
+                                <i class="fas fa-times-circle" style="color:#dc3545;font-size:9px;"></i> Must include at least one lowercase letter
+                            </div>
+                            <div id="signupReqNumber" style="font-size:10px;color:#6c757d;margin-bottom:2px;display:flex;align-items:center;gap:4px;">
+                                <i class="fas fa-times-circle" style="color:#dc3545;font-size:9px;"></i> Must include at least one number
+                            </div>
+                            <div id="signupReqSpecial" style="font-size:10px;color:#6c757d;margin-bottom:2px;display:flex;align-items:center;gap:4px;">
+                                <i class="fas fa-times-circle" style="color:#dc3545;font-size:9px;"></i> Must include at least one special character
+                            </div>
                         </div>
 
                         <div class="bm-err" id="signupErrBox">
@@ -963,6 +1008,7 @@ if (empty($_SESSION['csrf_token'])) {
                                 and <a href="privacy.html">Privacy Policy</a>
                             </label>
                         </div>
+                        <div id="termsError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">You must agree to the terms and conditions</div>
 
                         <button type="submit" class="bm-btn" id="signupSubmitBtn">
                             <span class="bm-btn-label"><i class="fas fa-paper-plane"></i>&ensp;Send Verification Code</span>

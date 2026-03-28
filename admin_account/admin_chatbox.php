@@ -25,6 +25,19 @@ $assetsBase  = rtrim(dirname(dirname($_script)), '/') . '/';
 
 $preloadConvId  = (int) ($_GET['conv'] ?? 0);
 $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
+
+function generateCSRFToken() {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        $_SESSION['csrf_token_expires'] = time() + 1800; // 30 minutes
+    }
+    
+    return $_SESSION['csrf_token'] ?? '';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -33,6 +46,7 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chatbox – BUNHS Admin</title>
+    <meta name="csrf-token" content="<?= generateCSRFToken() ?>">
     <link rel="stylesheet" href="<?= $assetsBase ?>admin_account/admin_assets/cs/admin_style.css">
     <link rel="stylesheet" href="../overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -346,6 +360,8 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
             flex: 1;
             overflow-y: auto;
             max-height: calc(7 * 73px); /* 7 users visible without scrolling */
+            background: var(--surface);
+            border-radius: 0 0 var(--radius) var(--radius) 0;
         }
 
         .conv-items::-webkit-scrollbar {
@@ -379,11 +395,12 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
             display: flex;
             align-items: center;
             gap: 11px;
-            padding: 13px 16px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
             cursor: pointer;
-            border-bottom: 1px solid #f0f5f3;
-            transition: all .14s ease;
+            transition: all .15s ease;
             position: relative;
+            background: var(--surface);
         }
 
         .conv-item:hover {
@@ -420,13 +437,11 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
         }
 
         .conv-name {
+            font-size: 14px;
             font-weight: 600;
-            font-size: 13.5px;
             color: var(--text);
             margin-bottom: 2px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+            line-height: 1.2;
         }
 
         .club-tag {
@@ -523,27 +538,21 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
             padding: 14px 22px;
             border-bottom: 1px solid var(--border);
             display: flex;
-            align-items: center;
-            gap: 14px;
-            background: var(--forest);
-        }
 
-        .chat-win-avatar {
-            width: 44px;
-            height: 44px;
-            border-radius: 11px;
-            background: rgba(255, 255, 255, .15);
-            border: 2px solid rgba(255, 255, 255, .2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-weight: 700;
-            font-size: 17px;
-        }
+.chat-empty p {
+    font-size: 15px;
+    font-weight: 500;
+}
 
-        .chat-win-info {
-            flex: 1;
+/* Chat header */
+.chat-win-header {
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--forest);
+}
         }
 
         .chat-win-name {
@@ -725,9 +734,17 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
             color: inherit;
         }
 
-        .msg-time {
-            font-size: 10.5px;
+        .conv-time {
+            font-size: 11px;
             color: var(--muted);
+            font-weight: 500;
+        }
+
+        .conv-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
             margin-top: 4px;
         }
 
@@ -980,21 +997,30 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
            EMPTY / LOADING STATES
         ════════════════════════════════════════════ */
         .conv-empty-state {
-            padding: 40px 20px;
+            padding: 60px 40px;
             text-align: center;
             color: var(--muted);
         }
 
-        .conv-empty-state i {
-            font-size: 36px;
-            opacity: .2;
-            display: block;
-            margin-bottom: 10px;
+        .empty-icon {
+            font-size: 48px;
             color: var(--forest);
+            opacity: 0.3;
+            margin-bottom: 16px;
         }
 
-        .conv-empty-state span {
-            font-size: 13px;
+        .empty-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .empty-desc {
+            font-size: 14px;
+            line-height: 1.5;
+            max-width: 280px;
+            margin: 0 auto;
         }
 
         .loading-row {
@@ -1150,7 +1176,7 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
                 <!-- Chat Window -->
                 <div class="chat-win">
                     <!-- Actual chat area (hidden until conv selected) -->
-                    <div id="chatArea" style="display:none; flex:1; display:flex; flex-direction:column;">
+                    <div id="chatArea" style="display:none;">
 
                         <!-- Chat Header (deep forest) -->
                         <div class="chat-win-header">
@@ -1241,7 +1267,13 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
         function renderConvs(convs) {
             const box = document.getElementById('convItems');
             if (!convs.length) {
-                box.innerHTML = `<div class="conv-empty-state"><i class="fas fa-inbox"></i><span>No conversations found</span></div>`;
+                box.innerHTML = `<div class="conv-empty-state">
+                    <div class="empty-icon">
+                        <i class="fas fa-inbox"></i>
+                    </div>
+                    <div class="empty-title">No Student Conversations</div>
+                    <div class="empty-desc">Students haven't started chatting with you yet. When they do, their conversations will appear here.</div>
+                </div>`;
                 return;
             }
 
@@ -1262,11 +1294,21 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
                 html += `
                 <div class="conv-item ${active}"
                      onclick="selectConversation(${c.conversation_id}, ${JSON.stringify(c).replace(/"/g,'&quot;')})">
-                    <div class="conv-avatar ${isClub ? 'club-av' : ''}">${init}</div>
+                    <div class="conv-avatar ${isClub ? 'club-av' : ''}" title="${isClub ? 'Group Chat' : 'Student Chat'}">
+                        ${init}
+                        ${!isClub && c.unread_count > 0 ? '<div class="conv-avatar online"></div>' : ''}
+                    </div>
                     <div class="conv-info">
-                        <div class="conv-name">${escHtml(isClub ? c.club_name : c.student_name)} ${clubTag}</div>
+                        <div class="conv-name">
+                            ${escHtml(isClub ? c.club_name : c.student_name)} 
+                            ${clubTag}
+                            ${!isClub && c.unread_count > 0 ? '<span style="color: var(--accent); font-size: 10px; margin-left: 4px;">●</span>' : ''}
+                        </div>
                         <div class="conv-preview">${escHtml(c.last_message || '—')}</div>
-                        <div class="conv-time">${escHtml(c.time_ago || '')}</div>
+                        <div class="conv-meta">
+                            <div class="conv-time">${escHtml(c.time_ago || '')}</div>
+                            ${c.unread_count > 0 ? `<div class="conv-unread">${c.unread_count}</div>` : ''}
+                        </div>
                     </div>
                     ${unread}${fileInd}
                 </div>`;
@@ -1275,21 +1317,32 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
         }
 
         async function loadConversations() {
-            const fd = new FormData();
-            fd.append('action', 'fetch_conversations');
-            const res = await fetch(API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (data.success) {
-                allConvs = data.conversations || [];
-                updateFilterCounts();
-                renderConvs(applyFilter(allConvs));
-                if (activeConvId > 0) {
-                    const conv = allConvs.find(c => c.conversation_id === activeConvId);
-                    if (conv) selectConversation(activeConvId, conv);
+            try {
+                const fd = new FormData();
+                fd.append('action', 'fetch_conversations');
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
                 }
+                
+                const data = await res.json();
+                if (data.success) {
+                    allConvs = data.conversations || [];
+                    updateFilterCounts();
+                    renderConvs(applyFilter(allConvs));
+                    if (activeConvId > 0) {
+                        const conv = allConvs.find(c => c.conversation_id === activeConvId);
+                        if (conv) selectConversation(activeConvId, conv);
+                    }
+                }
+            } catch (error) {
+                console.error('Load conversations error:', error);
             }
         }
 
@@ -1315,17 +1368,27 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
 
         /* ════════ MESSAGES ════════ */
         async function loadMessages() {
-            const fd = new FormData();
-            fd.append('action', 'fetch_messages');
-            fd.append('conversation_id', activeConvId);
-            const res = await fetch(API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (!data.success) return;
-            renderMessages(data.messages);
-            await refreshConvList();
+            try {
+                const fd = new FormData();
+                fd.append('action', 'fetch_messages');
+                fd.append('conversation_id', activeConvId);
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                if (!data.success) return;
+                renderMessages(data.messages);
+            } catch (error) {
+                console.error('Load messages error:', error);
+            }
         }
 
         function renderMessages(msgs) {
@@ -1455,59 +1518,95 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
 
         /* ════════ SEND MESSAGE ════════ */
         async function sendMessage() {
-            const input = document.getElementById('msgInput');
-            const text = input.value.trim();
-            if (!text || !activeConvId) return;
+            try {
+                const input = document.getElementById('msgInput');
+                const text = input.value.trim();
+                if (!text || !activeConvId) return;
 
-            const btn = document.getElementById('sendBtn');
-            btn.disabled = true;
-            input.value = '';
-            input.style.height = '';
+                const btn = document.getElementById('sendBtn');
+                btn.disabled = true;
+                input.value = '';
+                input.style.height = '';
 
-            const fd = new FormData();
-            fd.append('action', 'send_message');
-            fd.append('conversation_id', activeConvId);
-            fd.append('message', text);
+                const fd = new FormData();
+                fd.append('action', 'send_message');
+                fd.append('conversation_id', activeConvId);
+                fd.append('message', text);
+                fd.append('csrf_token', getCSRFToken());
 
-            const res = await fetch(API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            btn.disabled = false;
+                const res = await fetch(API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                btn.disabled = false;
 
-            if (data.success) {
-                await loadMessages();
-                await refreshConvList();
-            } else {
-                input.value = text;
-                toast('Failed to send message.', 'error');
+                if (data.success) {
+                    await loadMessages();
+                    await refreshConvList();
+                } else {
+                    input.value = text;
+                    toast(data.message || 'Failed to send message.', 'error');
+                }
+            } catch (error) {
+                console.error('Send message error:', error);
+                const btn = document.getElementById('sendBtn');
+                const input = document.getElementById('msgInput');
+                
+                if (btn) btn.disabled = false;
+                if (input && text) input.value = text;
+                
+                toast('Network error. Please check your connection and try again.', 'error');
             }
         }
 
         function markRead() {
-            if (!activeConvId) return;
-            const fd = new FormData();
-            fd.append('action', 'mark_read');
-            fd.append('conversation_id', activeConvId);
-            fetch(API, {
-                method: 'POST',
-                body: fd
-            });
+            try {
+                if (!activeConvId) return;
+                const fd = new FormData();
+                fd.append('action', 'mark_read');
+                fd.append('conversation_id', activeConvId);
+                fd.append('csrf_token', getCSRFToken());
+                
+                fetch(API, {
+                    method: 'POST',
+                    body: fd
+                }).catch(error => {
+                    console.error('Mark read error:', error);
+                });
+            } catch (error) {
+                console.error('Mark read error:', error);
+            }
         }
 
         async function refreshConvList() {
-            const fd = new FormData();
-            fd.append('action', 'fetch_conversations');
-            const res = await fetch(API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (!data.success) return;
-            allConvs = data.conversations;
-            updateFilterCounts();
-            renderConvs(applyFilter(allConvs));
+            try {
+                const fd = new FormData();
+                fd.append('action', 'fetch_conversations');
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                if (!data.success) return;
+                allConvs = data.conversations;
+                updateFilterCounts();
+                renderConvs(applyFilter(allConvs));
+            } catch (error) {
+                console.error('Refresh conversation list error:', error);
+            }
         }
 
         /* ════════ HELPERS ════════ */
@@ -1516,6 +1615,18 @@ $adminInitial   = strtoupper(substr($_SESSION['username'] ?? 'A', 0, 1));
             return String(s)
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function getCSRFToken() {
+            // Get CSRF token from meta tag or generate one
+            const metaTag = document.querySelector('meta[name="csrf-token"]');
+            if (metaTag) {
+                return metaTag.getAttribute('content');
+            }
+            
+            // Fallback: make a request to get token
+            console.warn('CSRF token not found in meta tag');
+            return '';
         }
 
         function formatDate(d) {

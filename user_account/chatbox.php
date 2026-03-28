@@ -1,438 +1,183 @@
 <?php
-
 /**
- * chatbox.php  (student-side)
- * Enhanced: file request system, club group chats, redesigned UI.
- * UI Redesign: Deep Forest #102C26 header, improved chat visibility
+ * chatbox.php - Student Chatbox
+ * Fixed version with proper JavaScript function scoping
  */
 
-if (session_status() === PHP_SESSION_NONE) session_start();
 require_once '../session_config.php';
 
 if (!isset($_SESSION['student_id'])) {
-    $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
-    header('Location: index.php');
+    header('Location: ../index.php');
     exit;
 }
 
 include '../db_connection.php';
 
-$student_id   = $_SESSION['student_id'];
-$student_name = $_SESSION['student_name'] ?? 'Student';
-$grade_level  = $_SESSION['grade_level']  ?? 'Grade 10';
-$initials     = strtoupper(substr(strip_tags($student_name), 0, 1));
-$notification_preference = null;
+$student_id = (int) $_SESSION['student_id'];
+$student_initial = strtoupper(substr($_SESSION['first_name'] ?? 'S', 0, 1));
 
-$chatApiPath    = '../admin_account/chat_api.php';
-$fileRequestApi = '../admin_account/file_request_api.php';
-$clubChatApi    = '../admin_account/club_chat_api.php';
+$_script = $_SERVER['SCRIPT_NAME'];
+$apiBase = rtrim(dirname($_script), '/') . '/';
+$assetsBase = rtrim(dirname(dirname($_script)), '/') . '/';
 
-// ── FETCH FULL STUDENT PROFILE ────────────────────────────────────────────────
-$db_student = [];
-try {
-    $stmt = $conn->prepare(
-        "SELECT first_name, last_name, grade_level,
-                phone, email, photo,
-                notification_preference,
-                phone_verified, email_verified,
-                login_method
-         FROM students WHERE student_id = ? LIMIT 1"
-    );
-    if ($stmt) {
-        $stmt->bind_param("s", $student_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if ($row = $result->fetch_assoc()) {
-            $db_student   = $row;
-            $student_name = trim($row['first_name'] . ' ' . $row['last_name']);
-            $grade_level  = $row['grade_level'];
-            $notification_preference = $row['notification_preference'];
-            $initials = strtoupper(substr($student_name, 0, 1));
-        }
-        $stmt->close();
-    }
-} catch (Exception $e) {
-    try {
-        $stmt = $conn->prepare("SELECT first_name, last_name, grade_level, notification_preference FROM students WHERE student_id = ?");
-        if ($stmt) {
-            $stmt->bind_param("s", $student_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            if ($row = $result->fetch_assoc()) {
-                $db_student   = $row;
-                $student_name = trim($row['first_name'] . ' ' . $row['last_name']);
-                $grade_level  = $row['grade_level'];
-                $notification_preference = $row['notification_preference'];
-                $initials = strtoupper(substr($student_name, 0, 1));
-            }
-            $stmt->close();
-        }
-    } catch (Exception $e2) {
-        error_log("DB error: " . $e2->getMessage());
-    }
-}
+// API paths
+$chatApi = $apiBase . 'chat_api.php';
+$fileReqApi = $apiBase . 'file_request_api.php';
+$clubChatApi = $apiBase . 'club_chat_api.php';
 
-$login_method   = isset($db_student['login_method']) ? $db_student['login_method'] : null;
-$phone_verified = !empty($db_student['phone_verified']);
-$email_verified = !empty($db_student['email_verified']);
-$profile_photo  = !empty($db_student['photo']) ? $db_student['photo'] : null;
-$student_email  = !empty($db_student['email'])  ? $db_student['email']  : null;
-$student_phone  = !empty($db_student['phone'])  ? $db_student['phone']  : null;
-
-if (!$login_method && !empty($_SESSION['login_method']))   $login_method  = $_SESSION['login_method'];
-if (!$student_email && !empty($_SESSION['student_email'])) $student_email = $_SESSION['student_email'];
-if (!$student_phone && !empty($_SESSION['student_phone'])) $student_phone = $_SESSION['student_phone'];
-
-if ($login_method === 'email' || ($email_verified && $student_email)) {
-    $profile_display_mode = 'email';
-} elseif ($login_method === 'phone' || ($phone_verified && $student_phone)) {
-    $profile_display_mode = 'phone';
-} elseif (!empty($_SESSION['notif_dismissed'])) {
-    $profile_display_mode = 'skip';
-} else {
-    $profile_display_mode = 'none';
-}
-
-$user_verified = ($email_verified || $phone_verified || !empty($_SESSION['dash_email_verified']));
-
-$nav_profile_img  = 'assets/img/person/unknown.jpg';
-$nav_profile_type = 'icon';
-if ($profile_display_mode === 'email') {
-    if ($profile_photo) {
-        $nav_profile_img = htmlspecialchars($profile_photo, ENT_QUOTES, 'UTF-8');
-        $nav_profile_type = 'img';
-    } elseif (!empty($_SESSION['google_avatar'])) {
-        $nav_profile_img = htmlspecialchars($_SESSION['google_avatar'], ENT_QUOTES, 'UTF-8');
-        $nav_profile_type = 'img';
-    }
-}
-
-switch ($profile_display_mode) {
-    case 'email':
-        $nav_display_label = $student_email ? htmlspecialchars($student_email, ENT_QUOTES, 'UTF-8') : htmlspecialchars($student_name, ENT_QUOTES, 'UTF-8');
-        break;
-    case 'phone':
-        $nav_display_label = $student_phone ? htmlspecialchars($student_phone, ENT_QUOTES, 'UTF-8') : htmlspecialchars($student_name, ENT_QUOTES, 'UTF-8');
-        break;
-    default:
-        $nav_display_label = '';
-        break;
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Messages – BUNHS Student Portal</title>
-    <link rel="stylesheet" href="../admin_account/admin_assets/cs/admin_style.css">
+    <title>Chatbox – BUNHS Student</title>
+    <meta name="csrf-token" content="<?= generateCSRFToken() ?>">
+    <link rel="stylesheet" href="<?= $assetsBase ?>overall_body.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-
+    
     <style>
-        /* ════════════════════════════════════════════
-           ROOT VARIABLES
-        ════════════════════════════════════════════ */
         :root {
-            /* Deep Forest Palette */
-            --forest: #102C26;
-            --forest-mid: #1a4a40;
-            --forest-light: #245c50;
-            --forest-pale: rgba(16, 44, 38, .08);
-            --forest-glow: rgba(16, 44, 38, .18);
-
-            /* Accent */
-            --accent: #3db88a;
-            --accent-soft: rgba(61, 184, 138, .12);
-            --accent-border: rgba(61, 184, 138, .3);
-
-            /* Legacy alias (used in older CSS) */
-            --moss: #3db88a;
-            --moss-dark: #2a9970;
-            --moss-ultra: rgba(61, 184, 138, .1);
-
-            /* Surface */
-            --sidebar-w: 280px;
-            --bg: #f0f4f2;
+            --forest: #2d4a2b;
+            --forest-mid: #3a5f38;
+            --forest-light: #4a7347;
+            --bg: #f8faf9;
             --surface: #ffffff;
-            --surface2: #f5f9f7;
-            --border: #dde8e4;
-            --border2: #c8d8d3;
-
-            /* Text */
-            --text: #0d1f1b;
-            --text-2: #3a5248;
-            --muted: #6b8c82;
-
-            /* Status */
+            --surface2: #f1f5f9;
+            --border: #e5e7eb;
+            --text: #1f2937;
+            --muted: #64748b;
             --success: #10b981;
-            --warning: #f59e0b;
             --danger: #ef4444;
-
-            /* Shadows */
-            --shadow-sm: 0 1px 4px rgba(16, 44, 38, .07);
-            --shadow-md: 0 4px 20px rgba(16, 44, 38, .10);
-            --shadow-lg: 0 12px 40px rgba(16, 44, 38, .14);
-
-            /* Shape */
-            --radius: 16px;
-            --radius-sm: 10px;
-
-            /* Typography */
-            --font: 'Plus Jakarta Sans', sans-serif;
-            --font-display: 'Outfit', sans-serif;
-        }
-
-        *,
-        *::before,
-        *::after {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+            --warning: #f59e0b;
+            --sidebar-w: 280px;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.15);
+            --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
         }
 
         body {
-            font-family: var(--font);
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
             background: var(--bg);
-            min-height: 100vh;
             color: var(--text);
+            line-height: 1.6;
         }
 
-        /* ════════════════════════════════════════════
-           MAIN LAYOUT
-        ════════════════════════════════════════════ */
         .main-content {
             margin-left: var(--sidebar-w);
+            margin-right: 0;
             min-height: 100vh;
             padding: 22px 24px;
             display: flex;
             flex-direction: column;
+            width: calc(100% - var(--sidebar-w));
         }
 
-        /* ════════════════════════════════════════════
-           PAGE HEADER — DEEP FOREST
-        ════════════════════════════════════════════ */
-        .page-header {
-            background: var(--forest);
-            border-radius: var(--radius);
-            padding: 18px 24px;
-            margin-bottom: 20px;
+        .chat-page {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
+            height: calc(100vh - 150px);
+            flex: 1;
+            background: var(--surface);
+            border-radius: var(--radius);
             box-shadow: var(--shadow-md);
-            position: relative;
             overflow: hidden;
         }
 
-        .page-header::before {
-            content: '';
-            position: absolute;
-            top: -50px;
-            right: -30px;
-            width: 180px;
-            height: 180px;
-            border-radius: 50%;
-            background: rgba(61, 184, 138, .06);
-            pointer-events: none;
+        .chat-sidebar {
+            width: 320px;
+            background: var(--surface2);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
         }
 
-        .page-header h1 {
-            font-family: var(--font-display);
-            font-size: 22px;
+        .sidebar-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+        }
+
+        .sidebar-title {
+            font-size: 16px;
             font-weight: 700;
-            color: #fff;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+
+        .search-box {
+            position: relative;
+            margin-bottom: 12px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 13.5px;
+            background: var(--surface);
+            outline: none;
+            transition: all .18s ease;
+        }
+
+        .search-box input:focus {
+            border-color: var(--forest);
+            background: var(--bg);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .conv-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .conv-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: all .18s ease;
             display: flex;
             align-items: center;
             gap: 12px;
         }
 
-        .page-header h1 i {
-            width: 38px;
-            height: 38px;
-            background: rgba(255, 255, 255, .12);
-            border-radius: 9px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            color: var(--accent);
-        }
-
-        .page-header p {
-            color: rgba(255, 255, 255, .5);
-            font-size: 12.5px;
-            margin-top: 2px;
-            padding-left: 50px;
-        }
-
-        .header-date {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            padding: 8px 14px;
-            background: rgba(255, 255, 255, .1);
-            border: 1px solid rgba(255, 255, 255, .15);
-            border-radius: var(--radius-sm);
-            color: rgba(255, 255, 255, .75);
-            font-size: 12.5px;
-            white-space: nowrap;
-        }
-
-        .header-date i {
-            color: var(--accent);
-        }
-
-        /* ════════════════════════════════════════════
-           CHAT LAYOUT
-        ════════════════════════════════════════════ */
-        .chat-wrap {
-            display: grid;
-            grid-template-columns: 290px 1fr;
-            gap: 18px;
-            flex: 1;
-            height: calc(100vh - 148px);
-            min-height: 0;
-        }
-
-        /* ── Sidebar panel ── */
-        .chat-panel {
-            background: var(--surface);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-md);
-            border: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .panel-header {
-            padding: 14px 18px 10px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: var(--forest);
-        }
-
-        .panel-header h3 {
-            font-family: var(--font-display);
-            font-size: 13.5px;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .panel-badge {
-            background: var(--accent);
-            color: #fff;
-            font-size: 10px;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 20px;
-        }
-
-        .panel-search {
-            padding: 10px 14px;
-            border-bottom: 1px solid var(--border);
-            background: var(--surface2);
-        }
-
-        .panel-search input {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1.5px solid var(--border);
-            border-radius: var(--radius-sm);
-            font-size: 13px;
-            outline: none;
-            font-family: var(--font);
-            background: var(--surface);
-            transition: border-color .15s;
-            color: var(--text);
-        }
-
-        .panel-search input:focus {
-            border-color: var(--forest);
-        }
-
-        .contact-list {
-            flex: 1;
-            overflow-y: auto;
-        }
-
-        .contact-list::-webkit-scrollbar {
-            width: 3px;
-        }
-
-        .contact-list::-webkit-scrollbar-thumb {
-            background: var(--border2);
-            border-radius: 3px;
-        }
-
-        .conv-section-label {
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            color: var(--muted);
-            padding: 10px 18px 4px;
-            background: var(--surface2);
-        }
-
-        .conv-item {
-            display: flex;
-            align-items: center;
-            gap: 11px;
-            padding: 12px 16px;
-            cursor: pointer;
-            border-bottom: 1px solid #f0f5f2;
-            transition: background .14s;
-            position: relative;
-        }
-
         .conv-item:hover {
-            background: var(--accent-soft);
+            background: var(--bg);
         }
 
         .conv-item.active {
-            background: var(--forest-pale);
-            border-left: 3px solid var(--forest);
+            background: var(--forest);
+            color: white;
         }
 
         .conv-avatar {
-            width: 42px;
-            height: 42px;
-            border-radius: 11px;
-            flex-shrink: 0;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #fff;
             font-weight: 700;
-            font-size: 15px;
+            font-size: 14px;
+            background: var(--surface2);
+            color: var(--text);
         }
 
-        .conv-avatar.admin-av {
-            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
-            box-shadow: 0 3px 10px rgba(16, 44, 38, .2);
+        .conv-item.active .conv-avatar {
+            background: white;
+            color: var(--forest);
         }
 
-        .conv-avatar.club-av {
-            background: linear-gradient(135deg, #2d7a60, #1a4a38);
-            border: 2px solid rgba(61, 184, 138, .3);
-            position: relative;
-        }
-
-        .conv-avatar.club-av::after {
-            content: '';
-            position: absolute;
-            bottom: -2px;
-            right: -2px;
-            width: 11px;
-            height: 11px;
-            background: var(--accent);
-            border-radius: 50%;
-            border: 2px solid var(--surface);
+        .conv-av.club-av {
+            background: var(--warning);
+            color: white;
         }
 
         .conv-info {
@@ -442,24 +187,12 @@ switch ($profile_display_mode) {
 
         .conv-name {
             font-weight: 600;
-            font-size: 13.5px;
             color: var(--text);
             margin-bottom: 2px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
         }
 
-        .club-tag {
-            background: var(--accent-soft);
-            color: var(--forest);
-            font-size: 9px;
-            font-weight: 700;
-            letter-spacing: .5px;
-            text-transform: uppercase;
-            padding: 1px 6px;
-            border-radius: 20px;
-            border: 1px solid var(--accent-border);
+        .conv-item.active .conv-name {
+            color: white;
         }
 
         .conv-preview {
@@ -470,614 +203,325 @@ switch ($profile_display_mode) {
             text-overflow: ellipsis;
         }
 
+        .conv-item.active .conv-preview {
+            color: rgba(255,255,255,0.8);
+        }
+
+        .club-tag {
+            font-size: 9px;
+            padding: 2px 6px;
+            background: var(--warning);
+            color: white;
+            border-radius: 10px;
+            font-weight: 600;
+            margin-left: 6px;
+        }
+
         .conv-time {
-            font-size: 10px;
-            color: #aab;
-            white-space: nowrap;
-            margin-left: 4px;
+            font-size: 11px;
+            color: var(--muted);
         }
 
         .conv-unread {
-            background: var(--forest);
-            color: #fff;
+            background: var(--danger);
+            color: white;
             font-size: 10px;
-            font-weight: 700;
-            padding: 2px 7px;
+            padding: 2px 6px;
             border-radius: 10px;
-            position: absolute;
-            top: 12px;
-            right: 14px;
+            font-weight: 600;
+            margin-left: auto;
         }
 
-        /* ════════════════════════════════════════════
-           CHAT WINDOW
-        ════════════════════════════════════════════ */
-        .chat-win {
-            background: var(--surface);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-md);
-            border: 1px solid var(--border);
+        .chat-area {
+            flex: 1;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            background: var(--surface);
         }
 
-        /* Header — deep forest */
         .chat-header {
-            padding: 14px 20px;
+            padding: 16px 22px;
             border-bottom: 1px solid var(--border);
+            background: var(--surface);
             display: flex;
             align-items: center;
-            gap: 13px;
-            background: var(--forest);
+            gap: 12px;
         }
 
-        .chat-header-avatar {
-            width: 42px;
-            height: 42px;
-            border-radius: 11px;
-            background: rgba(255, 255, 255, .15);
-            border: 2px solid rgba(255, 255, 255, .18);
+        .chat-info {
+            flex: 1;
+        }
+
+        .chat-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .chat-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #fff;
             font-weight: 700;
             font-size: 16px;
-        }
-
-        .chat-header-info h3 {
-            font-size: 15px;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .online-dot {
-            display: inline-block;
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: var(--accent);
-            margin-right: 5px;
-        }
-
-        .chat-header-status {
-            font-size: 12px;
-            color: rgba(255, 255, 255, .55);
-            margin-top: 1px;
+            background: var(--forest);
+            color: white;
         }
 
         .club-header-badge {
-            margin-left: auto;
-            background: rgba(255, 255, 255, .12);
-            color: rgba(255, 255, 255, .8);
-            border: 1px solid rgba(255, 255, 255, .2);
-            padding: 4px 12px;
-            border-radius: 20px;
             font-size: 11px;
+            padding: 4px 8px;
+            background: var(--warning);
+            color: white;
+            border-radius: 12px;
             font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 5px;
+            margin-left: 8px;
         }
 
-        /* Messages */
         .chat-messages {
             flex: 1;
-            padding: 20px;
             overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            background: #f4f8f6;
-            background-image: radial-gradient(circle at 5% 10%, rgba(16, 44, 38, .025) 0%, transparent 40%);
+            padding: 16px;
+            background: var(--bg);
+            min-height: 300px;
         }
 
-        .chat-messages::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .chat-messages::-webkit-scrollbar-thumb {
-            background: var(--border2);
-            border-radius: 4px;
-        }
-
-        /* Date divider */
-        .date-sep {
-            text-align: center;
-            font-size: 11px;
-            color: var(--muted);
-            position: relative;
-            margin: 6px 0;
-        }
-
-        .date-sep span {
-            background: #f4f8f6;
-            padding: 0 12px;
-            position: relative;
-            z-index: 1;
-        }
-
-        .date-sep::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            right: 0;
-            top: 50%;
-            height: 1px;
-            background: var(--border);
-        }
-
-        /* Bubbles */
         .msg-row {
             display: flex;
-            gap: 9px;
-            max-width: 76%;
-            animation: bubbleIn .2s ease;
-        }
-
-        @keyframes bubbleIn {
-            from {
-                opacity: 0;
-                transform: translateY(6px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            margin-bottom: 16px;
+            align-items: flex-start;
+            gap: 10px;
         }
 
         .msg-row.sent {
-            align-self: flex-end;
             flex-direction: row-reverse;
         }
 
         .msg-av {
             width: 32px;
             height: 32px;
-            border-radius: 9px;
-            flex-shrink: 0;
-            align-self: flex-end;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #fff;
             font-weight: 700;
-            font-size: 12px;
-            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
-            box-shadow: 0 2px 8px rgba(16, 44, 38, .2);
-        }
-
-        .msg-row.sent .msg-av {
-            background: linear-gradient(135deg, var(--accent), #2a9970);
+            font-size: 14px;
+            background: var(--surface2);
+            color: var(--text);
+            flex-shrink: 0;
         }
 
         .msg-bubble {
-            background: var(--surface);
-            padding: 10px 14px;
-            border-radius: 14px 14px 14px 4px;
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            background: var(--surface2);
             box-shadow: var(--shadow-sm);
-            border: 1px solid var(--border);
+            position: relative;
         }
 
         .msg-row.sent .msg-bubble {
             background: var(--forest);
-            color: #fff;
-            border-radius: 14px 14px 4px 14px;
-            border: none;
-            box-shadow: 0 3px 12px rgba(16, 44, 38, .22);
+            color: white;
         }
 
         .msg-text {
-            font-size: 13.5px;
-            line-height: 1.55;
-            word-break: break-word;
+            font-size: 14px;
+            line-height: 1.5;
+            word-wrap: break-word;
         }
 
         .msg-time {
-            font-size: 10.5px;
+            font-size: 11px;
             color: var(--muted);
             margin-top: 4px;
-            display: flex;
-            align-items: center;
-            gap: 3px;
         }
 
-        .msg-row.sent .msg-time {
-            color: rgba(255, 255, 255, .5);
-            justify-content: flex-end;
-        }
-
-        /* File request bubble */
-        .msg-bubble.file-req-bubble {
-            background: #fffdf0;
-            border: 1.5px solid #ffe58a;
-            border-radius: 14px 14px 14px 4px;
-        }
-
-        .msg-row.sent .msg-bubble.file-req-bubble {
-            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
-            border: none;
-        }
-
-        .file-req-header {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            margin-bottom: 8px;
-        }
-
-        .file-req-icon {
-            width: 28px;
-            height: 28px;
-            border-radius: 7px;
-            background: linear-gradient(135deg, var(--forest-mid), var(--forest));
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-size: 12px;
-        }
-
-        .file-req-label {
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: .3px;
-            color: var(--forest);
-        }
-
-        .msg-row.sent .file-req-label {
-            color: rgba(255, 255, 255, .75);
-        }
-
-        .file-req-name {
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .file-req-reason {
-            font-size: 12.5px;
-            opacity: .75;
-        }
-
-        .req-status-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            margin-top: 8px;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 600;
-        }
-
-        .req-status-pill.pending {
-            background: #fef9c3;
-            color: #854d0e;
-        }
-
-        .req-status-pill.approved {
-            background: #dcfce7;
-            color: #14532d;
-        }
-
-        .req-status-pill.rejected {
-            background: #fee2e2;
-            color: #7f1d1d;
-        }
-
-        .file-download-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            margin-top: 8px;
-            padding: 7px 14px;
-            background: var(--forest);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            transition: all .18s;
-        }
-
-        .file-download-btn:hover {
-            background: var(--forest-mid);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px var(--forest-glow);
-        }
-
-        /* ════════════════════════════════════════════
-           INPUT AREA
-        ════════════════════════════════════════════ */
-        .chat-input-wrap {
-            padding: 14px 18px;
+        .chat-input-box {
+            padding: 16px 22px;
             border-top: 1px solid var(--border);
             background: var(--surface);
-            position: relative;
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
         }
 
-        .input-row {
+        .msg-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 13.5px;
+            background: var(--surface2);
+            outline: none;
+            transition: all .18s ease;
+        }
+
+        .msg-input:focus {
+            border-color: var(--forest);
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .send-btn {
+            padding: 12px 22px;
+            background: var(--forest);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-weight: 700;
+            font-size: 13.5px;
+            cursor: pointer;
+            transition: all .18s ease;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            background: var(--forest-mid);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .file-req-btn {
-            width: 40px;
-            height: 40px;
-            border: 1.5px solid var(--border);
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 8px 12px;
             border-radius: var(--radius-sm);
-            background: var(--surface2);
-            color: var(--muted);
-            font-size: 15px;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all .18s;
-            flex-shrink: 0;
-            position: relative;
+            transition: all .18s ease;
+            font-size: 13px;
         }
 
-        .file-req-btn:hover,
-        .file-req-btn.active {
+        .file-req-btn:hover {
+            background: var(--surface2);
             border-color: var(--forest);
-            color: var(--forest);
-            background: var(--forest-pale);
+        }
+
+        .file-req-btn.active {
+            background: var(--forest);
+            color: white;
+            border-color: var(--forest);
         }
 
         .file-dropdown {
             position: absolute;
-            bottom: calc(100% + 10px);
-            left: 18px;
-            width: 300px;
+            bottom: 100%;
+            left: 0;
+            right: 0;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius);
             box-shadow: var(--shadow-lg);
-            z-index: 200;
-            opacity: 0;
-            transform: translateY(8px);
-            pointer-events: none;
-            transition: all .2s cubic-bezier(.4, 0, .2, 1);
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
         }
 
         .file-dropdown.open {
-            opacity: 1;
-            transform: translateY(0);
-            pointer-events: all;
+            display: block;
         }
 
         .file-dropdown-header {
-            padding: 11px 16px;
+            padding: 12px 16px;
             border-bottom: 1px solid var(--border);
-            font-weight: 700;
-            font-size: 12px;
+            background: var(--surface2);
+            font-weight: 600;
             color: var(--text);
-            letter-spacing: .3px;
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            background: var(--forest);
-            border-radius: var(--radius) var(--radius) 0 0;
-            color: #fff;
-        }
-
-        .file-dropdown-header i {
-            color: var(--accent);
         }
 
         .file-dropdown-body {
-            max-height: 240px;
+            max-height: 200px;
             overflow-y: auto;
         }
 
-        .file-dropdown-body::-webkit-scrollbar {
-            width: 3px;
-        }
-
-        .file-dropdown-body::-webkit-scrollbar-thumb {
-            background: var(--border2);
-            border-radius: 3px;
-        }
-
         .file-dropdown-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: all .18s ease;
             display: flex;
             align-items: center;
-            gap: 11px;
-            padding: 11px 16px;
-            cursor: pointer;
-            transition: background .14s;
-            border-bottom: 1px solid #f0f5f2;
-        }
-
-        .file-dropdown-item:last-child {
-            border-bottom: none;
+            gap: 12px;
         }
 
         .file-dropdown-item:hover {
-            background: var(--accent-soft);
+            background: var(--bg);
         }
 
         .file-dropdown-item-icon {
-            width: 34px;
-            height: 34px;
-            border-radius: 8px;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
-            flex-shrink: 0;
+            font-size: 14px;
         }
 
-        .file-dropdown-item-icon.pdf {
-            background: #fee2e2;
-            color: #ef4444;
-        }
-
-        .file-dropdown-item-icon.doc {
-            background: #dbeafe;
-            color: #3b82f6;
-        }
-
-        .file-dropdown-item-icon.xls {
-            background: #dcfce7;
-            color: #16a34a;
-        }
-
-        .file-dropdown-item-icon.img {
-            background: #ede9fe;
-            color: #7c3aed;
-        }
-
-        .file-dropdown-item-icon.other {
-            background: #f3f4f6;
-            color: #6b7280;
-        }
+        .file-dropdown-item-icon.pdf { background: #dc2626; color: white; }
+        .file-dropdown-item-icon.img { background: #10b981; color: white; }
+        .file-dropdown-item-icon.doc { background: #2563eb; color: white; }
+        .file-dropdown-item-icon.xls { background: #0d47a1; color: white; }
+        .file-dropdown-item-icon.other { background: var(--muted); color: white; }
 
         .file-dropdown-item-name {
-            font-size: 13px;
-            font-weight: 600;
+            flex: 1;
+            font-weight: 500;
             color: var(--text);
         }
 
         .file-dropdown-item-cat {
             font-size: 11px;
             color: var(--muted);
-            margin-top: 1px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
         }
 
         .file-dropdown-empty {
             padding: 24px;
             text-align: center;
             color: var(--muted);
-            font-size: 13px;
-        }
-
-        .file-dropdown-empty i {
-            font-size: 24px;
-            margin-bottom: 8px;
-            display: block;
-            opacity: .4;
+            font-style: italic;
         }
 
         .reason-bar {
+            padding: 12px 22px;
+            background: #fff3cd;
+            border-top: 1px solid var(--border);
             display: none;
             align-items: center;
-            gap: 8px;
-            padding: 8px 0 0;
-            border-top: 1px dashed var(--border);
-            margin-top: 8px;
+            gap: 10px;
         }
 
         .reason-bar.show {
             display: flex;
         }
 
-        .reason-bar-label {
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--forest);
-            white-space: nowrap;
-        }
-
-        .reason-bar input {
+        .reason-input {
             flex: 1;
-            padding: 7px 11px;
-            border: 1.5px solid var(--border);
-            border-radius: 8px;
-            font-size: 13px;
-            outline: none;
-            font-family: var(--font);
-            transition: border-color .15s;
-        }
-
-        .reason-bar input:focus {
-            border-color: var(--forest);
-        }
-
-        .reason-cancel {
-            width: 28px;
-            height: 28px;
-            border-radius: 7px;
+            padding: 10px 14px;
             border: 1px solid var(--border);
-            background: transparent;
-            color: var(--muted);
-            cursor: pointer;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all .15s;
-        }
-
-        .reason-cancel:hover {
-            border-color: #ef4444;
-            color: #ef4444;
-            background: #fee2e2;
-        }
-
-        .msg-input {
-            flex: 1;
-            padding: 11px 16px;
-            border: 1.5px solid var(--border);
-            border-radius: 12px;
-            font-size: 14px;
-            font-family: var(--font);
-            outline: none;
-            transition: border-color .15s, box-shadow .15s;
-            color: var(--text);
-            background: var(--surface2);
-        }
-
-        .msg-input:focus {
-            border-color: var(--forest);
-            box-shadow: 0 0 0 3px rgba(16, 44, 38, .08);
-            background: var(--surface);
-        }
-
-        .send-btn {
-            height: 40px;
-            padding: 0 18px;
-            background: var(--forest);
-            color: #fff;
-            border: none;
             border-radius: var(--radius-sm);
-            font-size: 13.5px;
-            font-weight: 600;
-            font-family: var(--font);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            transition: all .18s;
-            box-shadow: 0 3px 12px rgba(16, 44, 38, .22);
+            font-size: 13px;
+            background: var(--surface);
+            outline: none;
         }
 
-        .send-btn:hover {
-            background: var(--forest-mid);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 18px rgba(16, 44, 38, .3);
+        .reason-input:focus {
+            border-color: var(--forest);
+            box-shadow: var(--shadow-sm);
         }
 
-        .send-btn:disabled {
-            opacity: .6;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        /* ════════════════════════════════════════════
-           TOAST
-        ════════════════════════════════════════════ */
         .toast-zone {
             position: fixed;
             bottom: 24px;
@@ -1094,230 +538,167 @@ switch ($profile_display_mode) {
             align-items: center;
             gap: 10px;
             margin-top: 8px;
-            transform: translateX(120%);
-            transition: transform .3s ease;
-            border-left: 4px solid transparent;
-            font-size: 13.5px;
-            min-width: 260px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all .3s ease;
         }
 
         .toast.show {
-            transform: translateX(0);
+            opacity: 1;
+            transform: translateY(0);
         }
 
-        .toast.success {
-            border-color: #22c55e;
-        }
-
-        .toast.error {
-            border-color: #ef4444;
-        }
-
-        .toast i {
-            font-size: 17px;
-        }
-
-        .toast.success i {
-            color: #22c55e;
-        }
-
-        .toast.error i {
-            color: #ef4444;
-        }
-
-        /* ════════════════════════════════════════════
-           LOADING STATE
-        ════════════════════════════════════════════ */
         .chat-loading {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            padding: 48px;
+            padding: 20px;
             color: var(--muted);
-            font-size: 13.5px;
         }
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .spin {
-            animation: spin .8s linear infinite;
-        }
-
-        /* ════════════════════════════════════════════
-           RESPONSIVE
-        ════════════════════════════════════════════ */
-        @media (max-width: 1000px) {
+        @media (max-width: 900px) {
             .main-content {
-                margin-left: 0;
+                padding: 90px 16px 24px;
+            }
+            .chat-sidebar {
+                width: 280px;
             }
         }
 
-        @media (max-width: 820px) {
-            .chat-wrap {
-                grid-template-columns: 1fr;
+        @media (max-width: 600px) {
+            .main-content {
+                padding: 80px 12px 24px;
             }
-
-            .chat-panel {
-                display: none;
+            .chat-page {
+                flex-direction: column;
+            }
+            .chat-sidebar {
+                width: 100%;
+                height: 200px;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+            .chat-area {
+                margin-left: 0;
             }
         }
     </style>
 </head>
 
-<body
-    data-student-name="<?php echo htmlspecialchars($student_name); ?>"
-    data-grade-level="<?php echo htmlspecialchars($grade_level); ?>"
-    data-profile-mode="<?php echo htmlspecialchars($profile_display_mode); ?>"
-    data-profile-img="<?php echo ($nav_profile_type === 'img') ? $nav_profile_img : ''; ?>"
-    data-profile-label="<?php echo $nav_display_label; ?>"
-    data-user-verified="<?php echo $user_verified ? '1' : '0'; ?>">
-
-    <div id="nav-placeholder"></div>
-
+<body>
     <main class="main-content">
-
-        <!-- ══ HEADER — DEEP FOREST ═══════════════════════════════ -->
-        <header class="page-header">
-            <div>
-                <h1><i class="fas fa-comments"></i> Messages</h1>
-                <p>Chat with admin or your club members</p>
-            </div>
-            <div class="header-date">
-                <i class="fas fa-calendar-alt"></i>
-                <span id="currentDate"></span>
-            </div>
-        </header>
-
-        <div class="chat-wrap">
-            <!-- ── Left panel ── -->
-            <div class="chat-panel">
-                <div class="panel-header">
-                    <h3>Conversations</h3>
+        <div class="chat-page">
+            <aside class="chat-sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-title">Messages</div>
+                    <div class="search-box">
+                        <input type="text" id="convSearch" placeholder="Search chats…" oninput="filterConvs(this.value)">
+                    </div>
                 </div>
-                <div class="panel-search">
-                    <input type="text" id="convSearch" placeholder="Search chats…" oninput="filterConvs(this.value)">
-                </div>
-                <div class="contact-list" id="contactList">
-                    <div class="conv-section-label">Direct</div>
+                <div class="conv-list" id="convList">
                     <div class="conv-item active" id="adminConvItem" onclick="openAdminChat()">
-                        <div class="conv-avatar admin-av">AD</div>
+                        <div class="conv-avatar"><?= $student_initial ?></div>
                         <div class="conv-info">
                             <div class="conv-name">Admin Department</div>
-                            <div class="conv-preview" id="adminPreview">Loading…</div>
+                            <div class="conv-preview" id="adminPreview">No messages yet</div>
                         </div>
                     </div>
-                    <div id="clubChatsSection"></div>
                 </div>
-            </div>
+                <div id="clubChatsSection"></div>
+            </aside>
 
-            <!-- ── Chat window ── -->
-            <div class="chat-win">
-                <div class="chat-header" id="chatHeader">
-                    <div class="chat-header-avatar" id="chatAvatar">AD</div>
-                    <div class="chat-header-info">
-                        <h3 id="chatName">Admin Department</h3>
-                        <div class="chat-header-status">
-                            <span class="online-dot"></span>Online
-                        </div>
+            <section class="chat-area">
+                <div class="chat-header">
+                    <div class="chat-info">
+                        <div class="chat-name" id="chatName">Admin Department</div>
+                        <div class="chat-avatar" id="chatAvatar">AD</div>
+                        <span class="club-header-badge" id="clubHeaderBadge" style="display: none;">
+                            <span id="clubMemberCount">0 members</span>
+                        </span>
                     </div>
-                    <div id="clubHeaderBadge" style="display:none;" class="club-header-badge">
-                        <i class="fas fa-users"></i>
-                        <span id="clubMemberCount">0 members</span>
-                    </div>
+                    <button class="file-req-btn" id="fileReqBtn" onclick="toggleFileDropdown()">
+                        <i class="fas fa-paperclip"></i> Request File
+                    </button>
                 </div>
 
                 <div class="chat-messages" id="chatMessages">
                     <div class="chat-loading">
-                        <i class="fas fa-spinner spin"></i> Loading messages…
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading messages...
                     </div>
                 </div>
 
-                <div class="chat-input-wrap">
-                    <div class="file-dropdown" id="fileDropdown">
-                        <div class="file-dropdown-header">
-                            <i class="fas fa-lock"></i> Request a Restricted File
-                        </div>
-                        <div class="file-dropdown-body" id="fileDropdownBody">
-                            <div class="file-dropdown-empty">
-                                <i class="fas fa-spinner spin"></i> Loading files…
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="input-row">
-                        <button class="file-req-btn" id="fileReqBtn" title="Request a restricted file"
-                            onclick="toggleFileDropdown()" style="display:none;">
-                            <i class="fas fa-paperclip"></i>
-                        </button>
-                        <input type="text" class="msg-input" id="msgInput"
-                            placeholder="Type your message…"
-                            onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendMsg();}">
-                        <button class="send-btn" id="sendBtn" onclick="sendMsg()">
-                            <i class="fas fa-paper-plane"></i> Send
-                        </button>
-                    </div>
-
+                <div class="chat-input-box">
                     <div class="reason-bar" id="reasonBar">
-                        <span class="reason-bar-label"><i class="fas fa-file-lock"></i> Reason:</span>
-                        <input type="text" id="reasonInput"
-                            placeholder="Why do you need this file?"
-                            onkeydown="if(event.key==='Enter'){event.preventDefault();sendMsg();}">
-                        <button class="reason-cancel" onclick="cancelFileRequest()" title="Cancel">
+                        <input type="text" id="reasonInput" placeholder="Why do you need this file?" onkeydown="if(event.key==='Enter'){event.preventDefault();sendMsg();}">
+                        <button onclick="cancelFileRequest()">
                             <i class="fas fa-times"></i>
                         </button>
                     </div>
+                    <input type="text" class="msg-input" id="msgInput" placeholder="Type your message…" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendMsg();}">
+                    <button class="send-btn" id="sendBtn" onclick="sendMsg()">
+                        <i class="fas fa-paper-plane"></i>
+                        <span>Send</span>
+                    </button>
                 </div>
-            </div>
+
+                <div class="file-dropdown" id="fileDropdown">
+                    <div class="file-dropdown-header">Request a File</div>
+                    <div class="file-dropdown-body" id="fileDropdownBody">
+                        <div class="file-dropdown-empty">
+                            <i class="fas fa-folder-open"></i>
+                            Loading files...
+                        </div>
+                    </div>
+                </div>
+            </section>
         </div>
     </main>
 
-    <div class="toast-zone" id="toastZone"></div>
+    <div id="toastZone"></div>
 
     <script>
-        /* ════════ CONFIG & STATE ════════ */
-        const API = '<?= htmlspecialchars($chatApiPath,    ENT_QUOTES, "UTF-8") ?>';
-        const FILE_REQ_API = '<?= htmlspecialchars($fileRequestApi, ENT_QUOTES, "UTF-8") ?>';
-        const CLUB_API = '<?= htmlspecialchars($clubChatApi,    ENT_QUOTES, "UTF-8") ?>';
-        const STUDENT_INIT = '<?= $initials ?>';
+        /* ════════ CONFIG ════════ */
+        const API = '<?= htmlspecialchars($chatApi, ENT_QUOTES, "UTF-8") ?>';
+        const FILE_REQ_API = '<?= htmlspecialchars($fileReqApi, ENT_QUOTES, "UTF-8") ?>';
+        const CLUB_API = '<?= htmlspecialchars($clubChatApi, ENT_QUOTES, "UTF-8") ?>';
+        const STUDENT_INIT = '<?= $student_initial ?>';
 
-        let convId = 0;
-        let activeChatId = 0;
         let activeMode = 'admin';
-        let pollTimer = null;
+        let activeChatId = null;
+        let convId = null;
         let selectedFile = null;
+        let pollTimer = null;
 
-        /* ════════ INIT ════════ */
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('currentDate').textContent =
-                new Date().toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                });
-
-            ensureAdminConv().then(() => {
-                openAdminChat();
-                loadClubChats();
-                loadRestrictedFiles();
+        /* ════════ GLOBAL FUNCTIONS ════════ */
+        function filterConvs(q) {
+            q = q.toLowerCase();
+            document.querySelectorAll('.conv-item').forEach(el => {
+                const name = el.querySelector('.conv-name')?.textContent?.toLowerCase() || '';
+                el.style.display = (!q || name.includes(q)) ? '' : 'none';
             });
-        });
+        }
 
-        /* ════════ ADMIN CHAT ════════ */
-        async function ensureAdminConv() {
-            const fd = new FormData();
-            fd.append('action', 'get_student_conv');
-            const res = await fetch(API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (data.success && data.conv_id) convId = data.conv_id;
+        function getCSRFToken() {
+            const metaTag = document.querySelector('meta[name="csrf-token"]');
+            if (metaTag) {
+                return metaTag.getAttribute('content');
+            }
+            console.warn('CSRF token not found in meta tag');
+            return '';
+        }
+
+        function toast(msg, type = 'success') {
+            const zone = document.getElementById('toastZone');
+            const t = document.createElement('div');
+            t.className = `toast ${type}`;
+            t.innerHTML = `<i class="fas ${type==='success'?'fa-check-circle':'fa-exclamation-circle'}"></i><span>${msg}</span>`;
+            zone.appendChild(t);
+            requestAnimationFrame(() => t.classList.add('show'));
+            setTimeout(() => {
+                t.classList.remove('show');
+                setTimeout(() => t.remove(), 320);
+            }, 3500);
         }
 
         function openAdminChat() {
@@ -1326,8 +707,10 @@ switch ($profile_display_mode) {
 
             document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
             document.getElementById('adminConvItem').classList.add('active');
-            document.getElementById('chatName').textContent = 'Admin Department';
-            document.getElementById('chatAvatar').textContent = 'AD';
+            const chatNameEl = document.getElementById('chatName');
+            if (chatNameEl) chatNameEl.textContent = 'Admin Department';
+            const chatAvatarEl = document.getElementById('chatAvatar');
+            if (chatAvatarEl) chatAvatarEl.textContent = 'AD';
             document.getElementById('clubHeaderBadge').style.display = 'none';
             document.getElementById('fileReqBtn').style.display = '';
 
@@ -1336,289 +719,73 @@ switch ($profile_display_mode) {
             pollTimer = setInterval(loadAdminMessages, 5000);
         }
 
-        async function loadAdminMessages() {
-            if (!convId) return;
-            const fd = new FormData();
-            fd.append('action', 'fetch_messages');
-            fd.append('conversation_id', convId);
-            const res = await fetch(API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (!data.success) return;
-            renderMessages(data.messages, 'admin');
-            markAdminRead();
-        }
-
-        function markAdminRead() {
-            if (!convId) return;
-            const fd = new FormData();
-            fd.append('action', 'mark_read');
-            fd.append('conversation_id', convId);
-            fetch(API, {
-                method: 'POST',
-                body: fd
-            });
-        }
-
-        /* ════════ CLUB CHATS ════════ */
-        async function loadClubChats() {
-            const fd = new FormData();
-            fd.append('action', 'get_student_clubs');
-            const res = await fetch(CLUB_API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (!data.success || !data.clubs.length) return;
-
-            const section = document.getElementById('clubChatsSection');
-            section.innerHTML = `<div class="conv-section-label">Club Chats</div>` +
-                data.clubs.map(club => `
-                <div class="conv-item" id="club_${club.id}"
-                     onclick="openClubChat(${club.id}, '${esc(club.name)}', ${club.member_count})">
-                    <div class="conv-avatar club-av">${esc(club.name.charAt(0).toUpperCase())}</div>
-                    <div class="conv-info">
-                        <div class="conv-name">${esc(club.name)} <span class="club-tag">Club</span></div>
-                        <div class="conv-preview">${esc(club.last_message || 'No messages yet')}</div>
-                    </div>
-                    <span class="conv-time">${esc(club.last_time || '')}</span>
-                    ${club.unread > 0 ? `<span class="conv-unread">${club.unread}</span>` : ''}
-                </div>`).join('');
-        }
-
-        function openClubChat(clubId, clubName, memberCount) {
-            activeMode = 'club';
-            activeChatId = clubId;
-            document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
-            const el = document.getElementById('club_' + clubId);
-            if (el) el.classList.add('active');
-            document.getElementById('chatName').textContent = clubName;
-            document.getElementById('chatAvatar').textContent = clubName.charAt(0).toUpperCase();
-            document.getElementById('clubHeaderBadge').style.display = '';
-            document.getElementById('clubMemberCount').textContent = memberCount + ' members';
-            document.getElementById('fileReqBtn').style.display = 'none';
-            cancelFileRequest();
-            clearInterval(pollTimer);
-            loadClubMessages(clubId);
-            pollTimer = setInterval(() => loadClubMessages(clubId), 5000);
-        }
-
-        async function loadClubMessages(clubId) {
-            const fd = new FormData();
-            fd.append('action', 'fetch_club_messages');
-            fd.append('club_id', clubId);
-            const res = await fetch(CLUB_API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (!data.success) return;
-            renderMessages(data.messages, 'club');
-        }
-
-        /* ════════ RENDER MESSAGES ════════ */
-        function renderMessages(msgs, mode) {
-            const box = document.getElementById('chatMessages');
-            const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 60;
-
-            if (!msgs || !msgs.length) {
-                box.innerHTML = `<div style="text-align:center;padding:48px;color:var(--muted);">
-                    <i class="fas fa-comments" style="font-size:36px;opacity:.2;display:block;margin-bottom:10px;color:var(--forest);"></i>
-                    No messages yet. Say hello!
-                </div>`;
-                return;
-            }
-
-            let lastDate = '';
-            box.innerHTML = msgs.map(m => {
-                const isMine = (mode === 'admin') ?
-                    m.sender_role === 'student' :
-                    m.sender_id == <?= (int)$student_id ?>;
-
-                const init = isMine ? STUDENT_INIT : (m.avatar_letter || (mode === 'club' ? m.sender_name?.charAt(0)?.toUpperCase() : 'AD'));
-                const msgDate = (m.created_at || '').substring(0, 10);
-                let divider = '';
-                if (msgDate && msgDate !== lastDate) {
-                    lastDate = msgDate;
-                    divider = `<div class="date-sep"><span>${formatDateLabel(msgDate)}</span></div>`;
-                }
-
-                if (m.message_type === 'file_request') return divider + buildFileReqBubble(m, isMine, init);
-
-                return `${divider}
-<div class="msg-row ${isMine ? 'sent' : ''}">
-    <div class="msg-av">${esc(init)}</div>
-    <div>
-        ${mode === 'club' && !isMine ? `<div style="font-size:11px;color:var(--muted);margin-bottom:3px;padding-left:2px;">${esc(m.sender_name)}</div>` : ''}
-        <div class="msg-bubble">
-            <div class="msg-text">${esc(m.message)}</div>
-        </div>
-        <div class="msg-time"><i class="far fa-clock"></i>${esc(m.time_label)}</div>
-    </div>
-</div>`;
-            }).join('');
-
-            if (atBottom) box.scrollTop = box.scrollHeight;
-
-            if (mode === 'admin' && msgs.length) {
-                const last = msgs[msgs.length - 1];
-                document.getElementById('adminPreview').textContent = (last.message || '').substring(0, 45);
-            }
-        }
-
-        function buildFileReqBubble(m, isMine, init) {
-            const statusMap = {
-                pending: {
-                    cls: 'pending',
-                    icon: 'fa-clock',
-                    label: 'Pending Approval'
-                },
-                approved: {
-                    cls: 'approved',
-                    icon: 'fa-check-circle',
-                    label: 'Approved'
-                },
-                rejected: {
-                    cls: 'rejected',
-                    icon: 'fa-times-circle',
-                    label: 'Rejected'
-                },
-            };
-            const s = statusMap[m.request_status] || statusMap.pending;
-            const fileTypeIcon = getFileIcon(m.file_type || '');
-
-            const downloadBtn = (m.request_status === 'approved' && m.download_url) ? `
-<a href="${esc(m.download_url)}" class="file-download-btn" target="_blank">
-    <i class="fas fa-download"></i> Download File
-</a>` : '';
-
-            return `
-<div class="msg-row ${isMine ? 'sent' : ''}">
-    <div class="msg-av">${esc(init)}</div>
-    <div>
-        <div class="msg-bubble file-req-bubble">
-            <div class="file-req-header">
-                <div class="file-req-icon"><i class="fas ${fileTypeIcon}"></i></div>
-                <span class="file-req-label">FILE REQUEST</span>
-            </div>
-            <div class="file-req-name">${esc(m.file_name)}</div>
-            <div class="file-req-reason">${esc(m.message)}</div>
-            <div><span class="req-status-pill ${s.cls}"><i class="fas ${s.icon}"></i>${s.label}</span></div>
-            ${downloadBtn}
-        </div>
-        <div class="msg-time"><i class="far fa-clock"></i>${esc(m.time_label)}</div>
-    </div>
-</div>`;
-        }
-
-        /* ════════ SEND MESSAGE ════════ */
         async function sendMsg() {
-            const msgInput = document.getElementById('msgInput');
-            const reasonInput = document.getElementById('reasonInput');
-            const sendBtn = document.getElementById('sendBtn');
+            try {
+                const msgInput = document.getElementById('msgInput');
+                const reasonInput = document.getElementById('reasonInput');
+                const sendBtn = document.getElementById('sendBtn');
 
-            if (selectedFile) {
-                const reason = reasonInput.value.trim();
-                if (!reason) {
-                    reasonInput.focus();
-                    toast('Please enter a reason for the file request.', 'error');
+                if (selectedFile) {
+                    const reason = reasonInput.value.trim();
+                    if (!reason) {
+                        reasonInput.focus();
+                        toast('Please enter a reason for the file request.', 'error');
+                        return;
+                    }
+                    sendBtn.disabled = true;
+                    await sendFileRequest(selectedFile, reason);
+                    sendBtn.disabled = false;
                     return;
                 }
+
+                const text = msgInput.value.trim();
+                if (!text) return;
                 sendBtn.disabled = true;
-                await sendFileRequest(selectedFile, reason);
-                sendBtn.disabled = false;
-                return;
-            }
+                msgInput.value = '';
 
-            const text = msgInput.value.trim();
-            if (!text) return;
-            sendBtn.disabled = true;
-            msgInput.value = '';
-
-            if (activeMode === 'admin') {
-                const fd = new FormData();
-                fd.append('action', 'send_message');
-                fd.append('message', text);
-                if (convId) fd.append('conversation_id', convId);
-                const res = await fetch(API, {
-                    method: 'POST',
-                    body: fd
-                });
-                const data = await res.json();
-                sendBtn.disabled = false;
-                if (data.success) {
-                    if (data.conv_id && !convId) convId = data.conv_id;
-                    await loadAdminMessages();
-                } else {
-                    msgInput.value = text;
-                    toast('Could not send message. Please try again.', 'error');
+                if (activeMode === 'admin') {
+                    const fd = new FormData();
+                    fd.append('action', 'send_message');
+                    fd.append('message', text);
+                    if (convId) fd.append('conversation_id', convId);
+                    fd.append('csrf_token', getCSRFToken());
+                    
+                    const res = await fetch(API, {
+                        method: 'POST',
+                        body: fd
+                    });
+                    
+                    if (!res.ok) {
+                        throw new Error(`HTTP error! status: ${res.status}`);
+                    }
+                    
+                    const data = await res.json();
+                    sendBtn.disabled = false;
+                    if (data.success) {
+                        if (data.conv_id && !convId) convId = data.conv_id;
+                        await loadAdminMessages();
+                    } else {
+                        msgInput.value = text;
+                        toast(data.message || 'Could not send message. Please try again.', 'error');
+                    }
                 }
-            } else {
-                const fd = new FormData();
-                fd.append('action', 'send_club_message');
-                fd.append('club_id', activeChatId);
-                fd.append('message', text);
-                const res = await fetch(CLUB_API, {
-                    method: 'POST',
-                    body: fd
-                });
-                const data = await res.json();
-                sendBtn.disabled = false;
-                if (data.success) {
-                    await loadClubMessages(activeChatId);
-                } else {
-                    msgInput.value = text;
-                    toast('Could not send message.', 'error');
-                }
+            } catch (error) {
+                console.error('Send message error:', error);
+                const sendBtn = document.getElementById('sendBtn');
+                const msgInput = document.getElementById('msgInput');
+                
+                if (sendBtn) sendBtn.disabled = false;
+                
+                toast('Network error. Please check your connection and try again.', 'error');
             }
         }
 
-        async function sendFileRequest(file, reason) {
-            const fd = new FormData();
-            fd.append('action', 'submit_file_request');
-            fd.append('file_id', file.id);
-            fd.append('reason', reason);
-            fd.append('conversation_id', convId);
-            const res = await fetch(FILE_REQ_API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            if (data.success) {
-                cancelFileRequest();
-                toast('File request sent! Waiting for admin approval.', 'success');
-                await loadAdminMessages();
-            } else {
-                toast(data.message || 'Could not send request.', 'error');
-            }
-        }
-
-        /* ════════ FILE DROPDOWN ════════ */
-        async function loadRestrictedFiles() {
-            const fd = new FormData();
-            fd.append('action', 'get_restricted_files');
-            const res = await fetch(FILE_REQ_API, {
-                method: 'POST',
-                body: fd
-            });
-            const data = await res.json();
-            const body = document.getElementById('fileDropdownBody');
-            if (!data.success || !data.files.length) {
-                body.innerHTML = `<div class="file-dropdown-empty"><i class="fas fa-folder-open"></i>No restricted files available.</div>`;
-                return;
-            }
-            body.innerHTML = data.files.map(f => `
-            <div class="file-dropdown-item" onclick="selectFile(${f.id}, '${esc(f.title)}', '${esc(f.file_type)}')">
-                <div class="file-dropdown-item-icon ${getFileIconClass(f.file_type)}">
-                    <i class="fas ${getFileIcon(f.file_type)}"></i>
-                </div>
-                <div>
-                    <div class="file-dropdown-item-name">${esc(f.title)}</div>
-                    <div class="file-dropdown-item-cat"><i class="fas fa-tag"></i>${esc(f.category)}</div>
-                </div>
-            </div>`).join('');
+        function cancelFileRequest() {
+            selectedFile = null;
+            document.getElementById('msgInput').value = '';
+            document.getElementById('msgInput').disabled = false;
+            document.getElementById('reasonInput').value = '';
+            document.getElementById('reasonBar').classList.remove('show');
         }
 
         function toggleFileDropdown() {
@@ -1660,24 +827,6 @@ switch ($profile_display_mode) {
             document.getElementById('fileReqBtn').style.color = 'var(--forest)';
         }
 
-        function cancelFileRequest() {
-            selectedFile = null;
-            document.getElementById('msgInput').value = '';
-            document.getElementById('msgInput').disabled = false;
-            document.getElementById('reasonInput').value = '';
-            document.getElementById('reasonBar').classList.remove('show');
-        }
-
-        /* ════════ SEARCH FILTER ════════ */
-        function filterConvs(q) {
-            q = q.toLowerCase();
-            document.querySelectorAll('.conv-item').forEach(el => {
-                const name = el.querySelector('.conv-name')?.textContent?.toLowerCase() || '';
-                el.style.display = (!q || name.includes(q)) ? '' : 'none';
-            });
-        }
-
-        /* ════════ HELPERS ════════ */
         function esc(s) {
             if (s == null) return '';
             return String(s)
@@ -1715,85 +864,307 @@ switch ($profile_display_mode) {
             return 'other';
         }
 
-        function toast(msg, type = 'success') {
-            const zone = document.getElementById('toastZone');
-            const t = document.createElement('div');
-            t.className = `toast ${type}`;
-            t.innerHTML = `<i class="fas ${type==='success'?'fa-check-circle':'fa-exclamation-circle'}"></i><span>${msg}</span>`;
-            zone.appendChild(t);
-            requestAnimationFrame(() => t.classList.add('show'));
-            setTimeout(() => {
-                t.classList.remove('show');
-                setTimeout(() => t.remove(), 320);
-            }, 3500);
+        /* ════════ INIT ════════ */
+        document.addEventListener('DOMContentLoaded', () => {
+            const currentDateEl = document.getElementById('currentDate');
+            if (currentDateEl) currentDateEl.textContent =
+                new Date().toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+
+            ensureAdminConv().then(() => {
+                openAdminChat();
+                loadClubChats();
+                loadRestrictedFiles();
+            });
+        });
+
+        /* ════════ ADMIN CHAT ════════ */
+        async function ensureAdminConv() {
+            try {
+                const fd = new FormData();
+                fd.append('action', 'get_student_conv');
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                if (data.success && data.conv_id) convId = data.conv_id;
+            } catch (error) {
+                console.error('Ensure admin conversation error:', error);
+            }
+        }
+
+        async function loadAdminMessages() {
+            try {
+                if (!convId) return;
+                const fd = new FormData();
+                fd.append('action', 'fetch_messages');
+                fd.append('conversation_id', convId);
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                if (!data.success) return;
+                renderMessages(data.messages, 'admin');
+                markAdminRead();
+            } catch (error) {
+                console.error('Load admin messages error:', error);
+            }
+        }
+
+        function markAdminRead() {
+            try {
+                if (!convId) return;
+                const fd = new FormData();
+                fd.append('action', 'mark_read');
+                fd.append('conversation_id', convId);
+                fd.append('csrf_token', getCSRFToken());
+                
+                fetch(API, {
+                    method: 'POST',
+                    body: fd
+                }).catch(error => {
+                    console.error('Mark admin read error:', error);
+                });
+            } catch (error) {
+                console.error('Mark admin read error:', error);
+            }
+        }
+
+        /* ════════ CLUB CHATS ════════ */
+        async function loadClubChats() {
+            try {
+                const fd = new FormData();
+                fd.append('action', 'get_student_clubs');
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(CLUB_API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                if (!data.success || !data.clubs.length) return;
+
+                const section = document.getElementById('clubChatsSection');
+                section.innerHTML = `<div class="conv-section-label">Club Chats</div>` +
+                    data.clubs.map(club => `
+                    <div class="conv-item" id="club_${club.id}"
+                         onclick="openClubChat(${club.id}, '${esc(club.name)}', ${club.member_count})">
+                        <div class="conv-avatar club-av">${esc(club.name.charAt(0).toUpperCase())}</div>
+                        <div class="conv-info">
+                            <div class="conv-name">${esc(club.name)} <span class="club-tag">Club</span></div>
+                            <div class="conv-preview">${esc(club.last_message || 'No messages yet')}</div>
+                        </div>
+                        <span class="conv-time">${esc(club.last_time || '')}</span>
+                        ${club.unread > 0 ? `<span class="conv-unread">${club.unread}</span>` : ''}
+                    </div>`).join('');
+            } catch (error) {
+                console.error('Load club chats error:', error);
+            }
+        }
+
+        function openClubChat(clubId, clubName, memberCount) {
+            activeMode = 'club';
+            activeChatId = clubId;
+            document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+            const el = document.getElementById('club_' + clubId);
+            if (el) el.classList.add('active');
+            const chatNameEl = document.getElementById('chatName');
+            if (chatNameEl) chatNameEl.textContent = clubName;
+            const chatAvatarEl = document.getElementById('chatAvatar');
+            if (chatAvatarEl) chatAvatarEl.textContent = clubName.charAt(0).toUpperCase();
+            const clubHeaderBadgeEl = document.getElementById('clubHeaderBadge');
+            if (clubHeaderBadgeEl) clubHeaderBadgeEl.style.display = '';
+            const clubMemberCountEl = document.getElementById('clubMemberCount');
+            if (clubMemberCountEl) clubMemberCountEl.textContent = memberCount + ' members';
+            document.getElementById('fileReqBtn').style.display = 'none';
+            cancelFileRequest();
+            clearInterval(pollTimer);
+            loadClubMessages(clubId);
+            pollTimer = setInterval(() => loadClubMessages(clubId), 5000);
+        }
+
+        async function loadClubMessages(clubId) {
+            try {
+                const fd = new FormData();
+                fd.append('action', 'fetch_club_messages');
+                fd.append('club_id', clubId);
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(CLUB_API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                if (!data.success) return;
+                renderMessages(data.messages, 'club');
+            } catch (error) {
+                console.error('Load club messages error:', error);
+            }
+        }
+
+        /* ════════ RENDER MESSAGES ════════ */
+        function renderMessages(msgs, mode) {
+            const box = document.getElementById('chatMessages');
+            const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 60;
+
+            if (!msgs || !msgs.length) {
+                box.innerHTML = `<div style="text-align:center;padding:48px;color:var(--muted);">
+                    <i class="fas fa-comments" style="font-size:36px;opacity:.2;display:block;margin-bottom:10px;color:var(--forest);"></i>
+                    No messages yet. Say hello!
+                </div>`;
+                return;
+            }
+
+            let lastDate = '';
+            box.innerHTML = msgs.map(m => {
+                const isMine = (mode === 'admin') ?
+                    m.sender_role === 'student' :
+                    m.sender_id == <?= (int)$student_id ?>;
+
+                const init = isMine ? STUDENT_INIT : (m.avatar_letter || (mode === 'club' && m.sender_name ? m.sender_name.charAt(0).toUpperCase() : 'AD'));
+                const msgDate = (m.created_at || '').substring(0, 10);
+                let divider = '';
+                if (msgDate && msgDate !== lastDate) {
+                    lastDate = msgDate;
+                    divider = `<div class="date-sep"><span>${formatDateLabel(msgDate)}</span></div>`;
+                }
+
+                return `${divider}
+<div class="msg-row ${isMine ? 'sent' : ''}">
+    <div class="msg-av">${esc(init)}</div>
+    <div>
+        ${mode === 'club' && !isMine ? `<div style="font-size:11px;color:var(--muted);margin-bottom:3px;padding-left:2px;">${esc(m.sender_name)}</div>` : ''}
+        <div class="msg-bubble">
+            <div class="msg-text">${esc(m.message)}</div>
+        </div>
+        <div class="msg-time"><i class="far fa-clock"></i>${esc(m.time_label)}</div>
+    </div>
+</div>`;
+            }).join('');
+
+            if (atBottom) box.scrollTop = box.scrollHeight;
+
+            if (mode === 'admin' && msgs.length) {
+                const last = msgs[msgs.length - 1];
+                const adminPreviewEl = document.getElementById('adminPreview');
+                if (adminPreviewEl) adminPreviewEl.textContent = (last.message || '').substring(0, 45);
+            }
+        }
+
+        async function sendFileRequest(file, reason) {
+            try {
+                const fd = new FormData();
+                fd.append('action', 'submit_file_request');
+                fd.append('file_id', file.id);
+                fd.append('reason', reason);
+                fd.append('conversation_id', convId);
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(FILE_REQ_API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                if (data.success) {
+                    cancelFileRequest();
+                    toast('File request sent! Waiting for admin approval.', 'success');
+                    await loadAdminMessages();
+                } else {
+                    toast(data.message || 'Could not send request.', 'error');
+                }
+            } catch (error) {
+                console.error('Send file request error:', error);
+                toast('Network error. Please check your connection and try again.', 'error');
+            }
+        }
+
+        /* ════════ FILE DROPDOWN ════════ */
+        async function loadRestrictedFiles() {
+            try {
+                const fd = new FormData();
+                fd.append('action', 'get_restricted_files');
+                fd.append('csrf_token', getCSRFToken());
+                
+                const res = await fetch(FILE_REQ_API, {
+                    method: 'POST',
+                    body: fd
+                });
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                const data = await res.json();
+                const body = document.getElementById('fileDropdownBody');
+                if (!data.success || !data.files.length) {
+                    body.innerHTML = `<div class="file-dropdown-empty"><i class="fas fa-folder-open"></i>No restricted files available.</div>`;
+                    return;
+                }
+                body.innerHTML = data.files.map(f => `
+                <div class="file-dropdown-item" onclick="selectFile(${f.id}, '${esc(f.title)}', '${esc(f.file_type)}')">
+                    <div class="file-dropdown-item-icon ${getFileIconClass(f.file_type)}">
+                        <i class="fas ${getFileIcon(f.file_type)}"></i>
+                    </div>
+                    <div>
+                        <div class="file-dropdown-item-name">${esc(f.title)}</div>
+                        <div class="file-dropdown-item-cat"><i class="fas fa-tag"></i>${esc(f.category)}</div>
+                    </div>
+                </div>`).join('');
+            } catch (error) {
+                console.error('Load restricted files error:', error);
+            }
         }
     </script>
-
-    <!-- ══ STUDENT NAV LOADER ══ -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            var placeholder = document.getElementById('nav-placeholder');
-            if (!placeholder) return;
-            var pageDir = window.location.pathname.replace(/\/[^\/]*$/, '/');
-
-            fetch('Student_nav.php')
-                .then(function(res) {
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    return res.text();
-                })
-                .then(function(html) {
-                    var tmp = document.createElement('div');
-                    tmp.innerHTML = html;
-                    tmp.querySelectorAll('[data-nav-href]').forEach(function(el) {
-                        var rel = el.getAttribute('data-nav-href');
-                        if (rel.startsWith('../')) {
-                            var parentDir = pageDir.replace(/\/[^\/]+\/$/, '/');
-                            el.setAttribute('href', parentDir + rel.slice(3));
-                        } else {
-                            el.setAttribute('href', pageDir + rel);
-                        }
-                        el.removeAttribute('data-nav-href');
-                    });
-                    tmp.querySelectorAll('img[src]').forEach(function(img) {
-                        var src = img.getAttribute('src');
-                        if (src && !src.startsWith('/') && !src.startsWith('http')) img.setAttribute('src', pageDir + src);
-                    });
-                    tmp.querySelectorAll('style').forEach(function(styleEl) {
-                        document.head.appendChild(styleEl.cloneNode(true));
-                        styleEl.remove();
-                    });
-                    while (tmp.firstChild) placeholder.parentNode.insertBefore(tmp.firstChild, placeholder);
-                    placeholder.remove();
-                    tmp.querySelectorAll('script').forEach(function(oldScript) {
-                        var newScript = document.createElement('script');
-                        newScript.textContent = oldScript.textContent;
-                        document.body.appendChild(newScript);
-                    });
-                    var nameEl = document.getElementById('navStudentName');
-                    var gradeEl = document.getElementById('navGradeLevel');
-                    if (nameEl && document.body.dataset.studentName) nameEl.textContent = document.body.dataset.studentName;
-                    if (gradeEl && document.body.dataset.gradeLevel) gradeEl.textContent = document.body.dataset.gradeLevel;
-                    (function waitForStudentNav(attempts) {
-                        if (window.StudentNav && typeof window.StudentNav.bootProfileFromBody === 'function') {
-                            window.StudentNav.bootProfileFromBody();
-                        } else if (attempts > 0) {
-                            setTimeout(function() {
-                                waitForStudentNav(attempts - 1);
-                            }, 60);
-                        }
-                    })(20);
-                    var current = window.location.pathname.split('/').pop() || 'chatbox.php';
-                    document.querySelectorAll('.sidebar .menu-item').forEach(function(item) {
-                        var href = (item.getAttribute('href') || '').split('/').pop();
-                        item.classList.toggle('active', href === current);
-                    });
-                })
-                .catch(function(err) {
-                    console.error('[NavLoader] Failed:', err);
-                });
-        });
-    </script>
-
 </body>
 
 </html>
+
+<?php
+function generateCSRFToken() {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        $_SESSION['csrf_token_expires'] = time() + 1800; // 30 minutes
+    }
+    
+    return $_SESSION['csrf_token'] ?? '';
+}
+?>
