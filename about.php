@@ -50,18 +50,25 @@ $yearsExcellence = max(0, (int)date('Y') - $schoolFoundedYr);
 $completersCount = 0;
 $cRes = $conn->query("SELECT COUNT(*) AS cnt FROM students WHERE status='Completers'");
 if ($cRes) {
-    $completersCount = (int)$cRes->fetch_assoc()['cnt'];
+    $row = $cRes->fetch_assoc();
+    $completersCount = (int)($row['cnt'] ?? 0);
 }
 // Fallback: count 'Graduated' for backwards compat if no Completers yet
 if ($completersCount === 0) {
     $cRes2 = $conn->query("SELECT COUNT(*) AS cnt FROM students WHERE status='Graduated'");
-    if ($cRes2) $completersCount = (int)$cRes2->fetch_assoc()['cnt'];
+    if ($cRes2) {
+    $row = $cRes2->fetch_assoc();
+    $completersCount = (int)($row['cnt'] ?? 0);
+}
 }
 
 // ── Count all teachers ────────────────────────────────────────────────────────
 $teacherCount = 0;
 $tRes = $conn->query("SELECT COUNT(*) AS cnt FROM teachers");
-if ($tRes) $teacherCount = (int)$tRes->fetch_assoc()['cnt'];
+if ($tRes) {
+    $row = $tRes->fetch_assoc();
+    $teacherCount = (int)($row['cnt'] ?? 0);
+}
 
 // ── Fetch top 3 Entry-Level teachers (Teacher III > II > I) ─────────────────
 $facultyTeachers = [];
@@ -102,10 +109,10 @@ $is_logged_in = !empty($student_id);
 $user_identifier = $is_logged_in ? $student_id : null;
 
 /* Query helper function */
-function sr_query(string $sql, string $types = '', array $params = [])
+function sr_query($sql, $params = [], $types = '')
 {
-    global $conn, $pdo, $use_mysqli;
-    if ($use_mysqli) {
+    global $conn, $pdo;
+    if ($conn) {
         $stmt = $conn->prepare($sql);
         if ($stmt === false) return false;
         if ($types && $params) {
@@ -113,26 +120,29 @@ function sr_query(string $sql, string $types = '', array $params = [])
         }
         $stmt->execute();
         return $stmt;
-    } else {
+    } elseif ($pdo) {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params ?: null);
         return $stmt;
     }
+    return false; // No connection available
 }
 
 /* Create table if not exists - Updated for guest ratings */
-$create_sql = "
-    CREATE TABLE IF NOT EXISTS school_ratings (
-        id              INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
-        visitor_id      VARCHAR(255) NOT NULL,
-        ip_address      VARCHAR(45)  NOT NULL,
-        rating          TINYINT      NOT NULL,
-        feedback        TEXT         NULL,
-        created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_visitor_ip (visitor_id, ip_address)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-";
-sr_query($create_sql);
+if ($conn || $pdo) {
+    $create_sql = "
+        CREATE TABLE IF NOT EXISTS school_ratings (
+            id              INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            visitor_id      VARCHAR(255) NOT NULL,
+            ip_address      VARCHAR(45)  NOT NULL,
+            rating          TINYINT      NOT NULL,
+            feedback        TEXT         NULL,
+            created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_visitor_ip (visitor_id, ip_address)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ";
+    sr_query($create_sql);
+}
 
 /* Fetch aggregate rating data */
 $avg_rating  = 0.0;

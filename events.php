@@ -55,7 +55,7 @@ function get_category_counts($conn)
         $stmt->execute();
         $result = $stmt->get_result();
         $row = $result->fetch_assoc();
-        $counts[$category] = $row['count'];
+        $counts[$category] = $row ? $row['count'] : 0;
         $stmt->close();
     }
     return $counts;
