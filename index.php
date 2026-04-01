@@ -410,7 +410,7 @@ $conn->close();
     <link href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/glightbox/dist/css/glightbox.min.css" rel="stylesheet">
     <link href="assets/css/main.css" rel="stylesheet">
-    <link rel="shortcut icon" href="assets/img/Bagong_Pilipinas_logo.png" type="image/x-icon">
+    <link rel="shortcut icon" href="assets/img/logo.jpg" type="image/x-icon">
 
     <style>
         .verification-page {
