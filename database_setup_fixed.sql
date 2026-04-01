@@ -1,7 +1,6 @@
 -- ============================================================
---  BUNHS SCHOOL SYSTEM - ESSENTIAL DATABASE SETUP
---  Only includes tables actually used by the website
---  Based on database analysis and cleanup
+--  DEPED CALENDAR INTEGRATION - DATABASE SETUP (FIXED)
+--  Fixed MySQL index length issues
 -- ============================================================
 
 -- 1. Enhanced events table with all required columns
@@ -18,274 +17,318 @@ ADD COLUMN IF NOT EXISTS event_days INT DEFAULT 1,
 ADD COLUMN IF NOT EXISTS event_start_time TIME DEFAULT NULL,
 ADD COLUMN IF NOT EXISTS event_end_time TIME DEFAULT NULL;
 
--- 2. Create indexes for better performance
+-- 2. Event reminders table for notification system
+CREATE TABLE IF NOT EXISTS event_reminders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL,
+    event_id INT NOT NULL,
+    reminder_time DATETIME NOT NULL,
+    reminder_type ENUM('15min', '30min', '1hour', '1day', '2days', '1week') NOT NULL,
+    is_notified TINYINT(1) DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    INDEX idx_user_reminders (user_id, reminder_time),
+    INDEX idx_event_reminders (event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 3. Event analytics cache table for performance
+CREATE TABLE IF NOT EXISTS event_analytics_cache (
+    cache_key VARCHAR(100) PRIMARY KEY,
+    cache_data JSON NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    INDEX idx_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 4. Event categories table for dynamic category management
+CREATE TABLE IF NOT EXISTS event_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    color VARCHAR(7) DEFAULT '#1abc9c',
+    icon VARCHAR(50) DEFAULT 'bi-calendar-event',
+    is_active TINYINT(1) DEFAULT 1,
+    sort_order INT DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 5. Insert default categories if they don't exist
+INSERT IGNORE INTO event_categories (name, color, icon, sort_order) VALUES
+('Academic', '#1abc9c', 'bi-book', 1),
+('Sports', '#e74c3c', 'bi-trophy', 2),
+('Cultural', '#9b59b6', 'bi-palette', 3),
+('Workshops', '#3498db', 'bi-tools', 4),
+('Conferences', '#2c3e50', 'bi-people', 5),
+('Academic Calendar', '#16a085', 'bi-calendar-check', 6),
+('Holidays', '#c0392b', 'bi-umbrella', 7),
+('Health & Nutrition', '#27ae60', 'bi-heart-pulse', 8),
+('Governance & Elections', '#8e44ad', 'bi-bank', 9),
+('Assessments', '#f39c12', 'bi-clipboard-check', 10),
+('Professional Development', '#2980b9', 'bi-mortarboard', 11),
+('Remedial & Intervention', '#d35400', 'bi-arrow-clockwise', 12);
+
+-- 6. Event subscriptions table for user preferences
+CREATE TABLE IF NOT EXISTS event_subscriptions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL,
+    category_id INT,
+    is_official_only TINYINT(1) DEFAULT 0,
+    notification_preferences JSON,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (category_id) REFERENCES event_categories(id) ON DELETE SET NULL,
+    UNIQUE KEY unique_user_subscription (user_id, category_id),
+    INDEX idx_user_subscriptions (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 7. Event views tracking for analytics
+CREATE TABLE IF NOT EXISTS event_views (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_id INT NOT NULL,
+    user_id VARCHAR(50),
+    view_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    INDEX idx_event_views (event_id),
+    INDEX idx_view_date (view_date),
+    INDEX idx_user_views (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 8. Event registrations tracking
+CREATE TABLE IF NOT EXISTS event_registrations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_id INT NOT NULL,
+    user_id VARCHAR(50) NOT NULL,
+    registration_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('registered', 'cancelled', 'attended') DEFAULT 'registered',
+    notes TEXT,
+    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_event_registration (event_id, user_id),
+    INDEX idx_event_registrations (event_id),
+    INDEX idx_user_registrations (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 9. Event conflicts detection table
+CREATE TABLE IF NOT EXISTS event_conflicts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event1_id INT NOT NULL,
+    event2_id INT NOT NULL,
+    conflict_type ENUM('time_overlap', 'resource_conflict', 'double_booking') NOT NULL,
+    severity ENUM('low', 'medium', 'high') DEFAULT 'medium',
+    resolved TINYINT(1) DEFAULT 0,
+    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME NULL,
+    resolved_by VARCHAR(50) NULL,
+    FOREIGN KEY (event1_id) REFERENCES events(id) ON DELETE CASCADE,
+    FOREIGN KEY (event2_id) REFERENCES events(id) ON DELETE CASCADE,
+    INDEX idx_conflict_events (event1_id, event2_id),
+    INDEX idx_conflict_resolved (resolved)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 10. Event templates for recurring events
+CREATE TABLE IF NOT EXISTS event_templates (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    category_id INT NOT NULL,
+    description TEXT,
+    default_duration INT DEFAULT 1,
+    default_location VARCHAR(255),
+    recurrence_pattern JSON,
+    is_active TINYINT(1) DEFAULT 1,
+    created_by VARCHAR(50) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (category_id) REFERENCES event_categories(id),
+    INDEX idx_template_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 11. Insert some useful event templates
+INSERT IGNORE INTO event_templates (name, category_id, description, default_duration, recurrence_pattern) VALUES
+('Monthly Faculty Meeting', 11, 'Regular faculty meeting for academic coordination', 1, '{"type": "monthly", "day_of_week": 1, "week_of_month": 1}'),
+('Weekly Sports Practice', 2, 'Regular practice session for sports teams', 1, '{"type": "weekly", "days": [2, 4]}'),
+('Quarterly Assessment', 10, 'Regular quarterly assessment period', 5, '{"type": "quarterly"}'),
+('Parent-Teacher Conference', 11, 'Regular parent-teacher meetings', 1, '{"type": "monthly", "day_of_week": 5, "week_of_month": 2}');
+
+-- 12. Create indexes for better performance (FIXED - removed problematic search index)
 CREATE INDEX IF NOT EXISTS idx_events_date_category ON events(event_date, category);
 CREATE INDEX IF NOT EXISTS idx_events_official ON events(is_official, event_date);
+-- REMOVED: idx_events_date_range (duplicate column issue)
 CREATE INDEX IF NOT EXISTS idx_events_team_based ON events(team_based, event_date);
+
+-- Alternative search indexes that won't exceed length limits
 CREATE INDEX IF NOT EXISTS idx_events_title ON events(title(100));
 CREATE INDEX IF NOT EXISTS idx_events_description ON events(description(100));
 CREATE INDEX IF NOT EXISTS idx_events_location ON events(location(100));
 
--- ============================================================
--- CORE SYSTEM TABLES (Essential for Website Functionality)
--- ============================================================
+-- 13. Create stored procedures for analytics
+DELIMITER //
 
--- 3. Admin authentication tables
-CREATE TABLE IF NOT EXISTS admins (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100) NOT NULL,
-    title VARCHAR(100),
-    school_email VARCHAR(100),
-    phone VARCHAR(20),
-    is_active TINYINT(1) DEFAULT 1,
-    last_login DATETIME,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE PROCEDURE IF NOT EXISTS GetEventAnalytics(IN start_date DATE, IN end_date DATE)
+BEGIN
+    SELECT 
+        COUNT(*) as total_events,
+        COUNT(CASE WHEN event_date >= CURDATE() THEN 1 END) as upcoming_events,
+        COUNT(CASE WHEN is_official = 1 THEN 1 END) as official_events,
+        COUNT(CASE WHEN event_days > 1 THEN 1 END) as multi_day_events,
+        ROUND(COUNT(CASE WHEN is_official = 1 THEN 1 END) * 100.0 / COUNT(*), 2) as official_percentage,
+        ROUND(COUNT(CASE WHEN event_days > 1 THEN 1 END) * 100.0 / COUNT(*), 2) as multi_day_percentage
+    FROM events 
+    WHERE event_date BETWEEN start_date AND end_date;
+END//
 
-CREATE TABLE IF NOT EXISTS admin (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100) NOT NULL,
-    user_type ENUM('admin', 'sub-admin') DEFAULT 'admin',
-    is_active TINYINT(1) DEFAULT 1,
-    last_login DATETIME,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE PROCEDURE IF NOT EXISTS GetCategoryBreakdown(IN start_date DATE, IN end_date DATE)
+BEGIN
+    SELECT 
+        ec.name as category,
+        ec.color,
+        COUNT(e.id) as total_count,
+        COUNT(CASE WHEN e.is_official = 1 THEN 1 END) as official_count,
+        COUNT(CASE WHEN e.event_date >= CURDATE() THEN 1 END) as upcoming_count,
+        COUNT(CASE WHEN e.event_days > 1 THEN 1 END) as multi_day_count
+    FROM events e
+    LEFT JOIN event_categories ec ON e.category = ec.name
+    WHERE e.event_date BETWEEN start_date AND end_date
+    GROUP BY ec.name, ec.color
+    ORDER BY total_count DESC;
+END//
 
-CREATE TABLE IF NOT EXISTS sub_admin (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100) NOT NULL,
-    email VARCHAR(100),
-    phone VARCHAR(20),
-    department VARCHAR(100),
-    is_active TINYINT(1) DEFAULT 1,
-    last_login DATETIME,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE PROCEDURE IF NOT EXISTS GetMonthlyTrends(IN months_back INT)
+BEGIN
+    SELECT 
+        DATE_FORMAT(event_date, '%Y-%m') as month_key,
+        COUNT(*) as total_events,
+        COUNT(CASE WHEN is_official = 1 THEN 1 END) as official_events
+    FROM events 
+    WHERE event_date >= DATE_SUB(CURDATE(), INTERVAL months_back MONTH)
+    GROUP BY DATE_FORMAT(event_date, '%Y-%m')
+    ORDER BY month_key;
+END//
 
--- 4. Student and Teacher tables
-CREATE TABLE IF NOT EXISTS students (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id VARCHAR(50) NOT NULL UNIQUE,
-    first_name VARCHAR(100) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
-    grade_level VARCHAR(20),
-    section VARCHAR(20),
-    email VARCHAR(100),
-    phone VARCHAR(20),
-    address TEXT,
-    status ENUM('active', 'inactive', 'graduated') DEFAULT 'active',
-    graduation_year INT,
-    gpa DECIMAL(3,2),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+DELIMITER ;
 
-CREATE TABLE IF NOT EXISTS teachers (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    teacher_id VARCHAR(50) NOT NULL UNIQUE,
-    first_name VARCHAR(100) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
-    email VARCHAR(100),
-    phone VARCHAR(20),
-    department VARCHAR(100),
-    subject_specialization VARCHAR(200),
-    teacher_subjects TEXT,
-    status ENUM('active', 'inactive') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 14. Create triggers for analytics updates
+DELIMITER //
 
--- 5. Content Management Tables
-CREATE TABLE IF NOT EXISTS news (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    content TEXT NOT NULL,
-    excerpt TEXT,
-    author VARCHAR(100),
-    category VARCHAR(50) DEFAULT 'General',
-    image VARCHAR(255),
-    is_featured TINYINT(1) DEFAULT 0,
-    is_published TINYINT(1) DEFAULT 1,
-    view_count INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_news_published (is_published, created_at),
-    INDEX idx_news_category (category)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TRIGGER IF NOT EXISTS update_analytics_cache_after_insert
+AFTER INSERT ON events
+FOR EACH ROW
+BEGIN
+    DELETE FROM event_analytics_cache WHERE cache_key LIKE 'analytics_%';
+END//
 
-CREATE TABLE IF NOT EXISTS school_announcements (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    announcement_date DATE NOT NULL,
-    is_closed TINYINT(1) NOT NULL DEFAULT 0,
-    custom_message TEXT DEFAULT NULL,
-    created_by VARCHAR(100) DEFAULT 'admin',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_announcements_date (announcement_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TRIGGER IF NOT EXISTS update_analytics_cache_after_update
+AFTER UPDATE ON events
+FOR EACH ROW
+BEGIN
+    DELETE FROM event_analytics_cache WHERE cache_key LIKE 'analytics_%';
+END//
 
--- 6. School Configuration
-CREATE TABLE IF NOT EXISTS school_settings (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    setting_key VARCHAR(100) NOT NULL UNIQUE,
-    setting_value TEXT DEFAULT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TRIGGER IF NOT EXISTS update_analytics_cache_after_delete
+AFTER DELETE ON events
+FOR EACH ROW
+BEGIN
+    DELETE FROM event_analytics_cache WHERE cache_key LIKE 'analytics_%';
+END//
 
-CREATE TABLE IF NOT EXISTS homepage_cards (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    card_key VARCHAR(100) NOT NULL UNIQUE,
-    title VARCHAR(200) DEFAULT '',
-    description TEXT DEFAULT '',
-    icon VARCHAR(100) DEFAULT '',
-    image VARCHAR(255) DEFAULT '',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+DELIMITER ;
 
--- 7. Student Activities
-CREATE TABLE IF NOT EXISTS student_memories (
-    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255) NOT NULL DEFAULT '',
-    image VARCHAR(500) NOT NULL DEFAULT '',
-    category ENUM('Student Activities', 'Academic Excellence', 'Sports') NOT NULL DEFAULT 'Student Activities',
-    uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_memories_category (category),
-    INDEX idx_memories_uploaded (uploaded_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS clubs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    advisor VARCHAR(100),
-    meeting_schedule VARCHAR(100),
-    status ENUM('Active', 'Inactive') DEFAULT 'Active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- 8. Communication System
-CREATE TABLE IF NOT EXISTS chat_conversations (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id INT NOT NULL,
-    admin_id INT NOT NULL DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_conversations_student (student_id),
-    INDEX idx_conversations_admin (admin_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS chat_messages (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    conversation_id INT NOT NULL,
-    sender_id INT NOT NULL,
-    sender_role ENUM('admin', 'student') NOT NULL,
-    receiver_id INT NOT NULL,
-    message TEXT NOT NULL,
-    message_type ENUM('text', 'file', 'image') DEFAULT 'text',
-    is_read TINYINT(1) DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE,
-    INDEX idx_messages_conversation (conversation_id),
-    INDEX idx_messages_sender (sender_id),
-    INDEX idx_messages_created (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- 9. File Management System
-CREATE TABLE IF NOT EXISTS file_requests (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id VARCHAR(50) NOT NULL,
-    document_type VARCHAR(100) NOT NULL,
-    purpose TEXT,
-    status ENUM('pending', 'approved', 'rejected', 'completed') DEFAULT 'pending',
-    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP NULL,
-    processed_by VARCHAR(100),
-    notes TEXT,
-    INDEX idx_requests_student (student_id),
-    INDEX idx_requests_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- 10. Additional Features
-CREATE TABLE IF NOT EXISTS school_ratings (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    rater_name VARCHAR(100),
-    rating INT NOT NULL CHECK (rating >= 1 AND rating <= 5),
-    review TEXT,
-    is_approved TINYINT(1) DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_ratings_approved (is_approved),
-    INDEX idx_ratings_rating (rating)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS student_logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id VARCHAR(50),
-    action VARCHAR(100) NOT NULL,
-    details TEXT,
-    ip_address VARCHAR(45),
-    user_agent TEXT,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_logs_student (student_id),
-    INDEX idx_logs_timestamp (timestamp)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS parent_profiles (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    parent_id VARCHAR(50) NOT NULL UNIQUE,
-    full_name VARCHAR(150) DEFAULT '',
-    relationship_to_student VARCHAR(50) DEFAULT '',
-    occupation VARCHAR(100) DEFAULT '',
-    workplace VARCHAR(200) DEFAULT '',
-    home_address TEXT DEFAULT '',
-    mobile_number VARCHAR(20) DEFAULT '',
-    landline_number VARCHAR(20) DEFAULT '',
-    active_email VARCHAR(100) DEFAULT '',
-    emergency_contact_name VARCHAR(100) DEFAULT '',
-    emergency_contact_phone VARCHAR(20) DEFAULT '',
-    profile_picture VARCHAR(255) DEFAULT '',
-    total_outstanding_balance DECIMAL(10,2) DEFAULT 0.00,
-    payment_history TEXT DEFAULT NULL,
-    enrollment_documents_status TEXT DEFAULT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ============================================================
--- INITIAL DATA SETUP
--- ============================================================
-
--- Insert default school settings
-INSERT IGNORE INTO school_settings (setting_key, setting_value) VALUES
-('school_name', 'Buyoan National High School'),
-('school_address', 'Buyoan, Agusan del Norte, Philippines'),
-('school_phone', '+63 (0) XXX-XXXX'),
-('school_email', 'info@buyoan.edu.ph'),
-('school_motto', 'Quality Education for All'),
-('about_photo', 'assets/img/front pic/Buyoan School.jpg'),
-('cta_photo', 'assets/img/education/Students learning.jpg');
-
--- Insert default homepage cards
-INSERT IGNORE INTO homepage_cards (card_key, title, description, icon, image) VALUES
-('card1', 'Quality Education', 'Providing quality education to nurture young minds for a better future.', 'bi-mortarboard', 'assets/img/education/classroom.jpg'),
-('card2', 'Dedicated Teachers', 'Our team of experienced educators committed to student success.', 'bi-people', 'assets/img/education/teachers.jpg'),
-('card3', 'Modern Facilities', 'State-of-the-art facilities to support learning and development.', 'bi-building', 'assets/img/education/facilities.jpg');
-
--- Insert default admin user (password: admin123)
-INSERT IGNORE INTO admins (username, password_hash, full_name, title, school_email) VALUES
-('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'System Administrator', 'Administrator', 'admin@buyoan.edu.ph');
-
--- ============================================================
--- VERIFICATION QUERY
--- ============================================================
-
+-- 15. Create view for enhanced event listings (FIXED collation issue)
+CREATE OR REPLACE VIEW event_details_view AS
 SELECT 
-    'Essential database setup completed successfully!' as status,
-    (SELECT COUNT(*) FROM admins) as admin_count,
-    (SELECT COUNT(*) FROM students) as student_count,
-    (SELECT COUNT(*) FROM teachers) as teacher_count,
-    (SELECT COUNT(*) FROM news) as news_count,
-    (SELECT COUNT(*) FROM events) as event_count,
-    (SELECT COUNT(*) FROM school_settings) as settings_count;
+    e.id,
+    e.title,
+    e.description,
+    e.event_date,
+    e.event_start_time,
+    e.event_end_time,
+    e.event_days,
+    e.category,
+    e.location,
+    e.organizer_name,
+    e.organizer_position,
+    e.organizer_contact,
+    e.team_based,
+    e.source,
+    e.is_official,
+    e.image,
+    e.created_at,
+    ec.color as category_color,
+    ec.icon as category_icon,
+    CASE 
+        WHEN e.event_date >= CURDATE() THEN 'upcoming'
+        WHEN e.event_date < CURDATE() THEN 'past'
+        ELSE 'ongoing'
+    END as event_status,
+    CASE 
+        WHEN e.event_date = CURDATE() THEN 'today'
+        WHEN e.event_date = CURDATE() + INTERVAL 1 DAY THEN 'tomorrow'
+        ELSE NULL
+    END as special_status,
+    DATEDIFF(e.event_date, CURDATE()) as days_until,
+    (SELECT COUNT(*) FROM event_registrations er WHERE er.event_id = e.id AND er.status = 'registered' COLLATE utf8mb4_unicode_ci) as registration_count
+FROM events e
+LEFT JOIN event_categories ec ON e.category = ec.name COLLATE utf8mb4_unicode_ci;
+
+-- 16. Create function for conflict detection
+DELIMITER //
+
+CREATE FUNCTION IF NOT EXISTS CheckEventConflict(
+    p_event_date DATE,
+    p_start_time TIME,
+    p_end_time TIME,
+    p_location VARCHAR(255),
+    p_exclude_event_id INT
+) RETURNS BOOLEAN
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE conflict_count INT DEFAULT 0;
+    
+    SELECT COUNT(*) INTO conflict_count
+    FROM events 
+    WHERE event_date = p_event_date 
+    AND id != p_exclude_event_id
+    AND (
+        (event_start_time <= p_start_time AND event_end_time >= p_start_time) OR
+        (event_start_time <= p_end_time AND event_end_time >= p_end_time) OR
+        (event_start_time >= p_start_time AND event_end_time <= p_end_time)
+    )
+    AND (p_location IS NOT NULL AND location = p_location OR p_location IS NULL);
+    
+    RETURN conflict_count > 0;
+END//
+
+DELIMITER ;
+
+-- 17. Populate existing events with proper categories if needed (FIXED collation issue)
+UPDATE events e 
+SET e.category = (
+    SELECT name FROM event_categories ec 
+    WHERE ec.name = e.category COLLATE utf8mb4_unicode_ci
+    LIMIT 1
+) 
+WHERE e.category IS NOT NULL AND e.category != '';
+
+-- 18. Create user notification preferences table
+CREATE TABLE IF NOT EXISTS user_notification_preferences (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL UNIQUE,
+    email_notifications TINYINT(1) DEFAULT 1,
+    browser_notifications TINYINT(1) DEFAULT 1,
+    sound_notifications TINYINT(1) DEFAULT 1,
+    reminder_default ENUM('15min', '30min', '1hour', '1day', '2days', '1week') DEFAULT '1hour',
+    categories_to_notify JSON,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 19. Insert default notification preferences
+INSERT IGNORE INTO user_notification_preferences (user_id) 
+SELECT DISTINCT 'default_user' WHERE NOT EXISTS (SELECT 1 FROM user_notification_preferences WHERE user_id = 'default_user');
+
+-- 20. Final verification query
+SELECT 
+    'Database setup completed successfully!' as status,
+    (SELECT COUNT(*) FROM events) as total_events,
+    (SELECT COUNT(*) FROM event_categories) as total_categories,
+    (SELECT COUNT(*) FROM event_reminders) as total_reminders,
+    (SELECT COUNT(*) FROM event_analytics_cache) as cached_analytics;

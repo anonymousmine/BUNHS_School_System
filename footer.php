@@ -7,7 +7,7 @@
 
                 <div class="col-lg-5">
                     <div class="brand-section">
-                        <a href="index.php" class="logo d-flex align-items-center mb-4">
+                        <a href="index.html" class="logo d-flex align-items-center mb-4">
                             <span class="sitename">Buyoan National High School</span>
                         </a>
                         <p class="brand-description">Crafting exceptional digital experiences through thoughtful design and innovative solutions that elevate your brand presence.</p>

@@ -1829,7 +1829,7 @@
                 <div class="row g-4">
                     <!-- Main Content Area -->
                     <div class="col-lg-8">
-                        <?php include 'admin_account/announcements/hero_dynamic.php'; ?>
+                        <?php include 'news_hero_dynamic.php'; ?>
                     </div>
 
                     <!-- Sidebar with Tabs -->
@@ -1848,7 +1848,7 @@
                             </ul>
 
                             <div class="tab-content">
-                                <?php include 'admin_account/announcements/sidebar_dynamic.php'; ?>
+                                <?php include 'news_sidebar_dynamic.php'; ?>
                             </div>
                         </div>
                     </div>
@@ -1880,7 +1880,7 @@
                 </div>
 
                 <div class="row gy-4 gx-3" id="posts-grid">
-                    <?php include 'admin_account/announcements/news_posts_dynamic.php'; ?>
+                    <?php include 'news_posts_dynamic.php'; ?>
                 </div>
                 <div class="no-results-msg" id="no-results">
                     <i class="bi bi-newspaper"></i>
