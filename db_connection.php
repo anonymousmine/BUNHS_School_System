@@ -1,8 +1,8 @@
 <?php
 
 /**
- * BUNHS School System - Enhanced Database Connection for Railway
- * This version includes additional debugging and Railway-specific fixes
+ * BUNHS School System - Railway-Optimized Database Connection
+ * Enhanced with multiple fallback strategies and detailed logging
  */
 
 // Prevent multiple inclusions
@@ -22,11 +22,14 @@ function check_mysqli_loaded()
 }
 }
 
-// ── Enhanced DB connect with Railway-specific handling ───────────────────────────
+// ── Railway-optimized DB connect with multiple strategies ───────────────────────
 if (!function_exists('safe_db_connect')) {
 function safe_db_connect($host, $user, $pass, $dbname, $port = null)
 {
     check_mysqli_loaded();
+
+    // Log connection attempt
+    error_log("Attempting DB connection: host=$host, user=$user, db=$dbname, port=$port");
 
     if (empty($host) || empty($user) || empty($dbname)) {
         error_log('DB config missing: HOST=' . ($host ?? 'MISSING') . ', USER=' . ($user ?? 'MISSING') . ', DBNAME=' . ($dbname ?? 'MISSING'));
@@ -36,63 +39,87 @@ function safe_db_connect($host, $user, $pass, $dbname, $port = null)
 
     $port = $port ?: 3306;
     
-    // Railway-specific connection attempts
-    $connection_attempts = [
-        // Standard connection
-        ['host' => $host, 'port' => $port, 'db' => $dbname],
-        // Try without database first (Railway sometimes needs this)
-        ['host' => $host, 'port' => $port, 'db' => null],
-        // Try with socket path (some Railway setups)
-        ['host' => null, 'socket' => '/tmp/mysql.sock', 'db' => $dbname],
-    ];
-
-    foreach ($connection_attempts as $attempt) {
-        $conn = false;
-        $error = '';
-        
-        try {
-            if (isset($attempt['socket'])) {
-                // Socket connection
-                $conn = @mysqli_connect(null, $user, $pass, $attempt['db'], null, $attempt['socket']);
-            } else {
-                // TCP connection
-                $conn = @mysqli_connect($attempt['host'], $user, $pass, $attempt['db'], $attempt['port']);
-            }
-
+    // Railway-specific connection strategies
+    $strategies = [
+        // Strategy 1: Standard TCP connection
+        function() use ($host, $user, $pass, $dbname, $port) {
+            error_log("Strategy 1: Standard TCP connection to $host:$port");
+            $conn = @mysqli_connect($host, $user, $pass, $dbname, $port);
             if ($conn) {
-                // If we connected without database, try to select it
-                if ($attempt['db'] === null) {
-                    if (!mysqli_select_db($conn, $dbname)) {
-                        $error = mysqli_error($conn);
-                        mysqli_close($conn);
-                        $conn = false;
-                    }
-                }
-                
-                if ($conn) {
-                    // Set charset + error reporting
+                mysqli_set_charset($conn, 'utf8mb4');
+                mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+                error_log("Strategy 1: SUCCESS - Connected to $host:$port/$dbname");
+                return $conn;
+            }
+            error_log("Strategy 1: FAILED - " . mysqli_connect_error());
+            return false;
+        },
+        
+        // Strategy 2: Connect to server first, then select database
+        function() use ($host, $user, $pass, $dbname, $port) {
+            error_log("Strategy 2: Server-first connection to $host:$port");
+            $conn = @mysqli_connect($host, $user, $pass, '', $port);
+            if ($conn) {
+                if (mysqli_select_db($conn, $dbname)) {
                     mysqli_set_charset($conn, 'utf8mb4');
                     mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
-                    
-                    // Log successful connection
-                    error_log('DB Connected successfully: ' . ($attempt['host'] ?? 'socket') . ':' . ($attempt['port'] ?? 'socket') . '/' . $dbname);
-                    
+                    error_log("Strategy 2: SUCCESS - Connected and selected $dbname");
                     return $conn;
+                } else {
+                    error_log("Strategy 2: FAILED - Could not select database $dbname");
+                    mysqli_close($conn);
                 }
             } else {
-                $error = mysqli_connect_error();
+                error_log("Strategy 2: FAILED - " . mysqli_connect_error());
             }
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+            return false;
+        },
         
-        error_log('Connection attempt failed: ' . $error);
+        // Strategy 3: Try different port (Railway sometimes uses different ports)
+        function() use ($host, $user, $pass, $dbname) {
+            $alt_ports = [3306, 3307, 5432, 6379];
+            foreach ($alt_ports as $alt_port) {
+                error_log("Strategy 3: Trying port $alt_port");
+                $conn = @mysqli_connect($host, $user, $pass, $dbname, $alt_port);
+                if ($conn) {
+                    mysqli_set_charset($conn, 'utf8mb4');
+                    mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+                    error_log("Strategy 3: SUCCESS - Connected on port $alt_port");
+                    return $conn;
+                }
+            }
+            error_log("Strategy 3: FAILED - All ports failed");
+            return false;
+        },
+        
+        // Strategy 4: Fallback to localhost (for local testing)
+        function() use ($dbname) {
+            error_log("Strategy 4: Localhost fallback");
+            $conn = @mysqli_connect('localhost', 'root', '', $dbname);
+            if ($conn) {
+                mysqli_set_charset($conn, 'utf8mb4');
+                mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+                error_log("Strategy 4: SUCCESS - Localhost connection");
+                return $conn;
+            }
+            error_log("Strategy 4: FAILED - Localhost failed");
+            return false;
+        }
+    ];
+
+    // Try each strategy
+    foreach ($strategies as $index => $strategy) {
+        $conn = $strategy();
+        if ($conn) {
+            error_log("DB Connection successful using strategy " . ($index + 1));
+            return $conn;
+        }
     }
 
-    // All attempts failed
-    error_log('All DB connection attempts failed. Last error: ' . $error);
+    // All strategies failed
+    error_log('All DB connection strategies failed');
     http_response_code(503);
-    die('Connection failed: Database unavailable. Please check configuration and try again later.');
+    die('Connection failed: Database unavailable after multiple connection attempts. Please check configuration and try again later.');
 }
 }
 
@@ -101,9 +128,9 @@ $host    = getenv('DB_HOST')    ?: 'localhost';
 $db_user = getenv('DB_USER')    ?: 'root';
 $db_pass = getenv('DB_PASSWORD') ?: '';
 $db_name = getenv('DB_NAME')    ?: 'bunhs_db_important';
-$db_port = getenv('DB_PORT')    ?: 3306;
+$db_port = getenv('DB_PORT')    ?: null;
 
-// Railway-specific: Sometimes DB_HOST includes port
+// Railway-specific: Parse host if it includes port
 if (strpos($host, ':') !== false) {
     list($host, $port_from_host) = explode(':', $host, 2);
     if (is_numeric($port_from_host)) {
@@ -111,11 +138,14 @@ if (strpos($host, ':') !== false) {
     }
 }
 
+// Log final connection parameters
+error_log("Final DB parameters: host=$host, user=$db_user, db=$db_name, port=$db_port");
+
 $conn = safe_db_connect($host, $db_user, $db_pass, $db_name, $db_port);
 
 // ── Optional: Log success (remove in high-traffic prod) ─────────────────────
 if (getenv('APP_DEBUG') === 'true') {
-    error_log('DB Connected: ' . $host . ':' . $db_port . '/' . $db_name);
+    error_log('DB Connected successfully: ' . $host . ':' . ($db_port ?: 3306) . '/' . $db_name);
 }
 
 } // End of DB_CONNECTION_LOADED check
