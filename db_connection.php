@@ -212,6 +212,14 @@ if ($using_defaults) {
             return null;
         }
         
+        public function fetch($mode = null) {
+            return null;
+        }
+        
+        public function fetchAll($mode = null) {
+            return [];
+        }
+        
         public function close() {
             return true;
         }
