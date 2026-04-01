@@ -1258,79 +1258,81 @@ $conn->close();
 
     <!-- Modals + auth logic -->
     <script>
-        fetch('modals.php')
-            .then(r => r.text())
-            .then(html => {
-                document.body.insertAdjacentHTML('beforeend', html);
+        try {
+            fetch('modals.php')
+                .then(r => r.text())
+                .then(html => {
+                    document.body.insertAdjacentHTML('beforeend', html);
+                    console.log('Modals loaded successfully');
+                })
+                .catch(error => {
+                    console.warn('Error loading modals:', error);
+                });
+        } catch (error) {
+            console.warn('Modal initialization failed:', error);
+        }
+    </script>
 
-                // ── FIX: define password-strength helpers as globals ──────────
-                // modals.php is loaded via fetch/insertAdjacentHTML, so its
-                // <script> tags never execute. We define these here instead so
-                // the oninput="bmCheckPwStrength(...)" attributes work correctly.
-                window.bmCheckPwStrength = function(pw) {
-                    const wrap = document.getElementById('pwStrengthWrap');
-                    const lbl = document.getElementById('pwStrengthLabel');
-                    const bars = ['pws1', 'pws2', 'pws3', 'pws4'].map(id => document.getElementById(id));
-                    if (!wrap) return;
-                    if (!pw) {
-                        wrap.style.display = 'none';
-                        return;
+    (function() {
+        'use strict';
+
+        function initOtp(rowId, hiddenId) {
+            const row = document.getElementById(rowId);
+            if (!row) return;
+            const boxes = row.querySelectorAll('.bm-otp-box');
+            const hid = document.getElementById(hiddenId);
+
+            function sync() {
+                let v = '';
+                boxes.forEach(b => {
+                    v += b.value;
+                    b.classList.toggle('is-filled', b.value !== '');
+                });
+                if (hid) hid.value = v;
+            }
+            boxes.forEach((b, i) => {
+                b.addEventListener('input', () => {
+                    b.value = b.value.replace(/\D/g, '').slice(-1);
+                    sync();
+                    if (b.value && i < boxes.length - 1) boxes[i + 1].focus();
+                });
+                b.addEventListener('keydown', e => {
+                    if (e.key === 'Backspace' && !b.value && i > 0) {
+                        boxes[i - 1].value = '';
+                        boxes[i - 1].focus();
+                        sync();
                     }
-                    wrap.style.display = 'block';
-                    let score = 0;
-                    if (pw.length >= 8) score++;
-                    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
-                    if (/[0-9]/.test(pw)) score++;
-                    if (/[\W_]/.test(pw)) score++;
-                    const colors = ['#e53935', '#fb8c00', '#fdd835', '#2d6a4f'];
-                    const labels = ['Weak', 'Fair', 'Good', 'Strong'];
-                    bars.forEach((b, i) => {
-                        if (b) b.style.background = i < score ? colors[score - 1] : '#dde8e2';
+                    if (e.key === 'ArrowLeft' && i > 0) boxes[i - 1].focus();
+                    if (e.key === 'ArrowRight' && i < boxes.length - 1) boxes[i + 1].focus();
+                });
+                b.addEventListener('paste', e => {
+                    e.preventDefault();
+                    const d = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
+                    d.split('').forEach((c, j) => {
+                        if (boxes[j]) boxes[j].value = c;
                     });
-                    if (lbl) {
-                        lbl.textContent = labels[score - 1] || '';
-                        lbl.style.color = colors[score - 1] || 'var(--bunhs-muted)';
-                    }
-                    const cp = document.getElementById('signupConfirmPassword');
-                    if (cp && cp.value) window.bmCheckPwMatch();
-                };
-                window.bmCheckPwMatch = function() {
-                    const pw = document.getElementById('signupPassword');
-                    const cp = document.getElementById('signupConfirmPassword');
-                    const hint = document.getElementById('pwMatchHint');
-                    if (!cp || !hint) return;
-                    if (!cp.value) {
-                        hint.style.display = 'none';
-                        return;
-                    }
-                    hint.style.display = 'block';
-                    if (pw && pw.value === cp.value) {
-                        hint.textContent = '✓ Passwords match';
-                        hint.style.color = '#2d6a4f';
-                    } else {
-                        hint.textContent = '✗ Passwords do not match';
-                        hint.style.color = '#e53935';
-                    }
-                };
-                const _cpEl = document.getElementById('signupConfirmPassword');
-                if (_cpEl) _cpEl.addEventListener('input', window.bmCheckPwMatch);
-                // ─────────────────────────────────────────────────────────────
-
-                // Use safe event listeners for login/signup buttons
-                safeQuerySelectorAllAddEventListener('.btn-login, [data-open-login]', 'click', e => {
-                    e.preventDefault();
-                    const loginModal = document.getElementById('loginModal');
-                    if (loginModal) new bootstrap.Modal(loginModal).show();
+                    sync();
+                    boxes[Math.min(d.length, boxes.length - 1)].focus();
                 });
-                safeQuerySelectorAllAddEventListener('.btn-signup, [data-open-signup]', 'click', e => {
-                    e.preventDefault();
-                    const signupModal = document.getElementById('signupModal');
-                    if (signupModal) new bootstrap.Modal(signupModal).show();
+                b.addEventListener('keypress', e => {
+                    if (!/\d/.test(e.key)) e.preventDefault();
                 });
+            });
+        }
 
-                (function() {
-                    'use strict';
+        function clearOtp(rowId) {
+            document.querySelectorAll('#' + rowId + ' .bm-otp-box').forEach(b => {
+                b.value = '';
+                b.classList.remove('is-filled', 'is-error');
+            });
+        }
 
+        function shakeOtp(rowId) {
+            document.querySelectorAll('#' + rowId + ' .bm-otp-box').forEach(b => {
+                b.classList.add('is-error');
+                setTimeout(() => b.classList.remove('is-error'), 420);
+            });
+        }
                     function initOtp(rowId, hiddenId) {
                         const row = document.getElementById(rowId);
                         if (!row) return;
