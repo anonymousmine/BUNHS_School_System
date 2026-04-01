@@ -93,9 +93,13 @@ if ($act) {
     while ($row = $act->fetch_assoc()) $recent_activities[] = $row;
 }
 
-// ── Email subscribers (table removed during cleanup) ─────────────
+// ── Fetch email subscribers ────────────────────────────────────────
 $email_subscribers = [];
-$active_subscribers_count = 0;
+$es = $conn->query("SELECT id, email, is_active, subscribed_at, updated_at FROM email_subscribers ORDER BY subscribed_at DESC");
+if ($es) {
+    while ($row = $es->fetch_assoc()) $email_subscribers[] = $row;
+}
+$active_subscribers_count = count(array_filter($email_subscribers, fn($s) => $s['is_active'] == 1));
 
 // ── System notifications ──────────────────────────────────────────
 $notifications = [];
@@ -1027,24 +1031,71 @@ if ($pending_docs > 0) {
 
         </div><!-- /bento-grid -->
 
-        <!-- Email Subscribers Section (Removed During Cleanup) -->
+        <!-- Email Subscribers Table -->
         <div class="subscribers-table-container" style="margin-top: 24px;">
             <div class="bento-cell col-12" style="padding: 0;">
                 <div class="cell-header" style="border-bottom: none; padding: 22px 22px 14px;">
                     <div class="cell-header-title">
                         <i class="fas fa-envelope"></i> Email Subscribers
                         <span style="margin-left: 8px; font-size: 11px; color: var(--text-muted); font-weight: 400;">
-                            (0 total, 0 active)
+                            (<?= count($email_subscribers) ?> total, <?= $active_subscribers_count ?> active)
                         </span>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button class="banner-btn ghost" style="padding: 6px 12px; font-size: 11px;" onclick="refreshSubscribers()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
                     </div>
                 </div>
                 
                 <div style="padding: 0 22px 22px;">
-                    <div class="empty-state" style="padding: 40px; text-align: center;">
-                        <i class="fas fa-envelope" style="color: var(--moss-200); font-size: 32px; margin-bottom: 12px;"></i>
-                        <p style="color: var(--text-muted); font-size: 14px;">Email subscribers table was removed during database cleanup.</p>
-                        <p style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">This feature can be re-enabled if needed.</p>
-                    </div>
+                    <?php if (count($email_subscribers) > 0): ?>
+                        <div style="overflow-x: auto;">
+                            <table class="subscribers-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                <thead>
+                                    <tr style="background: var(--moss-50);">
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 2px solid var(--border);">ID</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 2px solid var(--border);">Email Address</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 2px solid var(--border);">Status</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 2px solid var(--border);">Subscribed</th>
+                                        <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 2px solid var(--border);">Last Updated</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($email_subscribers as $subscriber): ?>
+                                        <tr style="border-bottom: 1px solid var(--moss-50); transition: background 0.2s;">
+                                            <td style="padding: 12px 16px; color: var(--text-muted); font-weight: 500;"><?= $subscriber['id'] ?></td>
+                                            <td style="padding: 12px 16px;">
+                                                <div style="display: flex; align-items: center; gap: 8px;">
+                                                    <i class="fas fa-envelope" style="color: var(--moss-400); font-size: 12px;"></i>
+                                                    <span style="color: var(--text-primary); font-weight: 500;"><?= htmlspecialchars($subscriber['email'], ENT_QUOTES) ?></span>
+                                                </div>
+                                            </td>
+                                            <td style="padding: 12px 16px;">
+                                                <?php if ($subscriber['is_active'] == 1): ?>
+                                                    <span style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: #edfff4; color: #22863a; border-radius: 12px; font-size: 11px; font-weight: 600;">
+                                                        <i class="fas fa-check-circle" style="font-size: 9px;"></i> Active
+                                                    </span>
+                                                <?php else: ?>
+                                                    <span style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: #fdf1f1; color: #b94040; border-radius: 12px; font-size: 11px; font-weight: 600;">
+                                                        <i class="fas fa-times-circle" style="font-size: 9px;"></i> Inactive
+                                                    </span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td style="padding: 12px 16px; color: var(--text-muted); font-size: 12px;"><?= date('M j, Y g:i A', strtotime($subscriber['subscribed_at'])) ?></td>
+                                            <td style="padding: 12px 16px; color: var(--text-muted); font-size: 12px;"><?= date('M j, Y g:i A', strtotime($subscriber['updated_at'])) ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php else: ?>
+                        <div class="empty-state" style="padding: 40px; text-align: center;">
+                            <i class="fas fa-envelope" style="color: var(--moss-200); font-size: 32px; margin-bottom: 12px;"></i>
+                            <p style="color: var(--text-muted); font-size: 14px;">No email subscribers yet.</p>
+                            <p style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">Users can subscribe to email notifications through the Events page.</p>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

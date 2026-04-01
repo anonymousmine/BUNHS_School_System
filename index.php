@@ -75,7 +75,7 @@ $conn->query("CREATE TABLE IF NOT EXISTS homepage_cards (
     id INT AUTO_INCREMENT PRIMARY KEY,
     card_key VARCHAR(100) NOT NULL UNIQUE,
     title VARCHAR(200) DEFAULT '',
-    description TEXT DEFAULT '',
+    description TEXT,
     icon VARCHAR(100) DEFAULT '',
     image VARCHAR(255) DEFAULT '',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -84,6 +84,7 @@ $conn->query("CREATE TABLE IF NOT EXISTS homepage_cards (
 $conn->query("INSERT IGNORE INTO homepage_cards (card_key, title, description, icon, image) VALUES
     ('leadership', 'Leadership Development', 'Buyoan National High School shapes future leaders through dynamic SSG programs, hands-on leadership trainings, and engaging school and DepEd events helping students build confidence, teamwork, and communication skills that last a lifetime', 'fa-crown', 'assets/img/education/Leadership development.jpg'),
     ('cultural', 'Cultural Diversity', 'Buyoan National High School celebrates the rich blend of Bicolano and Filipino cultures that shape our campus community. We honor traditions, embrace diversity, and integrate local heritage into learning empowering students to grow with pride, inclusivity, and respect for all.', 'fa-globe', 'assets/img/education/Cultural Event.jpg'),
+    ('innovation', 'Innovation Hub', 'Buyoan National High School\'s Innovation Hub nurtures future-ready learners by inspiring creativity, critical thinking, and hands-on innovation to solve real-world challenges.', 'fa-lightbulb', 'assets/img/innovation.jpg'),
     ('innovation', 'Innovation Hub', 'Buyoan National High School\\'s Innovation Hub nurtures future-ready learners by inspiring creativity, critical thinking, and hands-on innovation to solve real-world challenges.', 'fa-lightbulb', 'assets/img/innovation.jpg'),
     ('cert_card1', 'Certified Excellence', 'Industry-recognized certificates', 'fa-trophy', ''),
     ('cert_card2', 'Learn at Your Pace', '24/7 access to all materials', 'fa-clock', ''),
