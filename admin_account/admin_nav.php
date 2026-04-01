@@ -112,14 +112,8 @@ if (isset($conn) && $conn instanceof mysqli && $conn->ping()) {
     // Teachers
     $_counts['teachers'] = $__safe_count("SELECT COUNT(*) AS c FROM teachers");
 
-    // Forms — try common table names, fall back to 0 gracefully
-    foreach (['form_requests', 'clearance_forms', 'forms'] as $_ft) {
-        $n = $__safe_count("SELECT COUNT(*) AS c FROM `{$_ft}`");
-        if ($n > 0 || $conn->query("SHOW TABLES LIKE '{$_ft}'")->num_rows > 0) {
-            $_counts['forms'] = $n;
-            break;
-        }
-    }
+    // Forms — all form tables were removed during cleanup
+    $_counts['forms'] = 0;
 
     // Clubs
     $_counts['clubs'] = $__safe_count("SELECT COUNT(*) AS c FROM clubs");
