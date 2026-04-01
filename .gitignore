@@ -1,0 +1,73 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Logs
+logs/
+*.log
+
+# Cache and temporary files
+cache/
+tmp/
+temp/
+
+# Database exports (keep structure files)
+*.sql
+!database_setup*.sql
+!admin_account/*.sql
+
+# Uploads (keep structure)
+uploads/*
+!uploads/.gitkeep
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Development files
+db_inspector.php
+db_schema_check.php
+db_tables.php
+
+# Session files
+sessions/
+
+# Composer
+composer.phar
+
+# PHPUnit
+.phpunit.result.cache
+.phpunit.cache
+
+# Build artifacts
+dist/
+build/
+
+# Runtime files
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage reports
+coverage/
+
+# Local configuration
+config/local.php
