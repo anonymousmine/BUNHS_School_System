@@ -1244,16 +1244,25 @@ $conn->close();
     <!-- Events filter script -->
     <script>
         function applyEventFilters() {
-            const month = document.getElementById('eventMonthFilter').value;
-            const cat = document.getElementById('eventCatFilter').value;
+            const monthFilter = document.getElementById('eventMonthFilter');
+            const catFilter = document.getElementById('eventCatFilter');
+            
+            if (!monthFilter || !catFilter) {
+                console.warn('Event filter elements not found');
+                return;
+            }
+            
+            const month = monthFilter.value;
+            const cat = catFilter.value;
             document.querySelectorAll('#events-grid .event-item').forEach(function(item) {
                 const mMatch = !month || item.dataset.month === month;
                 const cMatch = !cat || item.dataset.category.toLowerCase() === cat.toLowerCase();
                 item.style.display = (mMatch && cMatch) ? '' : 'none';
             });
         }
-        document.getElementById('eventMonthFilter').addEventListener('change', applyEventFilters);
-        document.getElementById('eventCatFilter').addEventListener('change', applyEventFilters);
+        
+        safeAddEventListener('eventMonthFilter', 'change', applyEventFilters);
+        safeAddEventListener('eventCatFilter', 'change', applyEventFilters);
     </script>
 
     <!-- Modals + auth logic -->
@@ -1316,17 +1325,16 @@ $conn->close();
                 if (_cpEl) _cpEl.addEventListener('input', window.bmCheckPwMatch);
                 // ─────────────────────────────────────────────────────────────
 
-                document.querySelectorAll('.btn-login, [data-open-login]').forEach(btn => {
-                    btn.addEventListener('click', e => {
-                        e.preventDefault();
-                        new bootstrap.Modal(document.getElementById('loginModal')).show();
-                    });
+                safeQuerySelectorAllAddEventListener('.btn-login, [data-open-login]', 'click', e => {
+                    e.preventDefault();
+                    const loginModal = document.getElementById('loginModal');
+                    if (loginModal) new bootstrap.Modal(loginModal).show();
                 });
-                document.querySelectorAll('.btn-signup, [data-open-signup]').forEach(btn => {
-                    btn.addEventListener('click', e => {
-                        e.preventDefault();
-                        new bootstrap.Modal(document.getElementById('signupModal')).show();
-                    });
+                
+                safeQuerySelectorAllAddEventListener('.btn-signup, [data-open-signup]', 'click', e => {
+                    e.preventDefault();
+                    const signupModal = document.getElementById('signupModal');
+                    if (signupModal) new bootstrap.Modal(signupModal).show();
                 });
 
                 (function() {
