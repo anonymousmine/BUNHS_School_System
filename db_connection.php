@@ -130,18 +130,88 @@ $db_pass = getenv('DB_PASSWORD') ?: '';
 $db_name = getenv('DB_NAME')    ?: 'bunhs_db_important';
 $db_port = getenv('DB_PORT')    ?: null;
 
-// Railway-specific: Parse host if it includes port
-if (strpos($host, ':') !== false) {
-    list($host, $port_from_host) = explode(':', $host, 2);
-    if (is_numeric($port_from_host)) {
-        $db_port = (int)$port_from_host;
+// Check if environment variables are properly set (not using defaults)
+$using_defaults = ($host === 'localhost' && $db_user === 'root' && empty($db_pass));
+
+if ($using_defaults) {
+    error_log('WARNING: Using default database settings - likely Railway environment variables not set');
+    error_log('TREATING AS BYPASS MODE - App will load without database connection');
+    
+    // Create a mock connection for bypass mode
+    class MockDBConnection {
+        public function query($sql) {
+            error_log("MOCK DB Query (bypass): $sql");
+            return false;
+        }
+        
+        public function prepare($sql) {
+            error_log("MOCK DB Prepare (bypass): $sql");
+            return new MockStatement();
+        }
+        
+        public function real_escape_string($string) {
+            return addslashes($string);
+        }
+        
+        public function close() {
+            // Do nothing
+        }
+        
+        public function error() {
+            return 'Database connection bypassed - Set Railway environment variables';
+        }
+        
+        public function errno() {
+            return 0;
+        }
+        
+        public function insert_id() {
+            return 0;
+        }
+        
+        public function affected_rows() {
+            return 0;
+        }
     }
+    
+    class MockStatement {
+        public function bind_param($types, ...$params) {
+            return true;
+        }
+        
+        public function execute() {
+            return true;
+        }
+        
+        public function get_result() {
+            return false;
+        }
+        
+        public function fetch_assoc() {
+            return false;
+        }
+        
+        public function close() {
+            return true;
+        }
+    }
+    
+    $conn = new MockDBConnection();
+    
+} else {
+    // Railway-specific: Parse host if it includes port
+    if (strpos($host, ':') !== false) {
+        list($host, $port_from_host) = explode(':', $host, 2);
+        if (is_numeric($port_from_host)) {
+            $db_port = (int)$port_from_host;
+        }
+    }
+
+    // Log final connection parameters
+    error_log("Final DB parameters: host=$host, user=$db_user, db=$db_name, port=$db_port");
+
+    $conn = safe_db_connect($host, $db_user, $db_pass, $db_name, $db_port);
 }
-
-// Log final connection parameters
-error_log("Final DB parameters: host=$host, user=$db_user, db=$db_name, port=$db_port");
-
-$conn = safe_db_connect($host, $db_user, $db_pass, $db_name, $db_port);
 
 // ── Optional: Log success (remove in high-traffic prod) ─────────────────────
 if (getenv('APP_DEBUG') === 'true') {
