@@ -1244,25 +1244,16 @@ $conn->close();
     <!-- Events filter script -->
     <script>
         function applyEventFilters() {
-            const monthFilter = document.getElementById('eventMonthFilter');
-            const catFilter = document.getElementById('eventCatFilter');
-            
-            if (!monthFilter || !catFilter) {
-                console.warn('Event filter elements not found');
-                return;
-            }
-            
-            const month = monthFilter.value;
-            const cat = catFilter.value;
+            const month = document.getElementById('eventMonthFilter').value;
+            const cat = document.getElementById('eventCatFilter').value;
             document.querySelectorAll('#events-grid .event-item').forEach(function(item) {
                 const mMatch = !month || item.dataset.month === month;
                 const cMatch = !cat || item.dataset.category.toLowerCase() === cat.toLowerCase();
                 item.style.display = (mMatch && cMatch) ? '' : 'none';
             });
         }
-        
-        safeAddEventListener('eventMonthFilter', 'change', applyEventFilters);
-        safeAddEventListener('eventCatFilter', 'change', applyEventFilters);
+        document.getElementById('eventMonthFilter').addEventListener('change', applyEventFilters);
+        document.getElementById('eventCatFilter').addEventListener('change', applyEventFilters);
     </script>
 
     <!-- Modals + auth logic -->
@@ -1325,12 +1316,12 @@ $conn->close();
                 if (_cpEl) _cpEl.addEventListener('input', window.bmCheckPwMatch);
                 // ─────────────────────────────────────────────────────────────
 
+                // Use safe event listeners for login/signup buttons
                 safeQuerySelectorAllAddEventListener('.btn-login, [data-open-login]', 'click', e => {
                     e.preventDefault();
                     const loginModal = document.getElementById('loginModal');
                     if (loginModal) new bootstrap.Modal(loginModal).show();
                 });
-                
                 safeQuerySelectorAllAddEventListener('.btn-signup, [data-open-signup]', 'click', e => {
                     e.preventDefault();
                     const signupModal = document.getElementById('signupModal');
@@ -1547,29 +1538,13 @@ $conn->close();
                         
                         return isValid;
                     }
-                    document.getElementById('toggleLoginPwd').addEventListener('click', function() {
+                    safeAddEventListener('toggleLoginPwd', 'click', function() {
                         var inp = document.getElementById('loginPassword');
                         var ico = document.getElementById('loginEyeIcon');
-                        if (inp.type === 'password') {
-                            inp.type = 'text';
-                            ico.className = 'fas fa-eye-slash';
-                        } else {
-                            inp.type = 'password';
-                            ico.className = 'fas fa-eye';
-                        }
-                    });
-
-                    document.getElementById('loginCredentialsForm').addEventListener('submit', e => {
-                        e.preventDefault();
-                        hideErr('loginErrBox');
-                        setLoad('loginSubmitBtn', true);
-                        const fd = new FormData(e.target);
-                        fd.append('action', 'login_verify_credentials');
-                        fetch('login_otp.php', {
-                            method: 'POST',
-                            body: fd
-                        }).then(r => r.json()).then(d => {
-                            setLoad('loginSubmitBtn', false);
+                        if (inp && ico) {
+                            if (inp.type === 'password') {
+                                inp.type = 'text';
+                                ico.className = 'fas fa-eye-slash';
                             if (d.success) {
                                 // Always show OTP step — no bypass
                                 document.getElementById('loginStep1').style.display = 'none';
@@ -1594,7 +1569,7 @@ $conn->close();
                         });
                     });
 
-                    document.getElementById('loginOtpForm').addEventListener('submit', e => {
+                    safeAddEventListener('loginOtpForm', 'submit', e => {
                         e.preventDefault();
                         hideErr('loginOtpErrBox');
                         const otp = document.getElementById('loginOtpHidden').value;
