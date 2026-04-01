@@ -17,13 +17,18 @@ if (session_status() === PHP_SESSION_NONE) {
     $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
 
+    // Detect cloud environment for cookie settings
+    $is_cloud_env = isset($_SERVER['RAILWAY_ENVIRONMENT']) || 
+                   isset($_SERVER['HEROKU_APP_ID']) ||
+                   (isset($_SERVER['HTTP_X_FORWARDED_FOR']) && !empty($_SERVER['HTTP_X_FORWARDED_FOR']));
+    
     session_set_cookie_params([
         'lifetime' => 0,                        // until browser closes
         'path'     => '/',                       // accessible from all paths on this host
         'domain'   => '',                        // current domain only
         'secure'   => $isHttps,                  // HTTPS only in production, HTTP ok on localhost
         'httponly' => true,                      // no JS access to cookie
-        'samesite' => 'Strict',                  // Strict for better security
+        'samesite' => $is_cloud_env ? 'Lax' : 'Strict',  // Lax for cloud environments
     ]);
 
     session_start();
@@ -58,13 +63,32 @@ if (session_status() === PHP_SESSION_NONE) {
         }
     }
     
-    // Check for session hijacking attempts
+    // Check for session hijacking attempts - relaxed for cloud environments
     $current_ip = $_SERVER['REMOTE_ADDR'] ?? '';
     $current_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
     
-    if ($_SESSION['ip_address'] !== $current_ip || $_SESSION['user_agent'] !== $current_user_agent) {
+    // Detect if we're in a cloud environment (Railway, Heroku, etc.)
+    $is_cloud_env = isset($_SERVER['RAILWAY_ENVIRONMENT']) || 
+                   isset($_SERVER['HEROKU_APP_ID']) ||
+                   (isset($_SERVER['HTTP_X_FORWARDED_FOR']) && !empty($_SERVER['HTTP_X_FORWARDED_FOR']));
+    
+    // In cloud environments, only check user agent, not IP (IP can change due to load balancers)
+    $hijacking_detected = false;
+    if ($is_cloud_env) {
+        // Cloud environment: only check user agent
+        if ($_SESSION['user_agent'] !== $current_user_agent) {
+            $hijacking_detected = true;
+        }
+    } else {
+        // Local/standard environment: check both IP and user agent
+        if ($_SESSION['ip_address'] !== $current_ip || $_SESSION['user_agent'] !== $current_user_agent) {
+            $hijacking_detected = true;
+        }
+    }
+    
+    if ($hijacking_detected) {
         // Potential session hijacking - destroy session
-        error_log("Session hijacking attempt detected. Expected IP: " . $_SESSION['ip_address'] . ", Actual: " . $current_ip);
+        error_log("Session hijacking attempt detected. Expected IP: " . $_SESSION['ip_address'] . ", Actual: " . $current_ip . " Environment: " . ($is_cloud_env ? 'cloud' : 'standard'));
         session_destroy();
         header('Location: ../index.php?error=session_hijack');
         exit;
