@@ -1223,6 +1223,9 @@ $conn->close();
     <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@srexi/purecounterjs/dist/purecounter_vanilla.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/glightbox/dist/js/glightbox.min.js"></script>
+    <script src="assets/js/safe-event-listeners.js"></script>
+
+    <!-- Main JavaScript -->
     <script src="assets/js/main.js"></script>
 
     <!-- Navigation -->
