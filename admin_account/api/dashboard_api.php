@@ -90,13 +90,6 @@ function getDashboardStats($conn) {
     return DashboardCache::remember('dashboard_stats', function() use ($conn) {
         $stats = [];
         
-        // Get teacher count
-        $stmt = $conn->prepare("SELECT COUNT(*) as total FROM teachers");
-        $stmt->execute();
-        $stmt->bind_result($stats['teachers']);
-        $stmt->fetch();
-        $stmt->close();
-        
         // Get student count
         $stmt = $conn->prepare("SELECT COUNT(*) as total FROM students");
         $stmt->execute();
@@ -104,45 +97,30 @@ function getDashboardStats($conn) {
         $stmt->fetch();
         $stmt->close();
         
-        // Get club count
-        $stmt = $conn->prepare("SELECT COUNT(*) as total FROM clubs");
+        // Get teacher count
+        $stmt = $conn->prepare("SELECT COUNT(*) as total FROM teachers");
         $stmt->execute();
-        $stmt->bind_result($stats['clubs']);
+        $stmt->bind_result($stats['teachers']);
         $stmt->fetch();
         $stmt->close();
         
-        // Get finance total
-        $stmt = $conn->prepare("SELECT COALESCE(SUM(amount), 0) as total FROM finance_records");
+        // Get news count
+        $stmt = $conn->prepare("SELECT COUNT(*) as total FROM news");
         $stmt->execute();
-        $stmt->bind_result($stats['finance']);
+        $stmt->bind_result($stats['news']);
+        $stmt->fetch();
+        $stmt->close();
+        
+        // Get announcements count
+        $stmt = $conn->prepare("SELECT COUNT(*) as total FROM announcements");
+        $stmt->execute();
+        $stmt->bind_result($stats['announcements']);
         $stmt->fetch();
         $stmt->close();
         
         // Calculate teacher-student ratio
         $stats['teacher_student_ratio'] = $stats['teachers'] > 0 ? 
             round($stats['students'] / $stats['teachers'], 1) : 0;
-        
-        // Get graduation rate
-        $grad_stmt = $conn->prepare(
-            "SELECT graduation_year,
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN LOWER(status) IN ('completers','graduate','graduated','completer') THEN 1 ELSE 0 END) AS completers
-             FROM students
-             WHERE graduation_year IS NOT NULL AND graduation_year > 0
-             GROUP BY graduation_year"
-        );
-        $grad_stmt->execute();
-        $grad_stmt->bind_result($grad_year, $total, $completers);
-        $batch_rates = [];
-        while ($grad_stmt->fetch()) {
-            if ((int)$total > 0) {
-                $batch_rates[] = ((int)$completers / (int)$total) * 100;
-            }
-        }
-        $grad_stmt->close();
-        
-        $stats['graduation_rate'] = count($batch_rates) > 0 ? 
-            round(array_sum($batch_rates) / count($batch_rates), 1) : 0;
         
         return $stats;
     }, 300); // Cache for 5 minutes
@@ -155,23 +133,23 @@ function getRecentActivities($conn) {
     return DashboardCache::remember('recent_activities', function() use ($conn) {
         $activities = [];
         
-        // Get recent student logs
+        // Get recent announcements
         $stmt = $conn->prepare(
-            "SELECT admin_name, action, student_id, timestamp 
-             FROM student_logs 
-             ORDER BY timestamp DESC 
-             LIMIT 10"
+            "SELECT title, announcement_date, created_by 
+             FROM announcements 
+             ORDER BY announcement_date DESC 
+             LIMIT 5"
         );
         $stmt->execute();
-        $stmt->bind_result($admin_name, $action, $student_id, $timestamp);
+        $stmt->bind_result($title, $announcement_date, $created_by);
         
         while ($stmt->fetch()) {
             $activities[] = [
-                'type' => 'student',
-                'icon' => 'fa-user-graduate',
-                'text' => "$admin_name $action student $student_id",
-                'timestamp' => $timestamp,
-                'time_ago' => getTimeAgo($timestamp)
+                'type' => 'announcement',
+                'icon' => 'fa-bullhorn',
+                'text' => "New announcement: $title",
+                'timestamp' => $announcement_date,
+                'time_ago' => getTimeAgo($announcement_date)
             ];
         }
         $stmt->close();
@@ -179,7 +157,7 @@ function getRecentActivities($conn) {
         // If no activities, provide default ones
         if (empty($activities)) {
             $activities = [
-                ['type' => 'info', 'icon' => 'fa-info-circle', 'text' => 'No recent activities', 'timestamp' => date('Y-m-d H:i:s')],
+                ['type' => 'info', 'icon' => 'fa-info-circle', 'text' => 'No recent announcements', 'timestamp' => date('Y-m-d H:i:s')],
             ];
         }
         

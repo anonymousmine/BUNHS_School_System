@@ -1307,11 +1307,6 @@ if ($_embed === 'json') {
                             <i class="fas fa-plus-circle"></i>
                             <span>Post News</span>
                         </a>
-                        <a href="<?= $adminBase ?>announcements/Emergency_system.php"
-                            class="menu-item" style="font-size:13px;">
-                            <i class="fa-solid fa-biohazard" style="color:rgb(211,60,8);"></i>
-                            <span>Emergency System</span>
-                        </a>
                     </div>
                 </div>
 

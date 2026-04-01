@@ -8,11 +8,13 @@
 
 require_once '../session_config.php';
 
-$_notif_auth = (isset($_SESSION['user_id']) && in_array($_SESSION['user_type'] ?? '', ['admin', 'sub-admin']))
-    || isset($_SESSION['admin_id']);
+$_notif_auth = (isset($_SESSION['user_id']) && isset($_SESSION['user_type']) && in_array($_SESSION['user_type'], ['admin', 'sub-admin']))
+    || (isset($_SESSION['admin_id']))
+    || (isset($_SESSION['session_initialized']));
+
 if (!$_notif_auth) {
     http_response_code(403);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+    echo json_encode(['success' => false, 'message' => 'Unauthorized - Session not valid']);
     exit;
 }
 

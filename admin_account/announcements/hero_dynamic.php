@@ -14,7 +14,7 @@ if (count($news) == 0) {
 } else {
     // featured
     $featured = $news[0];
-    $image = !empty($featured['image']) ? "../../assets/img/blog/" . $featured['image'] : "../../assets/img/blog/default.webp";
+    $image = !empty($featured['image']) ? "/assets/img/blog/" . $featured['image'] : "/assets/img/blog/default.webp";
     $date = date("m/d/Y", strtotime($featured['news_date']));
     echo '
     <!-- Featured Article -->
@@ -48,6 +48,9 @@ if (count($news) == 0) {
         <button class="interaction-btn share-btn" onclick="sharePost(' . $featured['id'] . ', \'' . addslashes($featured['title']) . '\')">
           <i class="fas fa-share"></i>
         </button>
+        <button class="interaction-btn delete-btn delete-post" data-id="' . $featured['id'] . '" data-title="' . addslashes($featured['title']) . '" title="Delete Post">
+          <i class="fas fa-trash"></i>
+        </button>
       </div>
       <div class="comment-section" id="comment-section-' . $featured['id'] . '" style="display:none;">
         <input type="text" placeholder="Add a comment..." class="comment-input" onkeypress="addComment(event, ' . $featured['id'] . ')">
@@ -79,6 +82,9 @@ if (count($news) == 0) {
             </button>
             <button class="interaction-btn share-btn" onclick="sharePost(' . $item['id'] . ', \'' . addslashes($item['title']) . '\')">
               <i class="fas fa-share"></i>
+            </button>
+            <button class="interaction-btn delete-btn delete-post" data-id="' . $item['id'] . '" data-title="' . addslashes($item['title']) . '" title="Delete Post">
+              <i class="fas fa-trash"></i>
             </button>
           </div>
           <div class="comment-section" id="comment-section-' . $item['id'] . '" style="display:none;">

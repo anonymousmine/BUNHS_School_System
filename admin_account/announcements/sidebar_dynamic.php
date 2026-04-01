@@ -27,7 +27,7 @@ while ($row = $result_latest->fetch_assoc()) {
 
 // Function to render article
 function render_tab_article($item) {
-    $image = !empty($item['image']) ? "../../assets/img/blog/" . $item['image'] : "../../assets/img/blog/default.webp";
+    $image = !empty($item['image']) ? "/assets/img/blog/" . $item['image'] : "/assets/img/blog/default.webp";
     $date = date("m/d/Y", strtotime($item['news_date']));
     return '
     <article class="tab-post">
@@ -40,6 +40,11 @@ function render_tab_article($item) {
             <span class="category">' . htmlspecialchars($item['category']) . '</span>
             <h4 class="post-title"><a href="#">' . htmlspecialchars($item['title']) . '</a></h4>
             <div class="post-author">by <a href="#">' . htmlspecialchars($item['author']) . '</a></div>
+            <div class="post-actions">
+              <button class="interaction-btn delete-btn delete-post" data-id="' . $item['id'] . '" data-title="' . addslashes($item['title']) . '" title="Delete Post">
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -1101,6 +1101,363 @@
             opacity: .4;
         }
 
+        /* Article Modal Styles */
+        .article-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .article-modal-content {
+            background: white;
+            border-radius: var(--radius-lg);
+            max-width: 800px;
+            max-height: 90vh;
+            width: 90%;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.3s ease;
+        }
+
+        .article-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--rule);
+        }
+
+        .modal-article-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--ink);
+            margin: 0;
+            line-height: 1.3;
+        }
+
+        .modal-close-btn {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            color: var(--ink-muted);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s ease;
+        }
+
+        .modal-close-btn:hover {
+            background: var(--surface);
+            color: var(--accent-2);
+        }
+
+        .article-modal-body {
+            padding: 24px;
+        }
+
+        .modal-article-image {
+            width: 100%;
+            height: 300px;
+            overflow: hidden;
+            border-radius: var(--radius-md);
+            margin-bottom: 20px;
+        }
+
+        .modal-article-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .modal-article-meta {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .modal-category {
+            background: var(--accent);
+            color: white;
+            padding: 4px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .modal-date, .modal-author {
+            color: var(--ink-muted);
+            font-size: 0.9rem;
+        }
+
+        .modal-article-content {
+            line-height: 1.7;
+            color: var(--ink);
+            margin-bottom: 24px;
+            font-size: 1.05rem;
+        }
+
+        .modal-article-actions {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            padding-top: 20px;
+            border-top: 1px solid var(--rule);
+        }
+
+        .modal-action-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 16px;
+            border: 1px solid var(--rule);
+            background: var(--surface);
+            color: var(--ink);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            min-width: 100px;
+        }
+
+        /* Messages Section */
+        .modal-messages-section {
+            border-top: 1px solid var(--rule);
+            padding: 20px;
+            background: var(--surface);
+        }
+
+        .modal-messages-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .modal-messages-header h4 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: var(--ink);
+        }
+
+        .message-count {
+            background: var(--accent);
+            color: white;
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .modal-messages-container {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            border: 1px solid var(--rule);
+            border-radius: var(--radius-sm);
+            background: white;
+        }
+
+        .message-item {
+            padding: 12px;
+            border-bottom: 1px solid var(--rule);
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-item:last-child {
+            border-bottom: none;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .message-content {
+            flex: 1;
+        }
+
+        .message-author {
+            font-weight: 600;
+            color: var(--ink);
+            margin-bottom: 4px;
+        }
+
+        .message-text {
+            color: var(--ink-soft);
+            line-height: 1.4;
+            margin-bottom: 4px;
+        }
+
+        .message-time {
+            font-size: 0.75rem;
+            color: var(--ink-muted);
+        }
+
+        .no-messages {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--ink-muted);
+            font-style: italic;
+        }
+
+        .message-input-container {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid var(--rule);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+        }
+
+        .send-message-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .send-message-btn:hover {
+            background: var(--accent-2);
+        }
+
+        .see-more-container {
+            text-align: center;
+        }
+
+        .see-more-btn {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .see-more-btn:hover {
+            background: var(--accent);
+            color: white;
+        }
+
+        .modal-action-btn:hover {
+            background: var(--accent);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-action-btn.like-btn:hover {
+            background: #e91e63;
+        }
+
+        .modal-action-btn.comment-btn:hover {
+            background: #2196f3;
+        }
+
+        .modal-action-btn.share-btn:hover {
+            background: #4caf50;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Article Expand/Collapse Styles */
+        .post-excerpt-container {
+            position: relative;
+            margin-bottom: 10px;
+        }
+
+        .post-full-content, .full-content {
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+
+        .read-more-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: inline-block;
+            margin-top: 5px;
+        }
+
+        .read-more-btn:hover {
+            background: var(--accent-2);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .read-more-text, .show-less-text {
+            transition: opacity 0.3s ease;
+        }
+
+        .show-less-text {
+            color: #ff6b6b;
+        }
+
+        .expanded .post-excerpt-container {
+            display: none;
+        }
+
+        .expanded .post-full-content, .expanded .full-content {
+            display: block;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .expanded .read-more-text {
+            display: none;
+        }
+
+        .expanded .show-less-text {
+            display: inline;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
         /* ── Responsive ─────────────────────────────────────── */
         @media (max-width: 768px) {
             .featured-post .image-container {
@@ -1472,7 +1829,7 @@
                 <div class="row g-4">
                     <!-- Main Content Area -->
                     <div class="col-lg-8">
-                        <?php include 'news_hero_dynamic.php'; ?>
+                        <?php include 'admin_account/announcements/hero_dynamic.php'; ?>
                     </div>
 
                     <!-- Sidebar with Tabs -->
@@ -1491,7 +1848,7 @@
                             </ul>
 
                             <div class="tab-content">
-                                <?php include 'news_sidebar_dynamic.php'; ?>
+                                <?php include 'admin_account/announcements/sidebar_dynamic.php'; ?>
                             </div>
                         </div>
                     </div>
@@ -1523,7 +1880,7 @@
                 </div>
 
                 <div class="row gy-4 gx-3" id="posts-grid">
-                    <?php include 'news_posts_dynamic.php'; ?>
+                    <?php include 'admin_account/announcements/news_posts_dynamic.php'; ?>
                 </div>
                 <div class="no-results-msg" id="no-results">
                     <i class="bi bi-newspaper"></i>
@@ -2029,9 +2386,262 @@
                 noResults.style.display = visible === 0 ? 'block' : 'none';
                 if (countEl) countEl.textContent = query ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
             }
-
-            searchInput.addEventListener('input', applyFilter);
             sortSelect?.addEventListener('change', applyFilter);
+        }
+
+        // Article Modal Functionality
+        function openArticleModal(articleId) {
+            const article = document.querySelector(`[data-article-id="${articleId}"]`);
+            if (!article) return;
+
+            const title = article.querySelector('.post-title, .post-title a')?.textContent || '';
+            const image = article.querySelector('img')?.src || '/assets/img/blog/default.webp';
+            const category = article.querySelector('.category, .category-tag')?.textContent || '';
+            const date = article.querySelector('.date-tag, .post-date')?.textContent || '';
+            const author = article.querySelector('.post-author')?.textContent || '';
+            const likes = article.querySelector('.like-count')?.textContent || '0';
+            const comments = article.querySelector('.comment-count')?.textContent || '0';
+
+            // Fetch complete article content from database
+            fetch('get_article_content.php?id=' + articleId)
+                .then(response => response.json())
+                .then(data => {
+                    const fullContent = data.content || data.short_description || 'No content available';
+                    
+                    const modalHTML = `
+                        <div class="article-modal-overlay" id="article-modal">
+                            <div class="article-modal-content">
+                                <div class="article-modal-header">
+                                    <h2 class="modal-article-title">${title}</h2>
+                                    <button class="modal-close-btn" onclick="closeArticleModal()">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <div class="article-modal-body">
+                                    <div class="modal-article-image">
+                                        <img src="${image}" alt="${title}" />
+                                    </div>
+                                    <div class="modal-article-meta">
+                                        <span class="modal-category">${category}</span>
+                                        <span class="modal-date">${date}</span>
+                                        <span class="modal-author">by ${author}</span>
+                                    </div>
+                                    <div class="modal-article-content">
+                                        ${fullContent}
+                                    </div>
+                                    <div class="modal-article-actions">
+                                        <button class="modal-action-btn like-btn" onclick="toggleLike(${articleId})">
+                                            <i class="far fa-heart"></i> <span>${likes}</span>
+                                        </button>
+                                        <button class="modal-action-btn comment-btn" onclick="toggleComment(${articleId})">
+                                            <i class="far fa-comment"></i> <span>${comments}</span>
+                                        </button>
+                                        <button class="modal-action-btn share-btn" onclick="sharePost(${articleId}, '${title.replace(/'/g, "\\'")}')">
+                                            <i class="fas fa-share"></i>
+                                        </button>
+                                    </div>
+                                    <div class="modal-messages-section">
+                                        <div class="modal-messages-header">
+                                            <h4>Comments</h4>
+                                            <span class="message-count" id="message-count-${articleId}">0 messages</span>
+                                        </div>
+                                        <div class="modal-messages-container" id="messages-container-${articleId}">
+                                            <div class="no-messages">No comments yet. Be the first to comment!</div>
+                                        </div>
+                                        <div class="message-input-container">
+                                            <input type="text" class="message-input" id="message-input-${articleId}" 
+                                                   placeholder="Write a comment..." maxlength="200">
+                                            <button class="send-message-btn" onclick="sendMessage(${articleId})">
+                                                <i class="fas fa-paper-plane"></i> Send
+                                            </button>
+                                        </div>
+                                        <div class="see-more-container" id="see-more-${articleId}" style="display: none;">
+                                            <button class="see-more-btn" onclick="loadMoreMessages(${articleId})">
+                                                See More Messages
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    document.body.insertAdjacentHTML('beforeend', modalHTML);
+                    document.body.style.overflow = 'hidden';
+                    
+                    // Add event listeners
+                    document.getElementById('article-modal').addEventListener('click', function(e) {
+                        if (e.target === this) closeArticleModal();
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching article content:', error);
+                    // Fallback to existing content if fetch fails
+                    const fallbackContent = article.querySelector('.post-excerpt, .excerpt')?.textContent || 'Content not available';
+                    
+                    const modalHTML = `
+                        <div class="article-modal-overlay" id="article-modal">
+                            <div class="article-modal-content">
+                                <div class="article-modal-header">
+                                    <h2 class="modal-article-title">${title}</h2>
+                                    <button class="modal-close-btn" onclick="closeArticleModal()">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <div class="article-modal-body">
+                                    <div class="modal-article-image">
+                                        <img src="${image}" alt="${title}" />
+                                    </div>
+                                    <div class="modal-article-meta">
+                                        <span class="modal-category">${category}</span>
+                                        <span class="modal-date">${date}</span>
+                                        <span class="modal-author">by ${author}</span>
+                                    </div>
+                                    <div class="modal-article-content">
+                                        ${fallbackContent}
+                                    </div>
+                                    <div class="modal-article-actions">
+                                        <button class="modal-action-btn like-btn" onclick="toggleLike(${articleId})">
+                                            <i class="far fa-heart"></i> <span>${likes}</span>
+                                        </button>
+                                        <button class="modal-action-btn comment-btn" onclick="toggleComment(${articleId})">
+                                            <i class="far fa-comment"></i> <span>${comments}</span>
+                                        </button>
+                                        <button class="modal-action-btn share-btn" onclick="sharePost(${articleId}, '${title.replace(/'/g, "\\'")}')">
+                                            <i class="fas fa-share"></i>
+                                        </button>
+                                    </div>
+                                    <div class="modal-messages-section">
+                                        <div class="modal-messages-header">
+                                            <h4>Comments</h4>
+                                            <span class="message-count" id="message-count-${articleId}">0 messages</span>
+                                        </div>
+                                        <div class="modal-messages-container" id="messages-container-${articleId}">
+                                            <div class="no-messages">No comments yet. Be the first to comment!</div>
+                                        </div>
+                                        <div class="message-input-container">
+                                            <input type="text" class="message-input" id="message-input-${articleId}" 
+                                                   placeholder="Write a comment..." maxlength="200">
+                                            <button class="send-message-btn" onclick="sendMessage(${articleId})">
+                                                <i class="fas fa-paper-plane"></i> Send
+                                            </button>
+                                        </div>
+                                        <div class="see-more-container" id="see-more-${articleId}" style="display: none;">
+                                            <button class="see-more-btn" onclick="loadMoreMessages(${articleId})">
+                                                See More Messages
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    document.body.insertAdjacentHTML('beforeend', modalHTML);
+                    document.body.style.overflow = 'hidden';
+                    
+                    // Add event listeners
+                    document.getElementById('article-modal').addEventListener('click', function(e) {
+                        if (e.target === this) closeArticleModal();
+                    });
+                });
+        }
+
+        function closeArticleModal() {
+            const modal = document.getElementById('article-modal');
+            if (modal) {
+                modal.remove();
+                document.body.style.overflow = '';
+            }
+        }
+
+        // Add click handlers to all articles
+        document.addEventListener('click', function(e) {
+            const article = e.target.closest('[data-article-id]');
+            if (article && (e.target.closest('.read-more-btn') || e.target.closest('.post-title, .post-excerpt-container') || e.target.closest('.comment-btn') || e.target.closest('.interaction-btn.comment-btn'))) {
+                e.preventDefault();
+                const articleId = article.getAttribute('data-article-id');
+                openArticleModal(articleId);
+            }
+        });
+
+        // Message System
+        let messageCounters = {};
+        let displayedMessages = {};
+        let allMessages = {};
+
+        function sendMessage(articleId) {
+            const input = document.getElementById(`message-input-${articleId}`);
+            const text = input.value.trim();
+            
+            if (!text) return;
+            
+            // Initialize message storage for this article
+            if (!allMessages[articleId]) {
+                allMessages[articleId] = [];
+            }
+            
+            const message = {
+                id: Date.now(),
+                text: text,
+                author: `anonymous user#${allMessages[articleId].length + 1}`,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+            
+            allMessages[articleId].push(message);
+            input.value = '';
+            
+            // Update display
+            updateMessagesDisplay(articleId);
+        }
+
+        function updateMessagesDisplay(articleId) {
+            const container = document.getElementById(`messages-container-${articleId}`);
+            const countElement = document.getElementById(`message-count-${articleId}`);
+            const seeMoreContainer = document.getElementById(`see-more-${articleId}`);
+            
+            const messages = allMessages[articleId] || [];
+            const displayedCount = displayedMessages[articleId] || 0;
+            
+            // Update count
+            countElement.textContent = `${messages.length} messages`;
+            
+            // Determine how many to show
+            const showCount = Math.min(messages.length, displayedCount || 10);
+            const messagesToShow = messages.slice(-showCount);
+            
+            if (messagesToShow.length === 0) {
+                container.innerHTML = '<div class="no-messages">No comments yet. Be the first to comment!</div>';
+            } else {
+                container.innerHTML = messagesToShow.map(msg => `
+                    <div class="message-item">
+                        <div class="message-avatar">${msg.author.charAt(0).toUpperCase()}</div>
+                        <div class="message-content">
+                            <div class="message-author">${msg.author}</div>
+                            <div class="message-text">${msg.text}</div>
+                            <div class="message-time">${msg.time}</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            
+            // Show/hide "See More" button
+            if (messages.length > 10) {
+                seeMoreContainer.style.display = 'block';
+                displayedMessages[articleId] = Math.min(displayedCount + 10, messages.length);
+            } else {
+                seeMoreContainer.style.display = 'none';
+                displayedMessages[articleId] = messages.length;
+            }
+        }
+
+        function loadMoreMessages(articleId) {
+            const messages = allMessages[articleId] || [];
+            const currentDisplayed = displayedMessages[articleId] || 10;
+            const newDisplayCount = Math.min(currentDisplayed + 10, messages.length);
+            
+            displayedMessages[articleId] = newDisplayCount;
+            updateMessagesDisplay(articleId);
         }
 
         /* ══════════════════════════════════════════════════════

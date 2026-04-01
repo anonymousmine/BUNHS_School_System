@@ -2,28 +2,48 @@
 include '../../db_connection.php';
 session_start();
 
-// Get author name from admin session (matches admin_profile.php logic)
-function get_author_name($conn)
+// Get current author data
+$current_author = get_author_data($conn);
+
+// Get author data from admin session (matches admin_profile.php logic)
+function get_author_data($conn)
 {
     $user_id = null;
     if (isset($_SESSION['user_id'])) $user_id = (int)$_SESSION['user_id'];
     elseif (isset($_SESSION['admin_id'])) $user_id = (int)$_SESSION['admin_id'];
 
     if ($user_id) {
-        $stmt = $conn->prepare("SELECT full_name FROM admin WHERE id = ? LIMIT 1");
+        $user_type = $_SESSION['user_type'] ?? 'admin';
+        
+        if ($user_type === 'admin') {
+            $stmt = $conn->prepare("SELECT full_name, title, principal_title FROM admin WHERE id = ? LIMIT 1");
+        } else {
+            $stmt = $conn->prepare("SELECT full_name, title FROM sub_admin WHERE id = ? LIMIT 1");
+        }
+        
         if ($stmt) {
             $stmt->bind_param("i", $user_id);
             $stmt->execute();
             $result = $stmt->get_result();
             if ($row = $result->fetch_assoc()) {
                 $stmt->close();
-                return !empty($row['full_name']) ? $row['full_name'] : 'Administrator';
+                return [
+                    'name' => !empty($row['full_name']) ? $row['full_name'] : 'Administrator',
+                    'type' => $user_type,
+                    'title' => $row['title'] ?? 'School Administrator',
+                    'principal_title' => $row['principal_title'] ?? ''
+                ];
             }
             $stmt->close();
         }
     }
     // Final fallback
-    return isset($_SESSION['admin_name']) ? $_SESSION['admin_name'] : 'Administrator';
+    return [
+        'name' => isset($_SESSION['admin_name']) ? $_SESSION['admin_name'] : 'Administrator',
+        'type' => $_SESSION['user_type'] ?? 'admin',
+        'title' => 'School Administrator',
+        'principal_title' => ''
+    ];
 }
 
 // Auto-generate short_description from content (max 200 chars, end with ellipsis)
@@ -45,6 +65,8 @@ function insert_news($conn)
     $content = $_POST['content'];
     $category = $_POST['category'];
     $news_date = $_POST['news_date'];
+    $author_name = $_POST['author_name'] ?? '';
+    $author_position = $_POST['author_position'] ?? '';
 
     if (empty($news_date)) $news_date = date("Y-m-d");
 
@@ -52,25 +74,65 @@ function insert_news($conn)
     $short_description = generate_short_description($content);
 
     // Get author from admin profile session
-    $author = get_author_name($conn);
+    $author_data = get_author_data($conn);
+    $author = !empty($author_name) ? $author_name : $author_data['name'];
+    
+    // Combine author name and position for display
+    if (!empty($author_position)) {
+        $author .= ' - ' . $author_position;
+    }
 
     // Handle multiple images — store as comma-separated filenames; first image is primary
     $images = [];
-    $target_dir = "../../assets/img/blog/";
+    $target_dir = $_SERVER['DOCUMENT_ROOT'] . "/assets/img/blog/";
     $allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
+    // Debug: Check if files are being uploaded
+    error_log("FILES array: " . print_r($_FILES, true));
+    
+    // Ensure directory exists and is writable
+    if (!is_dir($target_dir)) {
+        mkdir($target_dir, 0755, true);
+        error_log("Created directory: " . $target_dir);
+    }
+    
+    if (!is_writable($target_dir)) {
+        error_log("Directory is not writable: " . $target_dir);
+        chmod($target_dir, 0755);
+    }
+
     if (isset($_FILES['images']) && is_array($_FILES['images']['name'])) {
+        error_log("Processing images array upload");
         $file_count = count($_FILES['images']['name']);
+        error_log("Found " . $file_count . " files to upload");
+        
         for ($i = 0; $i < $file_count; $i++) {
-            if ($_FILES['images']['error'][$i] == 0) {
-                if (!in_array($_FILES['images']['type'][$i], $allowed_types)) continue;
-                if ($_FILES['images']['size'][$i] > 5 * 1024 * 1024) continue;
+            if ($_FILES['images']['error'][$i] == UPLOAD_ERR_OK) {
+                error_log("Processing file " . $i . ": " . $_FILES['images']['name'][$i]);
+                
+                if (!in_array($_FILES['images']['type'][$i], $allowed_types)) {
+                    error_log("Invalid file type: " . $_FILES['images']['type'][$i]);
+                    continue;
+                }
+                if ($_FILES['images']['size'][$i] > 5 * 1024 * 1024) {
+                    error_log("File too large: " . $_FILES['images']['size'][$i]);
+                    continue;
+                }
+                
                 $ext = strtolower(pathinfo($_FILES['images']['name'][$i], PATHINFO_EXTENSION));
                 $filename = uniqid('news_', true) . '.' . $ext;
                 $target_file = $target_dir . $filename;
+                
+                error_log("Target file: " . $target_file);
+                
                 if (move_uploaded_file($_FILES['images']['tmp_name'][$i], $target_file)) {
                     $images[] = $filename;
+                    error_log("Image uploaded successfully: " . $filename);
+                } else {
+                    error_log("Failed to upload image: " . $_FILES['images']['name'][$i] . " Error: " . $_FILES['images']['error'][$i]);
                 }
+            } else {
+                error_log("Upload error for file " . $_FILES['images']['name'][$i] . ": " . $_FILES['images']['error'][$i]);
             }
         }
     }
@@ -81,6 +143,9 @@ function insert_news($conn)
         $target_file = $target_dir . $filename;
         if (move_uploaded_file($_FILES["image"]["tmp_name"], $target_file)) {
             $images[] = $filename;
+            error_log("Single image uploaded successfully: " . $filename);
+        } else {
+            error_log("Failed to upload single image: " . $_FILES["image"]["name"] . " Error: " . $_FILES["image"]["error"]);
         }
     }
 
@@ -88,22 +153,70 @@ function insert_news($conn)
     $image = !empty($images) ? $images[0] : '';
     $extra_images = count($images) > 1 ? implode(',', array_slice($images, 1)) : '';
 
+    error_log("Images processed - Primary: " . $image . " Extra: " . $extra_images);
+
     // Auto-create extra_images column if it doesn't exist yet
     $conn->query("ALTER TABLE news ADD COLUMN IF NOT EXISTS extra_images VARCHAR(2000) DEFAULT ''");
 
     $stmt = $conn->prepare("INSERT INTO news (title, short_description, content, image, extra_images, category, news_date, author, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())");
     $stmt->bind_param("ssssssss", $title, $short_description, $content, $image, $extra_images, $category, $news_date, $author);
     $success = $stmt->execute();
+    $news_id = $conn->insert_id;
     $stmt->close();
+    
+    if ($success) {
+        error_log("News inserted successfully with image: " . $image);
+        
+        // Send email notifications to subscribers
+        include __DIR__ . '/../../email_notification_functions.php';
+        $notification_count = notify_subscribers_new_news($conn, $news_id);
+        error_log("Email notifications sent to {$notification_count} subscribers for new news ID: {$news_id}");
+    } else {
+        error_log("Failed to insert news: " . $stmt->error);
+    }
+    
     return $success;
 }
 
 function delete_news($conn, $id)
 {
+    // First get the news post to retrieve image filenames
+    $stmt = $conn->prepare("SELECT image, extra_images FROM news WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $news = $result->fetch_assoc();
+    $stmt->close();
+    
+    if ($news) {
+        // Delete primary image if it exists
+        if (!empty($news['image'])) {
+            $image_path = $_SERVER['DOCUMENT_ROOT'] . "/assets/img/blog/" . $news['image'];
+            if (file_exists($image_path)) {
+                unlink($image_path);
+                error_log("Deleted primary image: " . $image_path);
+            }
+        }
+        
+        // Delete extra images if they exist
+        if (!empty($news['extra_images'])) {
+            $extra_images = explode(',', $news['extra_images']);
+            foreach ($extra_images as $extra_image) {
+                $extra_image_path = $_SERVER['DOCUMENT_ROOT'] . "/assets/img/blog/" . trim($extra_image);
+                if (file_exists($extra_image_path)) {
+                    unlink($extra_image_path);
+                    error_log("Deleted extra image: " . $extra_image_path);
+                }
+            }
+        }
+    }
+    
+    // Delete the news record from database
     $stmt = $conn->prepare("DELETE FROM news WHERE id = ?");
     $stmt->bind_param("i", $id);
     $success = $stmt->execute();
     $stmt->close();
+    
     return $success;
 }
 
@@ -255,7 +368,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             </div>
                             <div>
                                 <h5 class="modal-title mb-0" id="createNewsModalLabel">Create New Announcement</h5>
-                                <p class="modal-subtitle mb-0">Fill in the details or use AI to generate content</p>
+                                <p class="modal-subtitle mb-0">Fill in the details below</p>
                             </div>
                         </div>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -273,171 +386,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                     <div class="modal-body p-0">
 
-                        <!-- ── AI ASSISTANT PANEL ── -->
-                        <div id="aiPanel" class="ai-panel">
-                            <div class="ai-panel-header" id="aiToggleBtn" onclick="toggleAIPanel()">
-                                <div class="ai-panel-title">
-                                    <span class="ai-sparkle">✨</span>
-                                    <span>AI Writing Assistant</span>
-                                    <span class="ai-badge">Powered by Claude</span>
-                                </div>
-                                <div class="ai-panel-subtitle" id="aiPanelSubtitle">
-                                    Describe your news in plain language — Claude will write all fields for you
-                                </div>
-                                <i class="fas fa-chevron-up ai-chevron" id="aiChevron"></i>
-                            </div>
-
-                            <div class="ai-panel-body" id="aiPanelBody">
-                                <!-- Brief input -->
-                                <div class="ai-brief-area">
-                                    <label class="ai-label">
-                                        <i class="fas fa-pen-nib me-1"></i>What's the news about?
-                                    </label>
-                                    <textarea id="aiBrief"
-                                        placeholder="e.g. 'Suspension of classes tomorrow due to Typhoon Ompong. All students should stay home.' — the more detail, the better."
-                                        rows="3"></textarea>
-                                    <div class="ai-quick-prompts">
-                                        <span class="ai-qs-label">Quick start:</span>
-                                        <button class="ai-qs-btn" onclick="setPrompt('Suspension of classes tomorrow due to typhoon signal 3 in Albay')">🌀 Class suspension</button>
-                                        <button class="ai-qs-btn" onclick="setPrompt('Recognition ceremony for top students and honor roll for this quarter')">🏆 Recognition</button>
-                                        <button class="ai-qs-btn" onclick="setPrompt('Enrollment schedule announcement for incoming Grade 7 students')">📋 Enrollment</button>
-                                        <button class="ai-qs-btn" onclick="setPrompt('School health advisory for flu season — encourage hygiene and vaccination')">🏥 Health notice</button>
-                                        <button class="ai-qs-btn" onclick="setPrompt('Upcoming BUNHS intramurals sports event next week, all students required to participate')">⚽ Intramurals</button>
-                                        <button class="ai-qs-btn" onclick="setPrompt('PTA general assembly meeting this Saturday at 9am in the school gymnasium')">👨‍👩‍👧 PTA meeting</button>
-                                    </div>
-                                </div>
-
-                                <!-- Options row -->
-                                <div class="ai-options-row">
-                                    <div class="ai-option-group">
-                                        <label class="ai-label"><i class="fas fa-tags me-1"></i>Category</label>
-                                        <select id="aiCategory">
-                                            <option value="">Auto-detect</option>
-                                            <option>Education</option>
-                                            <option>Politics</option>
-                                            <option>Travel &amp; Tourism</option>
-                                            <option>Technology</option>
-                                            <option>Community Updates</option>
-                                            <option>Emergency Notices</option>
-                                            <option>Health &amp; Safety</option>
-                                            <option>Public Service Information</option>
-                                        </select>
-                                    </div>
-                                    <div class="ai-option-group">
-                                        <label class="ai-label"><i class="fas fa-sliders-h me-1"></i>Tone</label>
-                                        <div class="ai-tone-group">
-                                            <label class="ai-tone-btn">
-                                                <input type="radio" name="aiTone" value="formal" checked>
-                                                <span>📰 Formal</span>
-                                            </label>
-                                            <label class="ai-tone-btn">
-                                                <input type="radio" name="aiTone" value="friendly">
-                                                <span>😊 Friendly</span>
-                                            </label>
-                                            <label class="ai-tone-btn">
-                                                <input type="radio" name="aiTone" value="urgent">
-                                                <span>🚨 Urgent</span>
-                                            </label>
-                                            <label class="ai-tone-btn">
-                                                <input type="radio" name="aiTone" value="bilingual">
-                                                <span>🇵🇭 Bilingual</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Generate button + status -->
-                                <div class="ai-generate-row">
-                                    <button class="ai-generate-btn" id="aiGenerateBtn" onclick="generateWithAI()">
-                                        <i class="fas fa-magic me-2"></i>Generate Article
-                                    </button>
-                                    <div class="ai-status" id="aiStatus"></div>
-                                </div>
-
-                                <!-- AI Result preview -->
-                                <div id="aiResult" class="ai-result" style="display:none;">
-                                    <div class="ai-result-header">
-                                        <span><i class="fas fa-check-circle me-1" style="color:#4A5D23"></i>Article generated — review below, then click <strong>Fill Form ↓</strong></span>
-                                        <button class="ai-fill-btn" onclick="fillFormFromAI()">
-                                            <i class="fas fa-arrow-down me-1"></i>Fill Form Fields
-                                        </button>
-                                    </div>
-
-                                    <div class="ai-field-preview" id="pTitle">
-                                        <div class="ai-fp-label">
-                                            <i class="fas fa-heading me-1"></i>Title
-                                            <button class="ai-refine-pill" onclick="openRefine('title')">✏️ Refine</button>
-                                        </div>
-                                        <div class="ai-fp-value" id="prevTitle"></div>
-                                        <div class="ai-refine-box" id="refineBox_title" style="display:none;">
-                                            <input type="text" id="refineInput_title" placeholder="e.g. make it shorter, add urgency…" />
-                                            <button onclick="refineField('title')">Apply</button>
-                                            <div class="ai-refine-chips">
-                                                <span onclick="quickRefine('title','Make it shorter')">Shorter</span>
-                                                <span onclick="quickRefine('title','Add urgency')">More urgent</span>
-                                                <span onclick="quickRefine('title','Translate to Filipino')">Filipino</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="ai-field-preview" id="pContent">
-                                        <div class="ai-fp-label">
-                                            <i class="fas fa-file-alt me-1"></i>Full Content
-                                            <button class="ai-refine-pill" onclick="openRefine('content')">✏️ Refine</button>
-                                        </div>
-                                        <div class="ai-fp-value ai-fp-content" id="prevContent"></div>
-                                        <div class="ai-refine-box" id="refineBox_content" style="display:none;">
-                                            <input type="text" id="refineInput_content" placeholder="e.g. add a closing paragraph, include safety reminders…" />
-                                            <button onclick="refineField('content')">Apply</button>
-                                            <div class="ai-refine-chips">
-                                                <span onclick="quickRefine('content','Add safety reminders')">Safety tips</span>
-                                                <span onclick="quickRefine('content','Make it more detailed')">More detail</span>
-                                                <span onclick="quickRefine('content','Translate to Filipino')">Filipino</span>
-                                                <span onclick="quickRefine('content','Add a strong closing paragraph')">Add closing</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="ai-field-row">
-                                        <div class="ai-field-preview" id="pCategory">
-                                            <div class="ai-fp-label"><i class="fas fa-tag me-1"></i>Category</div>
-                                            <div class="ai-fp-value" id="prevCategory"></div>
-                                        </div>
-                                    </div>
-
-                                    <div class="ai-result-footer">
-                                        <button class="ai-regen-btn" onclick="generateWithAI()">
-                                            <i class="fas fa-redo me-1"></i>Regenerate
-                                        </button>
-                                        <button class="ai-fill-btn ai-fill-btn-lg" onclick="fillFormFromAI()">
-                                            <i class="fas fa-arrow-down me-2"></i>Fill Form Fields
-                                        </button>
-                                    </div>
-                                </div>
-
-                            </div><!-- /ai-panel-body -->
-                        </div><!-- /ai-panel -->
 
                         <!-- ── FORM ── -->
                         <div class="form-wrapper px-4 pt-3 pb-2">
 
-                            <!-- AI Fill Success Banner -->
-                            <div id="aiFillSuccess" class="ai-fill-success" style="display:none;">
-                                <i class="fas fa-check-circle me-2"></i>
-                                All fields filled by AI — review, upload your image, then click <strong>Publish Announcement</strong>.
-                                <button onclick="document.getElementById('aiFillSuccess').style.display='none'" class="btn-close btn-close-sm ms-auto"></button>
-                            </div>
 
-                            <!-- Form Progress Bar -->
-                            <div class="form-progress-wrap mb-3">
-                                <div class="form-progress-label">
-                                    <span id="progressText">Form Completion</span>
-                                    <span id="progressPct" class="progress-pct">0%</span>
-                                </div>
-                                <div class="form-progress-bar-track">
-                                    <div class="form-progress-bar-fill" id="progressBarFill" style="width:0%"></div>
-                                </div>
-                            </div>
 
                             <form action="" method="POST" enctype="multipart/form-data" id="newsForm" novalidate>
 
@@ -449,6 +402,39 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                     <input type="text" class="form-control" id="title" name="title"
                                         placeholder="Enter the news title here…" required>
                                     <div class="invalid-feedback" id="titleError">Title is required.</div>
+                                </div>
+
+                                <!-- Row 1.5: Written By -->
+                                <div class="form-group-card mb-3">
+                                    <label class="form-label">
+                                        <i class="fas fa-user-pen me-2 label-icon"></i>Written By
+                                    </label>
+                                    <div class="row g-2">
+                                        <div class="col-md-6">
+                                            <input type="text" class="form-control" id="author_name" name="author_name"
+                                                placeholder="Enter author name..." required>
+                                            <div class="field-meta mt-1">
+                                                <span class="field-hint">Enter the author's name</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <select class="form-select" id="author_position" name="author_position">
+                                                <option value="">Select Position...</option>
+                                                <option value="Adviser">Adviser</option>
+                                                <option value="Editor In Chief">Editor In Chief</option>
+                                                <option value="Associate Editor">Associate Editor</option>
+                                                <option value="Managing Editor">Managing Editor</option>
+                                                <option value="News Editor">News Editor</option>
+                                                <option value="Feature Editor">Feature Editor</option>
+                                                <option value="Sports Editor">Sports Editor</option>
+                                                <option value="Literary Editor">Literary Editor</option>
+                                                <option value="Staff Writers">Staff Writers</option>
+                                                <option value="Photojournalist">Photojournalist</option>
+                                                <option value="Layout Artist">Layout Artist</option>
+                                                <option value="Cartoonist">Cartoonist</option>
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <!-- Row 2: Full Content -->
@@ -502,7 +488,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 <div class="form-group-card mb-3">
                                     <label class="form-label">
                                         <i class="fas fa-images me-2 label-icon"></i>Photos
-                                        <span class="badge bg-secondary ms-1" style="font-size:10px;font-weight:500;">Optional · Multiple allowed</span>
                                     </label>
                                     <div class="multi-image-upload-zone" id="imageUploadZone">
                                         <div class="image-upload-placeholder" id="imagePlaceholder">
@@ -722,7 +707,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             const len = el.value.length;
             countEl.textContent = len + ' / 100';
             validateField(el, len >= FIELDS.title.min && len <= FIELDS.title.max, 'titleError', 'titleHint');
-            updateProgress();
             scheduleDraftSave();
         }
 
@@ -736,7 +720,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             countEl.textContent = len + ' chars';
             wEl.textContent = words + ' word' + (words !== 1 ? 's' : '');
             validateField(el, len >= FIELDS.content.min, 'contentError', 'contentHint');
-            updateProgress();
             scheduleDraftSave();
         }
 
@@ -754,30 +737,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if (errEl) errEl.style.display = valid ? 'none' : 'block';
         }
 
-        function updateProgress() {
-            const titleEl = document.getElementById('title');
-            const contentEl = document.getElementById('content');
-            const categoryEl = document.getElementById('category');
-            if (!titleEl || !contentEl || !categoryEl) return;
-            const fields = [
-                titleEl.value.length >= FIELDS.title.min,
-                contentEl.value.length >= FIELDS.content.min,
-                !!categoryEl.value,
-            ];
-            const pct = Math.round((fields.filter(Boolean).length / fields.length) * 100);
-            const fillEl = document.getElementById('progressBarFill');
-            const pctEl = document.getElementById('progressPct');
-            const txtEl = document.getElementById('progressText');
-            if (fillEl) fillEl.style.width = pct + '%';
-            if (pctEl) pctEl.textContent = pct + '%';
-            if (pct === 100) {
-                if (txtEl) txtEl.textContent = '✓ All required fields complete';
-                if (pctEl) pctEl.style.color = '#4A5D23';
-            } else {
-                if (txtEl) txtEl.textContent = 'Form Completion';
-                if (pctEl) pctEl.style.color = '';
-            }
-        }
 
         // ============================================================
         // AUTO-SAVE DRAFT  (localStorage)
@@ -939,209 +898,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             renderPreviews();
         }
 
-        // ============================================================
-        // AI PANEL  — STATE + GENERATE + REFINE
-        // ============================================================
-        let aiDraft = null;
-        let aiOpen = true;
-
-        function toggleAIPanel() {
-            aiOpen = !aiOpen;
-            document.getElementById('aiPanelBody').style.display = aiOpen ? 'block' : 'none';
-            document.getElementById('aiChevron').style.transform = aiOpen ? 'rotate(0deg)' : 'rotate(180deg)';
-        }
-
-        function setPrompt(text) {
-            document.getElementById('aiBrief').value = text;
-            document.getElementById('aiBrief').focus();
-        }
-
-        function setAIStatus(msg, type) {
-            const el = document.getElementById('aiStatus');
-            el.className = 'ai-status ai-status-' + type;
-            el.innerHTML = msg;
-        }
-
-        async function generateWithAI() {
-            const brief = document.getElementById('aiBrief').value.trim();
-            const category = document.getElementById('aiCategory').value;
-            const tone = document.querySelector('input[name="aiTone"]:checked').value;
-
-            if (!brief) {
-                setAIStatus('<i class="fas fa-exclamation-circle me-1"></i>Please describe the news first.', 'error');
-                document.getElementById('aiBrief').focus();
-                return;
-            }
-
-            const btn = document.getElementById('aiGenerateBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Writing with Claude…';
-            setAIStatus('', '');
-            document.getElementById('aiResult').style.display = 'none';
-
-            const toneMap = {
-                formal: 'formal official school announcement',
-                friendly: 'warm friendly community tone',
-                urgent: 'urgent time-sensitive notice',
-                bilingual: 'English followed by Filipino (Tagalog) translation separated by ---'
-            };
-
-            const prompt = `You are a school news writer for BUNHS (Buhi Unified National High School) in Albay, Philippines.
-
-Write a complete school news article based on:
-"${brief}"
-
-Category hint: ${category || 'auto-detect best fit'}
-Tone: ${toneMap[tone]}
-
-Return ONLY a JSON object with these keys:
-{
-  "title": "compelling headline max 80 chars",
-  "content": "full article 3-4 paragraphs professional Filipino school writing style",
-  "category": "best match from: Education, Politics, Travel & Tourism, Technology, Community Updates, Emergency Notices, Health & Safety, Public Service Information"
-}
-
-No markdown, no code fences, no explanation. JSON only.`;
-
-            try {
-                const res = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model: 'claude-sonnet-4-20250514',
-                        max_tokens: 1200,
-                        messages: [{
-                            role: 'user',
-                            content: prompt
-                        }]
-                    })
-                });
-                const data = await res.json();
-                const raw = data.content?.map(b => b.text || '').join('') || '';
-                const clean = raw.replace(/```json|```/g, '').trim();
-                aiDraft = JSON.parse(clean);
-                showAIResult();
-                setAIStatus('<i class="fas fa-check-circle me-1" style="color:#4A5D23"></i>Done! Review below, then click <strong>Fill Form Fields</strong>.', 'success');
-            } catch (e) {
-                setAIStatus('<i class="fas fa-times-circle me-1"></i>Generation failed — try rephrasing your brief.', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-magic me-2"></i>Generate Article';
-            }
-        }
-
-        function showAIResult() {
-            if (!aiDraft) return;
-            document.getElementById('prevTitle').textContent = aiDraft.title;
-            document.getElementById('prevContent').textContent = aiDraft.content;
-            document.getElementById('prevCategory').textContent = aiDraft.category;
-            document.getElementById('aiResult').style.display = 'block';
-            document.getElementById('aiResult').scrollIntoView({
-                behavior: 'smooth',
-                block: 'nearest'
-            });
-        }
-
-        function fillFormFromAI() {
-            if (!aiDraft) return;
-            document.getElementById('title').value = aiDraft.title;
-            document.getElementById('content').value = aiDraft.content;
-
-            const sel = document.getElementById('category');
-            for (let i = 0; i < sel.options.length; i++) {
-                if (sel.options[i].text === aiDraft.category) {
-                    sel.selectedIndex = i;
-                    break;
-                }
-            }
-
-            updateTitleCount();
-            updateContentCount();
-
-            ['title', 'content', 'category'].forEach(id => {
-                const el = document.getElementById(id);
-                el.classList.remove('is-invalid');
-                el.classList.add('is-valid');
-            });
-
-            document.getElementById('aiFillSuccess').style.display = 'flex';
-            document.getElementById('title').scrollIntoView({
-                behavior: 'smooth',
-                block: 'center'
-            });
-            document.getElementById('title').focus();
-            showToast('AI content filled into all form fields!', 'success');
-        }
-
-        // ── PER-FIELD REFINE ──
-        function openRefine(field) {
-            const box = document.getElementById('refineBox_' + field);
-            const isOpen = box.style.display === 'block';
-            document.querySelectorAll('.ai-refine-box').forEach(b => b.style.display = 'none');
-            if (!isOpen) {
-                box.style.display = 'block';
-                document.getElementById('refineInput_' + field).focus();
-            }
-        }
-
-        async function refineField(field) {
-            const instruction = document.getElementById('refineInput_' + field).value.trim();
-            if (!instruction || !aiDraft) return;
-            await doRefine(field, instruction);
-            document.getElementById('refineInput_' + field).value = '';
-        }
-
-        async function quickRefine(field, instruction) {
-            if (!aiDraft) return;
-            await doRefine(field, instruction);
-        }
-
-        async function doRefine(field, instruction) {
-            const previewIds = {
-                title: 'prevTitle',
-                short_description: 'prevShortDesc',
-                content: 'prevContent'
-            };
-            const previewEl = document.getElementById(previewIds[field]);
-            if (previewEl) previewEl.style.opacity = '0.4';
-
-            const prompt = `You are editing a school news post for BUNHS.
-
-Current "${field}" value:
-"${aiDraft[field]}"
-
-Instruction: ${instruction}
-
-Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.`;
-
-            try {
-                const res = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model: 'claude-sonnet-4-20250514',
-                        max_tokens: 800,
-                        messages: [{
-                            role: 'user',
-                            content: prompt
-                        }]
-                    })
-                });
-                const data = await res.json();
-                const text = data.content?.map(b => b.text || '').join('').trim() || '';
-                aiDraft[field] = text;
-                showAIResult();
-            } catch (e) {
-                setAIStatus('<i class="fas fa-times-circle me-1"></i>Refinement failed.', 'error');
-            } finally {
-                if (previewEl) previewEl.style.opacity = '1';
-                document.querySelectorAll('.ai-refine-box').forEach(b => b.style.display = 'none');
-            }
-        }
 
         // ============================================================
         // FORM VALIDATION + SUBMISSION
@@ -1155,7 +911,6 @@ Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.
             document.getElementById('title').addEventListener('input', updateTitleCount);
             document.getElementById('content').addEventListener('input', updateContentCount);
             document.getElementById('category').addEventListener('change', () => {
-                updateProgress();
                 scheduleDraftSave();
             });
 
@@ -1170,6 +925,9 @@ Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.
 
             form.addEventListener('submit', function(e) {
                 e.preventDefault();
+
+                // Ensure files are properly synced before submission
+                syncFilesToInput();
 
                 const titleInput = document.getElementById('title');
                 const contentInput = document.getElementById('content');
@@ -1233,9 +991,6 @@ Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.
                                 form.querySelectorAll('.invalid-feedback').forEach(el => el.style.display = 'none');
                                 updateTitleCount();
                                 updateContentCount();
-                                aiDraft = null;
-                                document.getElementById('aiResult').style.display = 'none';
-                                document.getElementById('aiFillSuccess').style.display = 'none';
                                 document.getElementById('draftSaved').style.display = 'none';
                                 localStorage.removeItem('news_draft');
 
@@ -1568,43 +1323,7 @@ Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.
             cursor: pointer;
         }
 
-        /* ============================================================
-           FORM PROGRESS BAR
-        ============================================================ */
-        .form-progress-wrap {
-            background: var(--gray-50);
-            border: 1px solid var(--gray-200);
-            border-radius: var(--radius-md);
-            padding: 10px 14px;
-        }
-
-        .form-progress-label {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: var(--gray-600);
-            margin-bottom: 6px;
-        }
-
-        .progress-pct {
-            font-weight: 700;
-            transition: color 0.3s;
-        }
-
-        .form-progress-bar-track {
-            height: 6px;
-            background: var(--gray-200);
-            border-radius: 99px;
-            overflow: hidden;
-        }
-
-        .form-progress-bar-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--mg-primary), var(--mg-lighter));
-            border-radius: 99px;
-            transition: width 0.4s ease;
-        }
-
+        
         /* ============================================================
            FORM GROUP CARDS
         ============================================================ */
@@ -1945,444 +1664,85 @@ Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.
             gap: 10px;
         }
 
-        /* ============================================================
-           AI FILL SUCCESS BANNER
-        ============================================================ */
-        .ai-fill-success {
-            background: var(--mg-50);
-            border: 1px solid var(--mg-200);
-            border-radius: var(--radius-md);
-            padding: 10px 16px;
-            font-size: 13px;
-            color: var(--mg-primary);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-
-        /* ============================================================
-           AI PANEL  (preserved + refined)
-        ============================================================ */
-        .ai-panel {
-            border-bottom: 2px solid #e0ead0;
-            background: #f8fdf4;
-        }
-
-        .ai-panel-header {
-            background: linear-gradient(135deg, #4A5D23 0%, #6B7F3A 100%);
-            padding: 14px 22px;
-            cursor: pointer;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-            user-select: none;
-            transition: background 0.2s;
-        }
-
-        .ai-panel-header:hover {
-            background: linear-gradient(135deg, #3d4e1c 0%, #5c6e30 100%);
-        }
-
-        .ai-panel-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: white;
-            font-size: 15px;
-            font-weight: 700;
-        }
-
-        .ai-sparkle {
-            font-size: 18px;
-        }
-
-        .ai-badge {
-            background: rgba(255, 255, 255, .2);
-            border: 1px solid rgba(255, 255, 255, .35);
-            color: white;
-            font-size: 10px;
-            font-weight: 700;
-            padding: 2px 9px;
-            border-radius: 20px;
-        }
-
-        .ai-panel-subtitle {
-            color: rgba(255, 255, 255, .78);
-            font-size: 12px;
-            margin-top: 3px;
-            padding-left: 28px;
-        }
-
-        .ai-chevron {
-            position: absolute;
-            right: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: rgba(255, 255, 255, .8);
-            font-size: 14px;
-            transition: transform 0.3s;
-        }
-
-        .ai-panel-body {
-            padding: 18px 22px 16px;
-        }
-
-        .ai-label {
-            display: block;
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--mg-primary);
-            margin-bottom: 6px;
-            text-transform: uppercase;
-            letter-spacing: .4px;
-        }
-
-        .ai-brief-area textarea {
-            width: 100%;
-            border: 2px solid #d1e0b8;
-            border-radius: 10px;
-            padding: 10px 13px;
-            font-size: 13.5px;
-            font-family: inherit;
-            resize: vertical;
-            outline: none;
-            background: white;
-            color: var(--text-primary);
-            line-height: 1.6;
-            transition: border-color .2s, box-shadow .2s;
-        }
-
-        .ai-brief-area textarea:focus {
-            border-color: var(--mg-light);
-            box-shadow: 0 0 0 3px rgba(74, 93, 35, .12);
-        }
-
-        .ai-quick-prompts {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 6px;
-            margin-top: 8px;
-        }
-
-        .ai-qs-label {
-            font-size: 11px;
-            color: #9ca3af;
-            font-weight: 600;
-        }
-
-        .ai-qs-btn {
-            background: white;
-            border: 1px solid #c8d8a8;
-            border-radius: 20px;
-            padding: 3px 11px;
-            font-size: 11px;
-            color: var(--mg-primary);
-            cursor: pointer;
-            font-weight: 500;
-            transition: all .15s;
-        }
-
-        .ai-qs-btn:hover {
-            background: #e8f0d8;
-            border-color: var(--mg-light);
-        }
-
-        .ai-options-row {
-            display: flex;
-            gap: 18px;
-            margin-top: 14px;
-            flex-wrap: wrap;
-        }
-
-        .ai-option-group {
-            flex: 1 1 160px;
-        }
-
-        .ai-option-group select {
-            width: 100%;
-            border: 2px solid #d1e0b8;
-            border-radius: 8px;
-            padding: 8px 10px;
-            font-size: 13px;
-            font-family: inherit;
-            outline: none;
-            background: white;
-            transition: border-color .2s;
-        }
-
-        .ai-option-group select:focus {
-            border-color: var(--mg-light);
-        }
-
-        .ai-tone-group {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-        }
-
-        .ai-tone-btn {
-            flex: 1 1 80px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 2px solid #d1e0b8;
-            border-radius: 8px;
-            padding: 7px 8px;
-            cursor: pointer;
-            background: white;
-            transition: all .15s;
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--gray-600);
-        }
-
-        .ai-tone-btn input {
-            display: none;
-        }
-
-        .ai-tone-btn:has(input:checked) {
-            background: var(--mg-50);
-            border-color: var(--mg-primary);
-            color: var(--mg-primary);
-        }
-
-        .ai-tone-btn:hover {
-            background: var(--mg-50);
-        }
-
-        .ai-generate-row {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            margin-top: 16px;
-            flex-wrap: wrap;
-        }
-
-        .ai-generate-btn {
-            background: linear-gradient(135deg, #4A5D23, #6B7F3A);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            padding: 11px 26px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all .2s;
-            box-shadow: 0 3px 12px rgba(74, 93, 35, .35);
-        }
-
-        .ai-generate-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 5px 18px rgba(74, 93, 35, .4);
-        }
-
-        .ai-generate-btn:disabled {
-            opacity: .65;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .ai-status {
-            font-size: 13px;
-        }
-
-        .ai-status-error {
+        .delete-btn {
             color: #dc3545;
+            background: rgba(220, 53, 69, 0.1);
+            border-color: rgba(220, 53, 69, 0.2);
+            transition: all 0.2s ease;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .delete-btn:hover {
+            color: #fff;
+            background: #dc3545;
+            border-color: #dc3545;
+            transform: scale(1.05);
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
         }
 
-        .ai-status-success {
-            color: var(--mg-primary);
+        .delete-btn:active {
+            transform: scale(0.95);
         }
 
-        .ai-status-loading {
-            color: var(--gray-600);
-        }
-
-        .ai-result {
-            margin-top: 16px;
-            border: 2px solid #c8d8a8;
-            border-radius: 12px;
-            overflow: hidden;
-            background: white;
-        }
-
-        .ai-result-header {
-            background: var(--mg-50);
-            border-bottom: 1px solid #d1e0b8;
-            padding: 10px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 13px;
-            color: var(--mg-primary);
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .ai-fill-btn {
-            background: var(--mg-primary);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 7px 16px;
-            font-size: 12px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: background .2s;
-        }
-
-        .ai-fill-btn:hover {
-            background: var(--mg-light);
-        }
-
-        .ai-fill-btn-lg {
-            padding: 10px 22px;
-            font-size: 13px;
-        }
-
-        .ai-field-preview {
-            border-bottom: 1px solid #f0f0f0;
-            padding: 10px 16px;
-        }
-
-        .ai-field-preview:last-child {
-            border-bottom: none;
-        }
-
-        .ai-fp-label {
-            font-size: 11px;
-            font-weight: 700;
-            color: #9ca3af;
-            text-transform: uppercase;
-            letter-spacing: .4px;
-            margin-bottom: 4px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .ai-fp-value {
-            font-size: 13px;
-            color: var(--text-primary);
-            line-height: 1.55;
-            transition: opacity .3s;
-        }
-
-        .ai-fp-content {
-            max-height: 90px;
-            overflow: hidden;
-            display: -webkit-box;
-            -webkit-line-clamp: 4;
-            -webkit-box-orient: vertical;
-        }
-
-        .ai-field-row {
-            display: flex;
-        }
-
-        .ai-field-row .ai-field-preview {
-            flex: 1;
-        }
-
-        .ai-refine-pill {
-            background: transparent;
-            border: 1px solid #c8d8a8;
-            border-radius: 12px;
-            padding: 1px 9px;
-            font-size: 10px;
-            color: var(--mg-primary);
-            cursor: pointer;
-            margin-left: 8px;
-            font-weight: 600;
-            transition: all .15s;
-        }
-
-        .ai-refine-pill:hover {
-            background: #e8f0d8;
-        }
-
-        .ai-refine-box {
+        .post-actions {
             margin-top: 8px;
-            background: #f8fdf4;
-            border: 1px solid #d1e0b8;
-            border-radius: 8px;
-            padding: 10px 12px;
-        }
-
-        .ai-refine-box input {
-            width: 100%;
-            border: 1px solid #d1e0b8;
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 12px;
-            font-family: inherit;
-            outline: none;
-            margin-bottom: 6px;
-        }
-
-        .ai-refine-box input:focus {
-            border-color: var(--mg-light);
-        }
-
-        .ai-refine-box button {
-            background: var(--mg-primary);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 5px 14px;
-            font-size: 12px;
-            font-weight: 700;
-            cursor: pointer;
-            margin-bottom: 6px;
-        }
-
-        .ai-refine-chips {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-        }
-
-        .ai-refine-chips span {
-            background: white;
-            border: 1px solid #c8d8a8;
-            border-radius: 12px;
-            padding: 2px 9px;
-            font-size: 10px;
-            color: var(--mg-primary);
-            cursor: pointer;
-            font-weight: 500;
-        }
-
-        .ai-refine-chips span:hover {
-            background: #e8f0d8;
-        }
-
-        .ai-result-footer {
-            padding: 12px 16px;
-            border-top: 1px solid #e5e7eb;
             display: flex;
             justify-content: flex-end;
-            gap: 10px;
-            align-items: center;
         }
 
-        .ai-regen-btn {
-            background: transparent;
-            border: 1px solid #d1e0b8;
-            border-radius: 8px;
-            padding: 8px 16px;
+        .post-actions .delete-btn {
             font-size: 12px;
-            font-weight: 600;
-            color: var(--mg-primary);
-            cursor: pointer;
-            transition: all .15s;
+            padding: 4px 8px;
+            border-radius: 4px;
         }
 
-        .ai-regen-btn:hover {
-            background: var(--mg-50);
+        /* Specific styling for sidebar delete buttons */
+        .tab-post .delete-btn {
+            background: rgba(220, 53, 69, 0.1);
+            color: #dc3545;
+            border: 1px solid rgba(220, 53, 69, 0.2);
+            padding: 2px 6px;
+            font-size: 11px;
+            border-radius: 3px;
+            margin-left: auto;
         }
+
+        .tab-post .delete-btn:hover {
+            background: #dc3545;
+            color: #fff;
+            transform: scale(1.05);
+        }
+
+        /* Fix interaction bar layout */
+        .interaction-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .interaction-btn {
+            min-width: 36px;
+            height: 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            position: relative;
+            z-index: 1;
+        }
+
+        .interaction-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
 
         /* ============================================================
            MISC
@@ -2395,14 +1755,6 @@ Output ONLY the revised value as plain text. No JSON, no quotes, no explanation.
         }
 
         @media (max-width: 768px) {
-            .ai-options-row {
-                flex-direction: column;
-            }
-
-            .ai-tone-group {
-                flex-wrap: wrap;
-            }
-
             .page-content {
                 width: 100%;
             }

@@ -285,19 +285,6 @@ if ($stats === false) {
     $res = $conn->query("SELECT * FROM school_announcements WHERE announcement_date = '$today_date' LIMIT 1");
     if ($res && $res->num_rows > 0) $today_announcement = $res->fetch_assoc();
 
-    $recent_news = [];
-    $res = $conn->query("SELECT * FROM news WHERE news_date <= CURDATE() ORDER BY news_date DESC, created_at DESC LIMIT 4");
-    if ($res) {
-        while ($row = $res->fetch_assoc()) $recent_news[] = $row;
-    }
-    if (count($recent_news) < 4) {
-        $need    = 4 - count($recent_news);
-        $ids_in  = array_map(fn($n) => (int)$n['id'], $recent_news);
-        $exclude = count($ids_in) ? 'AND id NOT IN (' . implode(',', $ids_in) . ')' : '';
-        $res2 = $conn->query("SELECT * FROM news WHERE news_date > CURDATE() $exclude ORDER BY news_date ASC LIMIT $need");
-        if ($res2) while ($row = $res2->fetch_assoc()) $recent_news[] = $row;
-    }
-
     $upcoming_events = [];
     $res = $conn->query("SELECT * FROM events WHERE event_date >= CURDATE() ORDER BY event_date ASC LIMIT 4");
     if ($res) {
@@ -337,7 +324,6 @@ if ($stats === false) {
         'total_events',
         'today_date',
         'today_announcement',
-        'recent_news',
         'upcoming_events',
         'memories'
     );
@@ -1124,57 +1110,6 @@ $conn->close();
                     </div>
                 </div>
             </section><!-- /Call To Action Section -->
-
-
-            <!-- ═══════════════════════════════════════════════
-             RECENT NEWS — Rolling 4
-        ═══════════════════════════════════════════════ -->
-            <section id="recent-news" class="recent-news section">
-                <div class="container section-title">
-                    <h2>Recent News</h2>
-                    <p>Your Gateway to the Latest Campus Updates.</p>
-                </div>
-
-                <div class="container">
-                    <div class="row gy-5">
-                        <?php if (count($recent_news) > 0): ?>
-                            <?php foreach ($recent_news as $news_item): ?>
-                                <?php
-                                $news_img = !empty($news_item['image'])
-                                    ? 'assets/img/blog/' . $news_item['image']
-                                    : 'assets/img/blog/blog-post-2.jpg';
-                                $news_date_fmt = !empty($news_item['news_date'])
-                                    ? date('D, F j, Y', strtotime($news_item['news_date']))
-                                    : 'N/A';
-                                $news_author = !empty($news_item['author'])
-                                    ? $news_item['author']
-                                    : 'Buyoan National High School';
-                                $news_excerpt = htmlspecialchars(mb_substr(strip_tags($news_item['content'] ?? $news_item['description'] ?? ''), 0, 200));
-                                ?>
-                                <div class="col-xl-3 col-md-6">
-                                    <div class="post-box" style="cursor:pointer;" onclick="window.location='news.php?id=<?php echo (int)$news_item['id']; ?>'">
-                                        <div class="post-img">
-                                            <img src="<?php echo htmlspecialchars($news_img); ?>" class="img-fluid" alt="<?php echo htmlspecialchars($news_item['title']); ?>">
-                                        </div>
-                                        <div class="meta">
-                                            <span class="post-date"><?php echo $news_date_fmt; ?></span>
-                                            <span class="post-author"> / <?php echo htmlspecialchars($news_author); ?></span>
-                                        </div>
-                                        <h3 class="post-title"><?php echo htmlspecialchars($news_item['title']); ?></h3>
-                                        <p><?php echo $news_excerpt . (strlen(strip_tags($news_item['content'] ?? $news_item['description'] ?? '')) > 200 ? '...' : ''); ?></p>
-                                        <a href="news.php?id=<?php echo (int)$news_item['id']; ?>" class="readmore stretched-link"><span>Read More</span><i class="fas fa-arrow-right"></i></a>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <div class="col-12 text-center py-5 text-muted">
-                                <i class="fas fa-newspaper" style="font-size:48px;margin-bottom:16px;display:block;color:#ccc;"></i>
-                                No news available at the moment. Check back soon!
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </section><!-- /Recent News Section -->
 
 
             <!-- ═══════════════════════════════════════════════

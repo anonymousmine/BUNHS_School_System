@@ -1,0 +1,289 @@
+<?php
+include 'db_connection.php';
+
+// Create email subscribers and notification logs tables
+function setup_email_notification_tables($conn) {
+    // Create email_subscribers table
+    $conn->query("CREATE TABLE IF NOT EXISTS email_subscribers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        is_active TINYINT(1) DEFAULT 1,
+        subscribed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_email (email),
+        INDEX idx_active (is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Create email_notification_logs table
+    $conn->query("CREATE TABLE IF NOT EXISTS email_notification_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        subscriber_id INT NOT NULL,
+        notification_type ENUM('event', 'news') NOT NULL,
+        item_id INT NOT NULL,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status ENUM('sent', 'failed', 'pending') DEFAULT 'sent',
+        error_message TEXT DEFAULT NULL,
+        FOREIGN KEY (subscriber_id) REFERENCES email_subscribers(id) ON DELETE CASCADE,
+        INDEX idx_subscriber (subscriber_id),
+        INDEX idx_notification_type (notification_type),
+        INDEX idx_item (notification_type, item_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+// Save email subscriber
+function save_email_subscriber($conn, $email) {
+    $email = filter_var(trim($email), FILTER_SANITIZE_EMAIL);
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return ['status' => 'error', 'message' => 'Invalid email address'];
+    }
+
+    // Check if email already exists
+    $stmt = $conn->prepare("SELECT id, is_active FROM email_subscribers WHERE email = ?");
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        if ($row['is_active']) {
+            $stmt->close();
+            return ['status' => 'info', 'message' => 'Email already subscribed'];
+        } else {
+            // Reactivate subscription
+            $stmt = $conn->prepare("UPDATE email_subscribers SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE email = ?");
+            $stmt->bind_param("s", $email);
+            $stmt->execute();
+            $stmt->close();
+            return ['status' => 'success', 'message' => 'Subscription reactivated'];
+        }
+    }
+
+    // Insert new subscriber
+    $stmt = $conn->prepare("INSERT INTO email_subscribers (email) VALUES (?)");
+    $stmt->bind_param("s", $email);
+    $success = $stmt->execute();
+    $stmt->close();
+
+    if ($success) {
+        return ['status' => 'success', 'message' => 'Email subscribed successfully'];
+    } else {
+        return ['status' => 'error', 'message' => 'Failed to subscribe email'];
+    }
+}
+
+// Get all active subscribers
+function get_active_subscribers($conn) {
+    $stmt = $conn->prepare("SELECT id, email FROM email_subscribers WHERE is_active = 1");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $subscribers = [];
+    while ($row = $result->fetch_assoc()) {
+        $subscribers[] = $row;
+    }
+    $stmt->close();
+    return $subscribers;
+}
+
+// Send email notification using PHPMailer
+function send_email_notification($conn, $subscriber_email, $subject, $body, $notification_type, $item_id) {
+    // Include configuration
+    include 'email_config.php';
+    
+    // Check if email notifications are enabled
+    if (!defined('EMAIL_NOTIFICATIONS_ENABLED') || !EMAIL_NOTIFICATIONS_ENABLED) {
+        return false;
+    }
+    
+    // Include PHPMailer
+    require_once 'vendor/phpmailer/phpmailer/src/PHPMailer.php';
+    require_once 'vendor/phpmailer/phpmailer/src/SMTP.php';
+    require_once 'vendor/phpmailer/phpmailer/src/Exception.php';
+
+    $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+    
+    try {
+        // Server settings (same as login_otp.php for consistency)
+        $mail->isSMTP();
+        $mail->Host = SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = SMTP_USERNAME;
+        $mail->Password = SMTP_PASSWORD;
+        $mail->SMTPSecure = SMTP_ENCRYPTION;
+        $mail->Port = SMTP_PORT;
+        
+        // Add timeout and connection optimizations (same as login_otp.php)
+        $mail->Timeout = 10; // 10 second timeout
+        $mail->SMTPKeepAlive = true; // Keep connection alive
+        $mail->SMTPAutoTLS = true; // Auto TLS detection
+
+        // Recipients
+        $mail->setFrom(FROM_EMAIL, FROM_NAME);
+        $mail->addAddress($subscriber_email);
+
+        // Content
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        $mail->Body = $body;
+        $mail->AltBody = strip_tags($body);
+
+        // Send with timing and error handling (same as login_otp.php)
+        $start_time = microtime(true);
+        $result = $mail->send();
+        $send_time = round((microtime(true) - $start_time) * 1000, 2);
+        
+        error_log("[email_notifications] Sent {$notification_type} notification to {$subscriber_email} in {$send_time}ms");
+        
+        // Log successful notification
+        log_notification($conn, $subscriber_email, $notification_type, $item_id, 'sent');
+        
+        return true;
+    } catch (Exception $e) {
+        $error_msg = $mail->ErrorInfo ?? $e->getMessage();
+        error_log("[email_notifications] SMTP error: " . $error_msg . " for {$subscriber_email}");
+        
+        // Log failed notification
+        log_notification($conn, $subscriber_email, $notification_type, $item_id, 'failed', $error_msg);
+        return false;
+    }
+}
+
+// Log notification
+function log_notification($conn, $email, $notification_type, $item_id, $status, $error_message = null) {
+    // Get subscriber ID
+    $stmt = $conn->prepare("SELECT id FROM email_subscribers WHERE email = ?");
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $subscriber = $result->fetch_assoc();
+    $stmt->close();
+
+    if ($subscriber) {
+        $stmt = $conn->prepare("INSERT INTO email_notification_logs (subscriber_id, notification_type, item_id, status, error_message) VALUES (?, ?, ?, ?, ?)");
+        $stmt->bind_param("isisi", $subscriber['id'], $notification_type, $item_id, $status, $error_message);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+// Send notifications to all subscribers for new event
+function notify_subscribers_new_event($conn, $event_id) {
+    // Get event details
+    $stmt = $conn->prepare("SELECT title, description, event_date, category, location FROM events WHERE id = ?");
+    $stmt->bind_param("i", $event_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $event = $result->fetch_assoc();
+    $stmt->close();
+
+    if (!$event) return false;
+
+    $subscribers = get_active_subscribers($conn);
+    $success_count = 0;
+
+    foreach ($subscribers as $subscriber) {
+        $subject = "New Event: " . $event['title'];
+        
+        // Professional HTML template matching OTP style
+        $body = "
+        <div style='font-family:Arial,sans-serif;max-width:480px;margin:0 auto;'>
+          <div style='background:#1a3a2a;padding:28px 32px 20px;border-radius:12px 12px 0 0;text-align:center;'>
+            <h2 style='color:#fff;margin:0;font-size:20px;'>Buyoan National High School</h2>
+            <p style='color:rgba(255,255,255,.6);margin:4px 0 0;font-size:13px;'>Event Announcement</p>
+          </div>
+          <div style='background:#fff;padding:32px;border:1px solid #e0e0e0;border-top:none;'>
+            <p style='color:#333;font-size:14px;margin:0 0 18px;'>Hello,</p>
+            <p style='color:#555;font-size:14px;margin:0 0 20px;'>We're excited to announce a new upcoming event:</p>
+            
+            <div style='background:#f4faf7;border:2px solid #2d6a4f;border-radius:10px;padding:20px;margin-bottom:20px;'>
+              <h3 style='color:#1a3a2a;margin:0 0 10px;font-size:18px;'>" . htmlspecialchars($event['title'], ENT_QUOTES) . "</h3>
+              <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Date:</strong> " . date('F j, Y', strtotime($event['event_date'])) . "</p>
+              <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Category:</strong> " . htmlspecialchars($event['category'], ENT_QUOTES) . "</p>";
+        
+        if (!empty($event['location'])) {
+            $body .= "<p style='color:#555;margin:5px 0;font-size:13px;'><strong>Location:</strong> " . htmlspecialchars($event['location'], ENT_QUOTES) . "</p>";
+        }
+        
+        $body .= "
+            </div>
+            
+            <div style='background:#f8f5f0;padding:16px;border-radius:8px;margin:20px 0;'>
+              <p style='color:#666;font-size:13px;margin:0;'><strong>Event Details:</strong></p>
+              <p style='color:#555;font-size:13px;margin:8px 0 0;line-height:1.5;'>" . nl2br(htmlspecialchars($event['description'], ENT_QUOTES)) . "</p>
+            </div>
+            
+            <p style='color:#888;font-size:12px;margin:20px 0 0;'>This event is open to all students, parents, and staff members.</p>
+          </div>
+          <div style='background:#f8f5f0;padding:16px 32px;border-radius:0 0 12px 12px;text-align:center;'>
+            <p style='color:#aaa;font-size:11px;margin:0;'>Buyoan National High School &bull; Official Event Notification</p>
+            <p style='color:#aaa;font-size:10px;margin:4px 0 0;'>You received this because you subscribed to event notifications.</p>
+          </div>
+        </div>";
+
+        if (send_email_notification($conn, $subscriber['email'], $subject, $body, 'event', $event_id)) {
+            $success_count++;
+        }
+    }
+
+    return $success_count;
+}
+
+// Send notifications to all subscribers for new news
+function notify_subscribers_new_news($conn, $news_id) {
+    // Get news details
+    $stmt = $conn->prepare("SELECT title, short_description, category, author, news_date FROM news WHERE id = ?");
+    $stmt->bind_param("i", $news_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $news = $result->fetch_assoc();
+    $stmt->close();
+
+    if (!$news) return false;
+
+    $subscribers = get_active_subscribers($conn);
+    $success_count = 0;
+
+    foreach ($subscribers as $subscriber) {
+        $subject = "News: " . $news['title'];
+        
+        // Professional HTML template matching OTP style
+        $body = "
+        <div style='font-family:Arial,sans-serif;max-width:480px;margin:0 auto;'>
+          <div style='background:#1a3a2a;padding:28px 32px 20px;border-radius:12px 12px 0 0;text-align:center;'>
+            <h2 style='color:#fff;margin:0;font-size:20px;'>Buyoan National High School</h2>
+            <p style='color:rgba(255,255,255,.6);margin:4px 0 0;font-size:13px;'>News Announcement</p>
+          </div>
+          <div style='background:#fff;padding:32px;border:1px solid #e0e0e0;border-top:none;'>
+            <p style='color:#333;font-size:14px;margin:0 0 18px;'>Hello,</p>
+            <p style='color:#555;font-size:14px;margin:0 0 20px;'>We're pleased to share the latest news from our school:</p>
+            
+            <div style='background:#f4faf7;border:2px solid #2d6a4f;border-radius:10px;padding:20px;margin-bottom:20px;'>
+              <h3 style='color:#1a3a2a;margin:0 0 10px;font-size:18px;'>" . htmlspecialchars($news['title'], ENT_QUOTES) . "</h3>
+              <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Author:</strong> " . htmlspecialchars($news['author'], ENT_QUOTES) . "</p>
+              <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Date:</strong> " . date('F j, Y', strtotime($news['news_date'])) . "</p>
+              <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Category:</strong> " . htmlspecialchars($news['category'], ENT_QUOTES) . "</p>
+            </div>
+            
+            <div style='background:#f8f5f0;padding:16px;border-radius:8px;margin:20px 0;'>
+              <p style='color:#666;font-size:13px;margin:0;'><strong>News Summary:</strong></p>
+              <p style='color:#555;font-size:13px;margin:8px 0 0;line-height:1.5;'>" . nl2br(htmlspecialchars($news['short_description'], ENT_QUOTES)) . "</p>
+            </div>
+            
+            <p style='color:#888;font-size:12px;margin:20px 0 0;'>Stay tuned for more updates from Buyoan National High School.</p>
+          </div>
+          <div style='background:#f8f5f0;padding:16px 32px;border-radius:0 0 12px 12px;text-align:center;'>
+            <p style='color:#aaa;font-size:11px;margin:0;'>Buyoan National High School &bull; Official News Notification</p>
+            <p style='color:#aaa;font-size:10px;margin:4px 0 0;'>You received this because you subscribed to news notifications.</p>
+          </div>
+        </div>";
+
+        if (send_email_notification($conn, $subscriber['email'], $subject, $body, 'news', $news_id)) {
+            $success_count++;
+        }
+    }
+
+    return $success_count;
+}
+
+// Setup tables when this file is included
+setup_email_notification_tables($conn);
+?>

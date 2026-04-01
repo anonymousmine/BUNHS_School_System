@@ -61,12 +61,13 @@ include '../db_connection.php';
         .main {
             margin-left: 240px;
             min-height: 100vh;
-            width: calc(100% - 240px);
+            width: calc(100vw - 240px);
             box-sizing: border-box;
+            flex: 1;
         }
 
         .forms-page {
-            padding: 24px 20px 24px 0;
+            padding: 24px 0 24px 0;
             width: 100%;
             overflow-x: hidden;
         }

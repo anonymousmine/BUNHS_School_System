@@ -3241,7 +3241,7 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
                                             </div>
                                             <div class="reminder-settings">
                                                 <button class="btn btn-outline-primary btn-sm" onclick="showReminderSettings()">
-                                                    <i class="fa-solid fa-cog"></i> Settings
+                                                    <i class="fa-regular fa-bell" style="color: rgb(54, 148, 119);"></i> Subscribe
                                                 </button>
                                             </div>
                                         </div>
@@ -4439,8 +4439,12 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
                 this.renderUpcomingReminders();
                 this.checkPendingReminders();
                 
-                // Check reminders every minute
-                setInterval(() => this.checkPendingReminders(), 60000);
+                // Check reminders more frequently for precision
+                // Check every 5 seconds for better precision with short intervals
+                setInterval(() => this.checkPendingReminders(), 5000);
+                
+                // Also check every second for very short intervals (like 1 second)
+                setInterval(() => this.checkVeryShortReminders(), 1000);
                 
                 // Request notification permission
                 this.requestNotificationPermission();
@@ -4569,23 +4573,68 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
                 this.renderUpcomingReminders();
             }
 
-            triggerReminder(reminder) {
-                const message = `Reminder: ${reminder.eventTitle} is scheduled for ${new Date(reminder.eventDate).toLocaleDateString()}`;
+            checkVeryShortReminders() {
+                const now = new Date();
+                const fiveSecondsFromNow = new Date(now.getTime() + 5000);
                 
-                // Browser notification
+                this.reminders.forEach(reminder => {
+                    if (!reminder.notified) {
+                        const reminderTime = new Date(reminder.reminderTime);
+                        
+                        // Only check reminders that are within 5 seconds from now
+                        // This is for very short intervals like 1 second
+                        if (reminderTime >= now && reminderTime <= fiveSecondsFromNow) {
+                            // Calculate milliseconds until reminder
+                            const msUntilReminder = reminderTime.getTime() - now.getTime();
+                            
+                            if (msUntilReminder <= 1000) {
+                                // Trigger immediately if within 1 second
+                                this.triggerReminder(reminder);
+                                reminder.notified = true;
+                                this.saveReminders();
+                                this.renderUpcomingReminders();
+                            }
+                        }
+                    }
+                });
+            }
+
+            triggerReminder(reminder) {
+                console.log('🔔 TRIGGERING REMINDER:', reminder);
+                
+                const eventDate = new Date(reminder.eventDate);
+                const reminderDate = new Date(reminder.reminderTime);
+                const message = `Reminder: ${reminder.eventTitle} is scheduled for ${eventDate.toLocaleDateString()} at ${eventDate.toLocaleTimeString()}`;
+                
+                // Enhanced browser notification
                 if (Notification.permission === 'granted') {
-                    new Notification('Event Reminder', {
+                    const notification = new Notification('🔔 Event Reminder', {
                         body: message,
                         icon: '/assets/img/favicon.ico',
-                        tag: reminder.id.toString()
+                        tag: reminder.id.toString(),
+                        requireInteraction: true, // Keep notification visible until user interacts
+                        badge: '/assets/img/favicon.ico'
                     });
+                    
+                    // Auto-close after 10 seconds
+                    setTimeout(() => {
+                        notification.close();
+                    }, 10000);
+                    
+                    // Click handler to go to event details
+                    notification.onclick = function() {
+                        window.location.href = `user_account/event-details.php?id=${reminder.eventId}`;
+                    };
                 }
 
-                // In-app notification
-                this.showNotification('Event Reminder', message, 'warning', 10000);
+                // Enhanced in-app notification
+                this.showNotification('🔔 Event Reminder', message, 'warning', 15000);
 
                 // Play sound (if available)
                 this.playNotificationSound();
+                
+                // Log to console for debugging
+                console.log(`✅ Reminder triggered: "${reminder.eventTitle}" at ${new Date().toLocaleString()}`);
             }
 
             showNotification(title, message, type = 'info', duration = 5000) {
@@ -4611,6 +4660,31 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
                         notification.remove();
                     }
                 }, duration);
+            }
+
+            // Debug method to show all scheduled reminders
+            debugReminders() {
+                console.log('📅 ALL SCHEDULED REMINDERS:');
+                this.reminders.forEach((reminder, index) => {
+                    const reminderTime = new Date(reminder.reminderTime);
+                    const now = new Date();
+                    const msUntil = reminderTime.getTime() - now.getTime();
+                    const secondsUntil = Math.round(msUntil / 1000);
+                    const status = reminder.notified ? '✅ SENT' : (msUntil > 0 ? '⏳ PENDING' : '⏰ OVERDUE');
+                    
+                    console.log(`${index + 1}. ${reminder.eventTitle}`);
+                    console.log(`   📅 Event: ${new Date(reminder.eventDate).toLocaleString()}`);
+                    console.log(`   ⏰ Reminder: ${reminderTime.toLocaleString()}`);
+                    console.log(`   ⏱️  Time until: ${secondsUntil} seconds`);
+                    console.log(`   📊 Status: ${status}`);
+                    console.log('   ---');
+                });
+                
+                // Show summary notification
+                const pendingCount = this.reminders.filter(r => !r.notified).length;
+                const overdueCount = this.reminders.filter(r => !r.notified && new Date(r.reminderTime) < new Date()).length;
+                
+                this.showNotification('Debug Info', `Total: ${this.reminders.length}, Pending: ${pendingCount}, Overdue: ${overdueCount}`, 'info', 10000);
             }
 
             playNotificationSound() {
@@ -4657,6 +4731,8 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
                                     <label class="form-label">Remind me</label>
                                     <select class="form-select" id="reminderTime">
                                         <option value="">Select reminder time</option>
+                                        <option value="10">10 seconds before</option>
+                                        <option value="5">5 minutes before</option>
                                         <option value="15">15 minutes before</option>
                                         <option value="30">30 minutes before</option>
                                         <option value="60">1 hour before</option>
@@ -4697,7 +4773,31 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
                 const eventDateTime = new Date(eventDate);
                 const reminderTime = new Date(eventDateTime.getTime() - (minutesBefore * 60 * 1000));
                 
+                // Add debugging information for testing
+                console.log('Event Date:', eventDateTime);
+                console.log('Minutes Before:', minutesBefore);
+                console.log('Reminder Time:', reminderTime);
+                console.log('Current Time:', new Date());
+                console.log('Time Until Reminder:', reminderTime.getTime() - new Date().getTime(), 'ms');
+                
+                // Check if reminder time is in the past (for testing with old events)
+                const now = new Date();
+                if (reminderTime < now) {
+                    const confirmPast = confirm(`This reminder is scheduled for ${reminderTime.toLocaleString()}, which is in the past. Do you want to set it anyway for testing?`);
+                    if (!confirmPast) {
+                        return;
+                    }
+                }
+                
                 this.addReminder(eventId, eventTitle, eventDate, reminderTime.toISOString());
+                
+                // Show confirmation with exact time
+                const timeUntilReminder = reminderTime.getTime() - now.getTime();
+                const timeUntilText = timeUntilReminder > 0 
+                    ? `Reminder set for ${reminderTime.toLocaleString()} (in ${Math.round(timeUntilReminder / 1000)} seconds)`
+                    : `Reminder set for ${reminderTime.toLocaleString()} (in the past - testing mode)`;
+                
+                this.showNotification('Reminder Set', timeUntilText, 'info', 8000);
                 
                 // Close modal
                 const modal = reminderSelect.closest('.modal');
@@ -4741,15 +4841,25 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
                                     <option value="1440">1 day before</option>
                                 </select>
                             </div>
+                            <div class="mb-3">
+                                <label class="form-label">
+                                    <i class="fas fa-envelope me-2"></i>Email Notifications
+                                </label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-at"></i></span>
+                                    <input type="email" class="form-control" id="emailNotification" placeholder="Enter your Gmail address for event and news notifications">
+                                    <button class="btn btn-outline-primary" type="button" id="saveEmailBtn">
+                                        <i class="fas fa-save me-1"></i>Save
+                                    </button>
+                                </div>
+                                <small class="text-muted">Get notified about upcoming events and news announcements via email</small>
+                                <div id="emailStatus" class="mt-2"></div>
+                            </div>
                             <div class="text-center">
                                 <button class="btn btn-outline-danger btn-sm" onclick="eventReminderSystem.clearAllReminders()">
                                     <i class="fa-solid fa-trash"></i> Clear All Reminders
                                 </button>
                             </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                            <button type="button" class="btn btn-primary" onclick="eventReminderSystem.saveSettings()">Save Settings</button>
                         </div>
                     </div>
                 </div>
@@ -4758,6 +4868,49 @@ $paginated_events = array_slice($upcoming_events, $offset, $events_per_page);
             document.body.appendChild(modal);
             const bsModal = new bootstrap.Modal(modal);
             bsModal.show();
+            
+            // Add email save functionality
+            const saveEmailBtn = modal.querySelector('#saveEmailBtn');
+            const emailInput = modal.querySelector('#emailNotification');
+            const emailStatus = modal.querySelector('#emailStatus');
+            
+            saveEmailBtn.addEventListener('click', async () => {
+                const email = emailInput.value.trim();
+                if (!email) {
+                    emailStatus.innerHTML = '<div class="alert alert-warning py-1">Please enter an email address</div>';
+                    return;
+                }
+                
+                saveEmailBtn.disabled = true;
+                saveEmailBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Saving...';
+                
+                try {
+                    const response = await fetch('api/email_subscription_api.php', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ email: email, action: 'subscribe' })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.status === 'success') {
+                        emailStatus.innerHTML = `<div class="alert alert-success py-1"><i class="fas fa-check-circle me-1"></i>${result.message}</div>`;
+                        emailInput.value = '';
+                    } else if (result.status === 'info') {
+                        emailStatus.innerHTML = `<div class="alert alert-info py-1"><i class="fas fa-info-circle me-1"></i>${result.message}</div>`;
+                        emailInput.value = '';
+                    } else {
+                        emailStatus.innerHTML = `<div class="alert alert-danger py-1"><i class="fas fa-exclamation-circle me-1"></i>${result.message}</div>`;
+                    }
+                } catch (error) {
+                    emailStatus.innerHTML = '<div class="alert alert-danger py-1">Error saving email. Please try again.</div>';
+                } finally {
+                    saveEmailBtn.disabled = false;
+                    saveEmailBtn.innerHTML = '<i class="fas fa-save me-1"></i>Save';
+                }
+            });
             
             modal.addEventListener('hidden.bs.modal', () => {
                 document.body.removeChild(modal);

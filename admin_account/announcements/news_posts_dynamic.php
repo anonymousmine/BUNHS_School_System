@@ -13,7 +13,7 @@ if (count($news_posts) == 0) {
     echo '<p class="text-muted p-3 text-center">No news posts available.</p>';
 } else {
     foreach ($news_posts as $post) {
-        $image = !empty($post['image']) ? "../../assets/img/blog/" . $post['image'] : "../../assets/img/blog/default.webp";
+        $image = !empty($post['image']) ? "/assets/img/blog/" . $post['image'] : "/assets/img/blog/default.webp";
         $date = date("D, M d", strtotime($post['news_date']));
         $excerpt = substr($post['short_description'], 0, 100) . '...'; // Truncate to 100 chars
         $fullContent = $post['content']; // Full content for expanded view
@@ -38,6 +38,9 @@ if (count($news_posts) == 0) {
               </button>
               <button class="interaction-btn share-btn" onclick="sharePost(' . $post['id'] . ', \'' . addslashes($post['title']) . '\'); event.stopPropagation();">
                 <i class="fas fa-share"></i>
+              </button>
+              <button class="interaction-btn delete-btn delete-post" data-id="' . $post['id'] . '" data-title="' . addslashes($post['title']) . '" title="Delete Post" onclick="event.stopPropagation();">
+                <i class="fas fa-trash"></i>
               </button>
             </div>
             <div class="comment-section" id="comment-section-' . $post['id'] . '" style="display: none;">
