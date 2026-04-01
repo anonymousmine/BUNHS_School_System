@@ -377,16 +377,53 @@ foreach (['cert_card1', 'cert_card2', 'cert_card3'] as $_ck) {
 //                          $cert_card1, $cert_card2, $cert_card3
 
 // ── CACHE BLOCK 4: Login handler ──────────────────────────────────────────────
-// DISABLED: Login is now handled via OTP system (login_otp.php) to ensure proper verification
-// The old direct login handler was bypassing OTP verification for admin users
 $login_error = '';
-// Old login handler commented out to prevent OTP bypass
-/*
+
+// Handle admin login POST requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['password'])) {
-    // This handler was interfering with OTP verification
-    // All logins now go through login_otp.php with proper OTP verification
+    include __DIR__ . '/db_connection.php';
+    
+    $username = trim($_POST['username'] ?? '');
+    $password = trim($_POST['password'] ?? '');
+    
+    if ($username === '' || $password === '') {
+        $login_error = 'Please enter username and password.';
+    } else {
+        // Check admin table first
+        $admin = null;
+        $stmt = $conn->prepare("SELECT id, password_hash, school_email FROM admin WHERE username = ? LIMIT 1");
+        $stmt->bind_param('s', $username);
+        $stmt->execute();
+        $admin = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        
+        // If not found in admin, check sub_admin
+        if (!$admin) {
+            $stmt = $conn->prepare("SELECT id, password_hash, email FROM sub_admin WHERE username = ? AND status = 'approved' LIMIT 1");
+            $stmt->bind_param('s', $username);
+            $stmt->execute();
+            $admin = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        }
+        
+        if ($admin && password_verify($password, $admin['password_hash'])) {
+            // Password correct - set session
+            $_SESSION['user_id'] = $admin['id'];
+            $_SESSION['username'] = $username;
+            $_SESSION['user_type'] = isset($admin['email']) ? 'sub-admin' : 'admin';
+            $_SESSION['admin_id'] = $admin['id'];
+            $_SESSION['admin_username'] = $username;
+            $_SESSION['login_time'] = time();
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            
+            // Redirect to admin dashboard
+            header('Location: admin_account/admin_dashboard.php');
+            exit;
+        } else {
+            $login_error = 'Invalid username or password.';
+        }
+    }
 }
-*/
 
 $conn->close();
 ?>
