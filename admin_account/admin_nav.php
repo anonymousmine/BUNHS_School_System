@@ -124,9 +124,8 @@ if (isset($conn) && $conn instanceof mysqli && $conn->ping()) {
          WHERE sender_role = 'student' AND is_read = 0"
     );
 
-    // Finance total
-    $r = @$conn->query("SELECT COALESCE(SUM(amount),0) AS total FROM finance_records");
-    if ($r) $_counts['finance'] = (float)($r->fetch_assoc()['total'] ?? 0);
+    // Finance — table was removed during cleanup
+    $_counts['finance'] = 0;
 
     // Auto-clear "NEW" badge for current module
     if ($_active_module && $conn->ping()) {
