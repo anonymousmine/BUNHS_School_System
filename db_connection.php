@@ -141,7 +141,7 @@ if ($using_defaults) {
     class MockDBConnection {
         public function query($sql) {
             error_log("MOCK DB Query (bypass): $sql");
-            return false;
+            return new MockResult();
         }
         
         public function prepare($sql) {
@@ -174,6 +174,27 @@ if ($using_defaults) {
         }
     }
     
+    class MockResult {
+        public $num_rows = 0;
+        public $field_count = 0;
+        
+        public function fetch_assoc() {
+            return null;
+        }
+        
+        public function fetch_row() {
+            return null;
+        }
+        
+        public function fetch_all() {
+            return [];
+        }
+        
+        public function free() {
+            // Do nothing
+        }
+    }
+    
     class MockStatement {
         public function bind_param($types, ...$params) {
             return true;
@@ -184,11 +205,11 @@ if ($using_defaults) {
         }
         
         public function get_result() {
-            return false;
+            return new MockResult();
         }
         
         public function fetch_assoc() {
-            return false;
+            return null;
         }
         
         public function close() {
