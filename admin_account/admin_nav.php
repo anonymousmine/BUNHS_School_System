@@ -6,10 +6,9 @@
  * Works correctly from ANY directory depth inside admin_account/
  * Includes:
  *   • Functional bell / envelope / user dropdowns
- *   • Dynamic sidebar counts (students, teachers, clubs, forms, admins)
+ *   • Dynamic sidebar counts (forms, admins)
  *   • "NEW" badges driven by admin_notifications table
  *   • Chatbox unread message count
- *   • Finance total (₱ amount)
  *   • Auto-clears "NEW" badge when admin visits that module
  * ─────────────────────────────────────────────────────────────
  */
@@ -65,9 +64,6 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 // ── 3. Detect current module for auto-clear of "NEW" badge ───
 $_current_page = basename($_SERVER['PHP_SELF'], '.php');
 $_module_map   = [
-    'students'            => 'students',
-    'teachers'            => 'teachers',
-    'clubs'               => 'clubs',
     'forms'               => 'forms',
     'create_announcement' => 'announcements',
     'create_new'          => 'news',
@@ -78,12 +74,8 @@ $_active_module = $_module_map[$_current_page] ?? null;
 // ── 4. All sidebar counts in one pass ────────────────────────
 $_counts = [
     'admins'   => 0,
-    'students' => 0,
-    'teachers' => 0,
     'forms'    => 0,
-    'clubs'    => 0,
     'chat'     => 0,
-    'finance'  => 0.0,
 ];
 $_new_modules = [];
 
@@ -106,12 +98,6 @@ if (isset($conn) && $conn instanceof mysqli && $conn->ping()) {
         "SELECT COUNT(*) AS c FROM sub_admin WHERE status = 'approved'"
     );
 
-    // Students
-    $_counts['students'] = $__safe_count("SELECT COUNT(*) AS c FROM students");
-
-    // Teachers
-    $_counts['teachers'] = $__safe_count("SELECT COUNT(*) AS c FROM teachers");
-
     // Forms — try common table names, fall back to 0 gracefully
     foreach (['document_requests', 'form_requests', 'clearance_forms', 'forms'] as $_ft) {
         $n = $__safe_count("SELECT COUNT(*) AS c FROM `{$_ft}`");
@@ -121,18 +107,11 @@ if (isset($conn) && $conn instanceof mysqli && $conn->ping()) {
         }
     }
 
-    // Clubs
-    $_counts['clubs'] = $__safe_count("SELECT COUNT(*) AS c FROM clubs");
-
     // Unread student chat messages
     $_counts['chat'] = $__safe_count(
         "SELECT COUNT(*) AS c FROM chat_messages
          WHERE sender_role = 'student' AND is_read = 0"
     );
-
-    // Finance total
-    $r = @$conn->query("SELECT COALESCE(SUM(amount),0) AS total FROM finance_records");
-    if ($r) $_counts['finance'] = (float)($r->fetch_assoc()['total'] ?? 0);
 
     // Auto-clear "NEW" badge for current module
     if ($_active_module && $conn->ping()) {
@@ -166,12 +145,6 @@ function _nav_fmt_count(int $n): string
     if ($n >= 1000) return round($n / 1000, 1) . 'k';
     return (string)$n;
 }
-function _nav_fmt_finance(float $f): string
-{
-    if ($f >= 1_000_000) return '₱' . number_format($f / 1_000_000, 1) . 'M';
-    if ($f >= 1_000)     return '₱' . number_format($f / 1_000, 1)     . 'k';
-    return '₱' . number_format($f, 0);
-}
 function _nav_has_new(array $mods, string $key): bool
 {
     return in_array(strtolower($key), $mods, true);
@@ -184,9 +157,6 @@ if (!function_exists('roleLabel')) {
         $map = [
             'news_admin'         => 'News Admin',
             'announcement_admin' => 'Announcement Admin',
-            'student_admin'      => 'Student Admin',
-            'teacher_admin'      => 'Teacher Admin',
-            'club_admin'         => 'Club Admin',
             'super_sub_admin'    => 'Super Sub-Admin',
             'forms_admin'        => 'Forms Admin',
         ];
@@ -1881,7 +1851,7 @@ if ($_embed === 'json') {
         /* Auto-expand announcements menu if currently on a sub-page */
         (function() {
             var page = location.pathname.split('/').pop().replace('.php', '');
-            var subPages = ['create_announcement', 'create_new', 'Emergency_system'];
+            var subPages = ['create_announcement', 'create_new'];
             if (subPages.indexOf(page) === -1) return;
             var menu = document.getElementById('announcementsMenu');
             var btn = document.querySelector('[aria-controls="announcementsMenu"]');

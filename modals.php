@@ -685,7 +685,7 @@ if (empty($_SESSION['csrf_token'])) {
 
                 <!-- Step 1: credentials -->
                 <div id="loginStep1">
-                    <form id="loginCredentialsForm" autocomplete="on">
+                    <form id="loginCredentialsForm" method="POST" autocomplete="on">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
 
 

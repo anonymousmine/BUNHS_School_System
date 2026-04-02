@@ -391,6 +391,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['p
     } else {
         // Check admin table first
         $admin = null;
+        $user_type = null;
         $stmt = $conn->prepare("SELECT id, password_hash, school_email FROM admin WHERE username = ? LIMIT 1");
         $stmt->bind_param('s', $username);
         $stmt->execute();
@@ -404,21 +405,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['p
             $stmt->execute();
             $admin = $stmt->get_result()->fetch_assoc();
             $stmt->close();
+            $user_type = 'sub-admin';
+        } else {
+            $user_type = 'admin';
         }
         
         if ($admin && password_verify($password, $admin['password_hash'])) {
-            // Password correct - set session
-            $_SESSION['user_id'] = $admin['id'];
-            $_SESSION['username'] = $username;
-            $_SESSION['user_type'] = isset($admin['email']) ? 'sub-admin' : 'admin';
-            $_SESSION['admin_id'] = $admin['id'];
-            $_SESSION['admin_username'] = $username;
-            $_SESSION['login_time'] = time();
-            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            // Password correct - generate and send OTP
+            $otp = sprintf("%06d", mt_rand(0, 999999));
             
-            // Redirect to admin dashboard
-            header('Location: admin_account/admin_dashboard.php');
-            exit;
+            // Create session structure expected by login_otp.php
+            $_SESSION['otp_pending'] = [
+                'user_id' => $admin['id'],
+                'username' => $username,
+                'user_type' => $user_type,
+                'email' => $admin['school_email'] ?? $admin['email'],
+                'otp' => password_hash($otp, PASSWORD_DEFAULT),
+                'expires' => time() + 300 // 5 minutes
+            ];
+            
+            // Keep existing session variables for compatibility
+            $_SESSION['login_otp'] = $otp;
+            $_SESSION['otp_sent_to'] = $admin['school_email'] ?? $admin['email'];
+            $_SESSION['login_admin_id'] = $admin['id'];
+            $_SESSION['otp_generated_at'] = time();
+            $_SESSION['show_otp_verification'] = true;
+            
+            // Send OTP via email
+            try {
+                $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+                $mail->isSMTP();
+                $mail->Host = 'smtp.gmail.com';
+                $mail->SMTPAuth = true;
+                $mail->Username = 'bunhs.deped@gmail.com';
+                $mail->Password = 'svhiovmxalojxzxg';
+                $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+                $mail->Port = 587;
+                
+                $mail->setFrom('bunhs.deped@gmail.com', 'Buyoan National High School');
+                $mail->addAddress($_SESSION['otp_sent_to']);
+                $mail->isHTML(true);
+                $mail->Subject = 'Your Login Verification Code';
+                $mail->Body = "
+                    <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;'>
+                        <div style='background: linear-gradient(135deg, #1a73e8, #1557b0); color: white; padding: 30px; border-radius: 10px; text-align: center;'>
+                            <h2 style='margin: 0 0 20px 0; font-size: 24px;'>🔐 Security Verification</h2>
+                            <p style='margin: 0; font-size: 16px;'>Your login code for Buyoan National High School Admin Portal</p>
+                        </div>
+                        <div style='background: #f8f9fa; padding: 30px; border-radius: 10px; text-align: center; margin: 20px 0;'>
+                            <div style='font-size: 36px; font-weight: bold; color: #1a73e8; letter-spacing: 8px; border: 2px dashed #1a73e8; padding: 15px 25px; border-radius: 8px; display: inline-block;'>
+                                $otp
+                            </div>
+                            <p style='margin: 20px 0 0 0; color: #666; font-size: 14px;'>This code expires in 5 minutes</p>
+                        </div>
+                        <div style='text-align: center; color: #666; font-size: 12px; margin-top: 20px;'>
+                            <p>If you didn't request this code, please ignore this email.</p>
+                        </div>
+                    </div>
+                ";
+                
+                $mail->send();
+                
+            } catch (Exception $e) {
+                $login_error = 'Failed to send verification email. Please try again.';
+                error_log('OTP Email failed: ' . $e->getMessage());
+            }
         } else {
             $login_error = 'Invalid username or password.';
         }
@@ -690,6 +741,285 @@ $conn->close();
 <?php $isVerificationPage = isset($_GET['verify']) && !empty($_SESSION['signup_data']); ?>
 
 <body class="<?php echo $isVerificationPage ? 'verification-page' : 'index-page'; ?>">
+
+    <!-- OTP Verification Section (shown when login is successful) -->
+    <?php if (isset($_SESSION['show_otp_verification']) && $_SESSION['show_otp_verification'] === true): ?>
+        <div class="verification-page" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+            <div class="verification-card" style="background: white; border-radius: 16px; box-shadow: 0 4px 12px rgba(0, 0, 0, .1); padding: 48px; width: 100%; max-width: 460px; text-align: center; position: relative;">
+                <!-- Close Button -->
+                <button class="bm-hero-close" id="closeOtpBtn" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #666; font-size: 18px; cursor: pointer; padding: 8px; border-radius: 50%; transition: all 0.2s; z-index: 10;">
+                    <i class="fas fa-times"></i>
+                </button>
+                
+                <img src="assets/img/logo.jpg" alt="School Logo" class="verification-logo" style="width: 80px; height: auto; margin-bottom: 24px;">
+                <h1 class="verification-title" style="font-size: 24px; font-weight: 500; color: #202124; margin-bottom: 16px;">Two-Step Verification</h1>
+                <p class="verification-text" style="font-size: 14px; color: #5f6368; line-height: 1.5; margin-bottom: 32px;">Enter the code sent to <?php echo htmlspecialchars(maskEmail($_SESSION['otp_sent_to'] ?? 'your email')); ?></p>
+                
+                <form id="otpVerificationForm" method="POST" action="login_otp.php">
+                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                    <input type="hidden" name="action" value="login_verify_otp">
+                    
+                    <div class="bm-otp-row" style="display: flex; justify-content: center; gap: 7px; margin: 6px 0 20px;">
+                        <input class="bm-otp-box" type="text" name="otp1" maxlength="1" inputmode="numeric" pattern="[0-9]" required style="width: 48px; height: 56px; font-family: var(--bunhs-display); font-size: 20px; text-align: center; border: 2px solid #e0e0e0; border-radius: var(--bunhs-radius-sm); transition: border-color .2s, background .2s, box-shadow .2s, transform .15s;">
+                        <input class="bm-otp-box" type="text" name="otp2" maxlength="1" inputmode="numeric" pattern="[0-9]" required style="width: 48px; height: 56px; font-family: var(--bunhs-display); font-size: 20px; text-align: center; border: 2px solid #e0e0e0; border-radius: var(--bunhs-radius-sm); transition: border-color .2s, background .2s, box-shadow .2s, transform .15s;">
+                        <input class="bm-otp-box" type="text" name="otp3" maxlength="1" inputmode="numeric" pattern="[0-9]" required style="width: 48px; height: 56px; font-family: var(--bunhs-display); font-size: 20px; text-align: center; border: 2px solid #e0e0e0; border-radius: var(--bunhs-radius-sm); transition: border-color .2s, background .2s, box-shadow .2s, transform .15s;">
+                        <input class="bm-otp-box" type="text" name="otp4" maxlength="1" inputmode="numeric" pattern="[0-9]" required style="width: 48px; height: 56px; font-family: var(--bunhs-display); font-size: 20px; text-align: center; border: 2px solid #e0e0e0; border-radius: var(--bunhs-radius-sm); transition: border-color .2s, background .2s, box-shadow .2s, transform .15s;">
+                        <input class="bm-otp-box" type="text" name="otp5" maxlength="1" inputmode="numeric" pattern="[0-9]" required style="width: 48px; height: 56px; font-family: var(--bunhs-display); font-size: 20px; text-align: center; border: 2px solid #e0e0e0; border-radius: var(--bunhs-radius-sm); transition: border-color .2s, background .2s, box-shadow .2s, transform .15s;">
+                        <input class="bm-otp-box" type="text" name="otp6" maxlength="1" inputmode="numeric" pattern="[0-9]" required style="width: 48px; height: 56px; font-family: var(--bunhs-display); font-size: 20px; text-align: center; border: 2px solid #e0e0e0; border-radius: var(--bunhs-radius-sm); transition: border-color .2s, background .2s, box-shadow .2s, transform .15s;">
+                    </div>
+                    
+                    <div id="otpError" class="bm-err" style="display: none; margin: 6px 0;">
+                        <i class="fas fa-exclamation-circle"></i> <span id="otpErrorText"></span>
+                    </div>
+                    
+                    <button type="submit" class="bm-btn" id="verifyOtpBtn" style="width: 100%; padding: 13px 20px; margin-top: 4px;">
+                        <span class="bm-btn-label"><i class="fas fa-check-circle"></i>&ensp;Verify & Sign In</span>
+                        <div class="bm-spinner"></div>
+                    </button>
+                    
+                    <div style="margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+                        <button type="button" class="bm-ghost" id="resendOtpBtn" disabled>
+                            Resend · <span id="resendTimer">30</span>s
+                        </button>
+                        <span style="color: var(--bunhs-border); font-size: 14px;">|</span>
+                        <button type="button" class="bm-ghost" id="backToLoginBtn">
+                            <i class="fas fa-arrow-left" style="font-size: 10px;"></i> Back
+                        </button>
+                    </div>
+                    
+                    <div style="margin-top: 16px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+                        <span class="bm-timer" id="otpTimer" style="color: var(--bunhs-muted); font-size: 12.5px;">
+                            <i class="fas fa-clock"></i> <span id="loginTimerVal">05:00</span>
+                        </span>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <script>
+            // OTP Input handling (matching modal behavior)
+            const otpInputs = document.querySelectorAll('input[name^="otp"]');
+            
+            otpInputs.forEach((input, index) => {
+                input.addEventListener('input', (e) => {
+                    if (e.target.value && index < otpInputs.length - 1) {
+                        otpInputs[index + 1].focus();
+                    }
+                    // Add filled class
+                    if (e.target.value) {
+                        e.target.classList.add('is-filled');
+                    } else {
+                        e.target.classList.remove('is-filled');
+                    }
+                });
+                
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Backspace' && !e.target.value && index > 0) {
+                        otpInputs[index - 1].focus();
+                    }
+                });
+                
+                input.addEventListener('paste', (e) => {
+                    e.preventDefault();
+                    const pastedData = e.clipboardData.getData('text').slice(0, 6);
+                    for (let i = 0; i < pastedData.length && i < otpInputs.length; i++) {
+                        otpInputs[i].value = pastedData[i];
+                        otpInputs[i].classList.add('is-filled');
+                        if (i < otpInputs.length - 1) {
+                            otpInputs[i + 1].focus();
+                        }
+                    }
+                });
+            });
+            
+            // Timer
+            let timeLeft = 300; // 5 minutes in seconds
+            const timerElement = document.getElementById('loginTimerVal');
+            
+            function updateTimer() {
+                if (timeLeft <= 0) {
+                    timerElement.textContent = 'Expired';
+                    document.getElementById('verifyOtpBtn').disabled = true;
+                    return;
+                }
+                
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                timeLeft--;
+            }
+            
+            const timerInterval = setInterval(updateTimer, 1000);
+            
+            // Handle form submission
+            document.getElementById('otpVerificationForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const otp = Array.from(otpInputs).map(input => input.value).join('');
+                const formData = new FormData(e.target);
+                formData.set('otp', otp);
+                
+                // Show loading state
+                const submitBtn = document.getElementById('verifyOtpBtn');
+                submitBtn.classList.add('loading');
+                
+                try {
+                    const response = await fetch('login_otp.php', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Redirect to dashboard
+                        window.location.href = 'admin_account/admin_dashboard.php';
+                    } else {
+                        // Show error
+                        document.getElementById('otpError').style.display = 'block';
+                        document.getElementById('otpErrorText').textContent = result.message || 'Invalid verification code';
+                        
+                        // Shake error boxes
+                        otpInputs.forEach(input => {
+                            input.classList.add('is-error');
+                            setTimeout(() => input.classList.remove('is-error'), 380);
+                        });
+                    }
+                } catch (error) {
+                    document.getElementById('otpError').style.display = 'block';
+                    document.getElementById('otpErrorText').textContent = 'Network error. Please try again.';
+                } finally {
+                    submitBtn.classList.remove('loading');
+                }
+            });
+            
+            // Resend OTP
+            document.getElementById('resendOtpBtn').addEventListener('click', async () => {
+                try {
+                    const response = await fetch('login_otp.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            action: 'resend_otp',
+                            csrf_token: '<?php echo $_SESSION['csrf_token']; ?>'
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Reset timer and inputs
+                        timeLeft = 300;
+                        otpInputs.forEach(input => {
+                            input.value = '';
+                            input.classList.remove('is-filled', 'is-error');
+                        });
+                        otpInputs[0].focus();
+                        
+                        document.getElementById('otpError').style.display = 'none';
+                        
+                        // Start resend countdown
+                        let resendTimeLeft = 30;
+                        const resendBtn = document.getElementById('resendOtpBtn');
+                        const resendTimer = document.getElementById('resendTimer');
+                        
+                        const resendInterval = setInterval(() => {
+                            if (resendTimeLeft <= 0) {
+                                resendBtn.disabled = false;
+                                resendTimer.textContent = 'Resend';
+                                clearInterval(resendInterval);
+                            } else {
+                                resendTimer.textContent = resendTimeLeft;
+                                resendTimeLeft--;
+                            }
+                        }, 1000);
+                        
+                    } else {
+                        document.getElementById('otpError').style.display = 'block';
+                        document.getElementById('otpErrorText').textContent = result.message || 'Failed to resend code';
+                    }
+                } catch (error) {
+                    document.getElementById('otpError').style.display = 'block';
+                    document.getElementById('otpErrorText').textContent = 'Network error. Please try again.';
+                }
+            });
+            
+            // Back to login
+            document.getElementById('backToLoginBtn').addEventListener('click', () => {
+                // Clear OTP session and reload
+                fetch('login_otp.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        action: 'cancel_otp',
+                        csrf_token: '<?php echo $_SESSION['csrf_token']; ?>'
+                    })
+                }).then(() => {
+                    window.location.reload();
+                });
+            });
+            
+            // Close button - hide form but keep session active
+            document.getElementById('closeOtpBtn').addEventListener('click', () => {
+                const verificationOverlay = document.querySelector('.verification-page');
+                verificationOverlay.style.display = 'none';
+            });
+            
+            // Check if OTP session is still valid when page loads
+            window.addEventListener('load', () => {
+                const otpGeneratedAt = <?php echo $_SESSION['otp_generated_at'] ?? 0; ?>;
+                const currentTime = Math.floor(Date.now() / 1000);
+                const maxAge = 300; // 5 minutes
+                
+                if (otpGeneratedAt && (currentTime - otpGeneratedAt) > maxAge) {
+                    // OTP expired, clear session and reload
+                    fetch('login_otp.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            action: 'cancel_otp',
+                            csrf_token: '<?php echo $_SESSION['csrf_token']; ?>'
+                        })
+                    }).then(() => {
+                        window.location.reload();
+                    });
+                }
+            });
+            
+            // Periodic check for OTP expiration
+            setInterval(() => {
+                const otpGeneratedAt = <?php echo $_SESSION['otp_generated_at'] ?? 0; ?>;
+                const currentTime = Math.floor(Date.now() / 1000);
+                const maxAge = 300; // 5 minutes
+                
+                if (otpGeneratedAt && (currentTime - otpGeneratedAt) > maxAge) {
+                    // OTP expired, clear session and reload
+                    fetch('login_otp.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            action: 'cancel_otp',
+                            csrf_token: '<?php echo $_SESSION['csrf_token']; ?>'
+                        })
+                    }).then(() => {
+                        window.location.reload();
+                    });
+                }
+            }, 5000); // Check every 5 seconds
+            
+            // Show OTP form again if session is still active and user navigates back
+            const otpGeneratedAt = <?php echo $_SESSION['otp_generated_at'] ?? 0; ?>;
+            const currentTime = Math.floor(Date.now() / 1000);
+            const maxAge = 300; // 5 minutes
+            
+            if (otpGeneratedAt && (currentTime - otpGeneratedAt) <= maxAge) {
+                const verificationOverlay = document.querySelector('.verification-page');
+                if (verificationOverlay && verificationOverlay.style.display === 'none') {
+                    verificationOverlay.style.display = 'flex';
+                }
+            }
+        </script>
+    <?php endif; ?>
 
     <?php if ($isVerificationPage): ?>
         <div class="verification-card fade-in">
@@ -1601,6 +1931,55 @@ $conn->close();
                                 document.querySelector('#loginOtpBoxes .bm-otp-box').focus();
                             } else {
                                 showErr('loginErrBox', 'loginErrTxt', d.message || 'Invalid credentials.');
+                            }
+                        }).catch(() => {
+                            setLoad('loginSubmitBtn', false);
+                            showErr('loginErrBox', 'loginErrTxt', 'Connection error. Try again.');
+                        });
+                    });
+
+                    // Login credentials form submission
+                    safeAddEventListener('loginCredentialsForm', 'submit', function(e) {
+                        e.preventDefault();
+                        hideErr('loginErrBox');
+                        
+                        const username = document.getElementById('loginUsername').value.trim();
+                        const password = document.getElementById('loginPassword').value;
+                        
+                        if (!username || !password) {
+                            showErr('loginErrBox', 'loginErrTxt', 'Please enter username and password.');
+                            return;
+                        }
+                        
+                        setLoad('loginSubmitBtn', true);
+                        const formData = new FormData();
+                        formData.append('username', username);
+                        formData.append('password', password);
+                        formData.append('csrf_token', document.querySelector('#loginCredentialsForm input[name="csrf_token"]').value);
+                        
+                        fetch('index.php', {
+                            method: 'POST',
+                            body: formData
+                        }).then(response => response.json())
+                        .then(data => {
+                            setLoad('loginSubmitBtn', false);
+                            if (data.success) {
+                                // Always show OTP step — no bypass
+                                document.getElementById('loginStep1').style.display = 'none';
+                                document.getElementById('loginStep2').style.display = 'block';
+                                if (data.masked_contact) document.getElementById('loginOtpSubtitle').textContent = 'Code sent to ' + data.masked_contact;
+                                mmss('loginTimerVal', 'loginTimer', 300);
+                                const rb = document.getElementById('loginResendBtn');
+                                rb.disabled = true;
+                                rb.innerHTML = 'Resend · <span id="loginResendTimer">30</span>s';
+                                cdwn('loginResendTimer', 30, () => {
+                                    rb.disabled = false;
+                                    rb.innerHTML = 'Resend code';
+                                    rb.classList.add('on');
+                                });
+                                document.querySelector('#loginOtpBoxes .bm-otp-box').focus();
+                            } else {
+                                showErr('loginErrBox', 'loginErrTxt', data.message || 'Invalid credentials.');
                             }
                         }).catch(() => {
                             setLoad('loginSubmitBtn', false);

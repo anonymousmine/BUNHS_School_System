@@ -5,6 +5,11 @@
  * Enhanced with multiple fallback strategies and detailed logging
  */
 
+// Include local database configuration for XAMPP testing
+if (file_exists(__DIR__ . '/local_db_config.php')) {
+    include_once __DIR__ . '/local_db_config.php';
+}
+
 // Prevent multiple inclusions
 if (!defined('DB_CONNECTION_LOADED')) {
     define('DB_CONNECTION_LOADED', true);
@@ -133,7 +138,10 @@ $db_port = getenv('DB_PORT')    ?: null;
 // Check if environment variables are properly set (not using defaults)
 $using_defaults = ($host === 'localhost' && $db_user === 'root' && empty($db_pass));
 
-if ($using_defaults) {
+// Check if we have local database setup
+$has_local_setup = isset($_ENV['LOCAL_DB_SETUP']) && $_ENV['LOCAL_DB_SETUP'] === 'true';
+
+if ($using_defaults && !$has_local_setup) {
     error_log('WARNING: Using default database settings - likely Railway environment variables not set');
     error_log('TREATING AS BYPASS MODE - App will load without database connection');
     

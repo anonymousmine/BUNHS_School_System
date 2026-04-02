@@ -164,9 +164,6 @@ $date_of_birth   = $user_data['date_of_birth']   ?? '';
 $place_of_birth  = $user_data['place_of_birth']  ?? '';
 $home_address    = $user_data['home_address']    ?? '';
 $government_id   = $user_data['government_id']   ?? '';
-$emerg_name      = $user_data['emergency_contact_name']  ?? '';
-$emerg_phone     = $user_data['emergency_contact_phone'] ?? '';
-$emerg_rel       = $user_data['emergency_relationship']  ?? '';
 $bank_account    = $user_data['bank_account']    ?? '';
 
 // Avatar: handle different profile picture types
@@ -1861,13 +1858,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
                         <div class="info-row"><span class="info-label">Gov. ID / SSN</span><span class="info-value <?php echo $government_id ? '' : 'muted'; ?>"><?php echo $government_id ? '••••••••' : 'Not provided'; ?></span></div>
                     </div>
 
-                    <div class="sub-heading"><i class="fas fa-phone-alt"></i> Emergency Contact</div>
-                    <div class="info-list">
-                        <div class="info-row"><span class="info-label">Contact Name</span><span class="info-value <?php echo $emerg_name ? '' : 'muted'; ?>"><?php echo $emerg_name ? h($emerg_name) : 'Not provided'; ?></span></div>
-                        <div class="info-row"><span class="info-label">Phone</span><span class="info-value <?php echo $emerg_phone ? '' : 'muted'; ?>"><?php echo $emerg_phone ? h($emerg_phone) : 'Not provided'; ?></span></div>
-                        <div class="info-row"><span class="info-label">Relationship</span><span class="info-value <?php echo $emerg_rel ? '' : 'muted'; ?>"><?php echo $emerg_rel ? h($emerg_rel) : 'Not provided'; ?></span></div>
-                    </div>
-
                     <div class="sub-heading"><i class="fas fa-university"></i> Financial</div>
                     <div class="info-list">
                         <div class="info-row"><span class="info-label">Bank Account</span><span class="info-value <?php echo $bank_account ? '' : 'muted'; ?>"><?php echo $bank_account ? '••••' . substr($bank_account, -4) : 'Not provided'; ?></span></div>
@@ -2165,17 +2155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_hpc_action'] ?? '') === '
                     </div>
                 </div>
 
-                <div class="form-section">
-                    <div class="form-section-head"><i class="fas fa-phone-alt"></i> Emergency Contact</div>
-                    <div class="form-row">
-                        <div class="form-group"><label class="form-label">Contact Name</label><input class="form-input" type="text" name="emergency_contact_name" placeholder="Full name" value="<?php echo h($emerg_name); ?>" /></div>
-                        <div class="form-group"><label class="form-label">Contact Phone</label><input class="form-input" type="tel" name="emergency_contact_phone" placeholder="Phone number" value="<?php echo h($emerg_phone); ?>" /></div>
-                    </div>
-                    <div class="form-row full">
-                        <div class="form-group"><label class="form-label">Relationship</label><input class="form-input" type="text" name="emergency_relationship" placeholder="e.g. Spouse, Parent, Sibling" value="<?php echo h($emerg_rel); ?>" /></div>
-                    </div>
-                </div>
-
+                
                 <div class="form-section">
                     <div class="form-section-head"><i class="fas fa-university"></i> Financial</div>
                     <div class="form-row full">
