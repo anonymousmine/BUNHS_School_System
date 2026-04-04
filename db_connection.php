@@ -6,10 +6,10 @@
  */
 
 // ── Environment Detection and Configuration Loading ───────────────────────────────
-// Use the unified database configuration for both Railway and local
-require_once __DIR__ . '/config/database.php';
+// Use the simple database configuration for reliable Railway detection
+require_once __DIR__ . '/config/simple_database.php';
 
-error_log("[DB] Using unified database configuration");
+error_log("[DB] Using simple database configuration");
 
 // Prevent multiple inclusions
 if (!defined('DB_CONNECTION_LOADED')) {
