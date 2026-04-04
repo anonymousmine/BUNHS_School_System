@@ -807,7 +807,8 @@ if (empty($_SESSION['csrf_token'])) {
 
                 <!-- Step 1: form -->
                 <div id="signupFormContainer">
-                    <form id="signupForm" method="POST" novalidate>
+                    <form id="signupForm" method="POST" novalidate onsubmit="return false;">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES); ?>">
                         <!-- ✅ FIX: action changed from "signup" to "send_otp" -->
                         <input type="hidden" name="action" value="send_otp">
 
@@ -869,27 +870,9 @@ if (empty($_SESSION['csrf_token'])) {
                         <div id="lastNameError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Last name is required</div>
                         <div id="suffixError" style="color:#e53935;font-size:10.5px;margin-top:3px;margin-bottom:8px;display:none;">Suffix is optional</div>
 
-                        <!-- ── Email/Phone fields ── -->
-                        <div style="margin-bottom:14px;">
-                            <label class="bm-label" style="margin-bottom:7px;">Verification Method <span style="color:#e53935;">*</span></label>
-                            <div class="bm-contact-wrap">
-                                <div class="bm-contact-opt">
-                                    <input type="radio" name="contact_method" id="contactEmail" value="email" checked>
-                                    <label class="bm-contact-card" for="contactEmail">
-                                        <i class="fas fa-envelope" style="color:#ea4335;"></i> Gmail
-                                    </label>
-                                </div>
-                                <div class="bm-contact-opt">
-                                    <input type="radio" name="contact_method" id="contactPhone" value="phone">
-                                    <label class="bm-contact-card" for="contactPhone">
-                                        <i class="fas fa-mobile-alt" style="color:var(--bunhs-mint);"></i> Phone
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div id="emailField" class="bm-field">
-                            <label class="bm-label" for="email">Email Address <span style="color:#e53935;">*</span></label>
+                        <!-- ── Email Field (Gmail Only) ── -->
+                        <div class="bm-field">
+                            <label class="bm-label" for="email">Gmail Address <span style="color:#e53935;">*</span></label>
                             <div class="bm-input-wrap">
                                 <i class="fas fa-envelope bm-field-icon"></i>
                                 <input class="bm-input" type="email" id="email" name="email"
@@ -1032,8 +1015,10 @@ if (empty($_SESSION['csrf_token'])) {
                             <span class="bm-timer" id="signupTimer"><i class="fas fa-clock"></i> Expires in <span id="otpCountdown">05:00</span></span>
                         </div>
 
-                        <form id="otpForm" novalidate>
-                            <input type="hidden" name="action" value="verify_otp">
+                        <form id="otpForm" novalidate onsubmit="return false;">
+                            
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>">
+                            <input type="hidden" name="action" value="verify_signup_otp">
                             <div class="bm-otp-row" id="signupOtpBoxes">
                                 <input class="bm-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]">
                                 <input class="bm-otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]">

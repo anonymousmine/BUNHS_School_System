@@ -22,8 +22,6 @@ $assetsBase = rtrim(dirname(dirname($_script)), '/') . '/';
 
 // API paths
 $chatApi = $apiBase . 'chat_api.php';
-$fileReqApi = $apiBase . 'file_request_api.php';
-$clubChatApi = $apiBase . 'club_chat_api.php';
 
 ?>
 <!DOCTYPE html>

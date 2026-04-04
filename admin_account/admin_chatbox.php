@@ -1502,6 +1502,7 @@ function generateCSRFToken() {
             fd.append('action', 'process_file_request');
             fd.append('request_id', requestId);
             fd.append('decision', action);
+            fd.append('csrf_token', getCSRFToken());
             const res = await fetch(API, {
                 method: 'POST',
                 body: fd

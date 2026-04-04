@@ -1045,9 +1045,7 @@ if ($db) {
                         'database' => ['icon' => 'fa-database', 'label' => 'Database', 'permission' => 'system.database'],
                         'school' => ['icon' => 'fa-school', 'label' => 'School', 'permission' => 'system.school'],
                         'admin' => ['icon' => 'fa-user-shield', 'label' => 'Admin', 'permission' => 'system.admin'],
-                        'finance' => ['icon' => 'fa-peso-sign', 'label' => 'Finance', 'permission' => 'finance.view'],
                         'files' => ['icon' => 'fa-folder-open', 'label' => 'Files', 'permission' => 'system.files'],
-                        'clubs' => ['icon' => 'fa-people-group', 'label' => 'Clubs', 'permission' => 'clubs.view'],
                         'overview' => ['icon' => 'fa-chart-pie', 'label' => 'Overview', 'permission' => 'system.reports']
                     ];
                     
@@ -1083,7 +1081,7 @@ if ($db) {
                     
                     <h4>Permission Test Results:</h4>
                     <?php
-                    $test_sections = ['appearance', 'security', 'system', 'admin', 'finance'];
+                    $test_sections = ['appearance', 'security', 'system', 'admin'];
                     foreach ($test_sections as $section) {
                         $can_access = PermissionManager::canAccessSettingsSection($section);
                         echo "<p><strong>$section:</strong> " . ($can_access ? '✅ ACCESS' : '❌ DENIED') . "</p>";
@@ -1155,9 +1153,6 @@ if ($db) {
                                 <div class="s-row-control">
                                     <div class="s-checkbox-grid">
                                         <label class="s-checkbox-item"><input type="checkbox" checked> <i class="fa-solid fa-chart-bar"></i> Reports</label>
-                                        <label class="s-checkbox-item"><input type="checkbox" checked> <i class="fa-solid fa-user-graduate"></i> Students</label>
-                                        <label class="s-checkbox-item"><input type="checkbox"> <i class="fa-solid fa-people-group"></i> Clubs</label>
-                                        <label class="s-checkbox-item"><input type="checkbox" checked> <i class="fa-solid fa-peso-sign"></i> Finance</label>
                                         <label class="s-checkbox-item"><input type="checkbox"> <i class="fa-solid fa-hard-drive"></i> File Storage</label>
                                     </div>
                                 </div>
@@ -1591,14 +1586,8 @@ if ($db) {
                         </div>
                         <div class="s-card-body">
                             <div class="s-row">
-                                <div class="s-row-label"><strong>Quick Add User</strong><span>Create a new account with the appropriate role</span></div>
+                                <div class="s-row-label"><strong>Quick Add User</strong><span>Create a new account with appropriate role</span></div>
                                 <div class="s-row-control" style="display:flex;gap:8px;flex-wrap:wrap;">
-                                    <?php if (PermissionManager::hasPermission($_SESSION['user_id'], 'students.create')): ?>
-                                        <button class="btn btn-primary btn-sm"><i class="fa-solid fa-user-graduate"></i> Add Student</button>
-                                    <?php endif; ?>
-                                    <?php if (PermissionManager::hasPermission($_SESSION['user_id'], 'teachers.create')): ?>
-                                        <button class="btn btn-ghost btn-sm"><i class="fa-solid fa-chalkboard-teacher"></i> Add Teacher</button>
-                                    <?php endif; ?>
                                     <?php if (PermissionManager::hasPermission($_SESSION['user_id'], 'system.admin')): ?>
                                         <button class="btn btn-ghost btn-sm"><i class="fa-solid fa-user-tie"></i> Add Staff</button>
                                     <?php endif; ?>
@@ -1664,11 +1653,8 @@ if ($db) {
                                         <tr>
                                             <th>Role</th>
                                             <th>Reports</th>
-                                            <th>Finance</th>
                                             <th>Files</th>
                                             <th>Settings</th>
-                                            <th>Clubs</th>
-                                            <th>Students</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1680,11 +1666,8 @@ if ($db) {
                                         <tr>
                                             <td><strong><?php echo htmlspecialchars($role['label']); ?></strong></td>
                                             <td><?php echo in_array('*', $permissions) || in_array('system.reports', $permissions) ? '✅' : '❌'; ?></td>
-                                            <td><?php echo in_array('*', $permissions) || in_array('finance.view', $permissions) ? '✅' : '❌'; ?></td>
                                             <td><?php echo in_array('*', $permissions) || in_array('system.files', $permissions) ? '✅' : '❌'; ?></td>
                                             <td><?php echo in_array('*', $permissions) || in_array('system.settings', $permissions) ? '✅' : '❌'; ?></td>
-                                            <td><?php echo in_array('*', $permissions) || in_array('clubs.view', $permissions) ? '✅' : '❌'; ?></td>
-                                            <td><?php echo in_array('*', $permissions) || in_array('students.view', $permissions) ? '✅' : '❌'; ?></td>
                                         </tr>
                                         <?php endforeach; ?>
                                         <tr>
@@ -1692,9 +1675,36 @@ if ($db) {
                                             <td>✅</td>
                                             <td>✅</td>
                                             <td>✅</td>
-                                            <td>✅</td>
-                                            <td>✅</td>
-                                            <td>✅</td>
+                                        </tr>
+                                        <tr>
+                                            <td><span class="badge badge-blue">Principal</span></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                        </tr>
+                                        <tr>
+                                            <td><span class="badge badge-blue">Vice Principal</span></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                        </tr>
+                                        <tr>
+                                            <td><span class="badge badge-green">Teacher</span></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                            <td><i class="fa-solid fa-xmark"></i></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                        </tr>
+                                        <tr>
+                                            <td><span class="badge badge-orange">Sub Admin</span></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                            <td><i class="fa-solid fa-xmark"></i></td>
+                                            <td><i class="fa-solid fa-check"></i></td>
+                                        </tr>
+                                        <tr>
+                                            <td><span class="badge badge-red">Student</span></td>
+                                            <td><i class="fa-solid fa-xmark"></i></td>
+                                            <td><i class="fa-solid fa-xmark"></i></td>
+                                            <td><i class="fa-solid fa-xmark"></i></td>
                                         </tr>
                                     </tbody>
                                 </table>

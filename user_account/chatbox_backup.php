@@ -50,10 +50,6 @@ $notification_preference = null;
 
 $chatApiPath    = '../admin_account/chat_api.php';
 
-$fileRequestApi = '../admin_account/file_request_api.php';
-
-$clubChatApi    = '../admin_account/club_chat_api.php';
-
 
 
 // ── FETCH FULL STUDENT PROFILE ────────────────────────────────────────────────

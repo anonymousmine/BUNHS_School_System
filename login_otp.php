@@ -478,4 +478,343 @@ if ($action === 'login_resend_otp') {
     send(['success' => true, 'masked_contact' => $masked]);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  ACTION: send_otp (Signup OTP Generation)
+// ══════════════════════════════════════════════════════════════════════════════
+if ($action === 'send_otp') {
+    if (empty($sess_csrf) || empty($csrf) || !hash_equals($sess_csrf, $csrf)) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        send(['success' => false, 'message' => 'Security validation failed. Please refresh and try again.']);
+    }
+    
+    // Validate required fields
+    $required = ['first_name', 'last_name', 'email', 'username', 'password', 'confirm_password'];
+    foreach ($required as $field) {
+        if (empty($_POST[$field])) {
+            send(['success' => false, 'message' => "Missing required field: $field"]);
+        }
+    }
+    
+    // Validate Gmail email
+    $email = $_POST['email'];
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match('/@gmail\.com$/', $email)) {
+        send(['success' => false, 'message' => 'Only Gmail addresses are allowed for registration.']);
+    }
+    
+    // Validate password match
+    if ($_POST['password'] !== $_POST['confirm_password']) {
+        send(['success' => false, 'message' => 'Passwords do not match.']);
+    }
+    
+    // Validate password strength
+    $password = $_POST['password'];
+    if (strlen($password) < 8 || !preg_match('/[A-Z]/', $password) || !preg_match('/[a-z]/', $password) || !preg_match('/[0-9]/', $password) || !preg_match('/[!@#$%^&*]/', $password)) {
+        send(['success' => false, 'message' => 'Password must be at least 8 characters with uppercase, lowercase, number, and special character.']);
+    }
+    
+    // Check if email already exists
+    $check_email = $conn->prepare("SELECT id FROM sub_admin WHERE email = ?");
+    $check_email->bind_param("s", $email);
+    $check_email->execute();
+    if ($check_email->get_result()->num_rows > 0) {
+        send(['success' => false, 'message' => 'This email is already registered.']);
+    }
+    
+    // Check if username already exists
+    $username = $_POST['username'];
+    $check_username = $conn->prepare("SELECT id FROM sub_admin WHERE username = ?");
+    $check_username->bind_param("s", $username);
+    $check_username->execute();
+    if ($check_username->get_result()->num_rows > 0) {
+        send(['success' => false, 'message' => 'This username is already taken.']);
+    }
+    
+    // Generate 6-digit OTP
+    $otp = sprintf("%06d", random_int(0, 999999));
+    $otp_hash = password_hash($otp, PASSWORD_DEFAULT);
+    
+    // Store signup data and OTP in session
+    $_SESSION['signup_data'] = [
+        'first_name' => $_POST['first_name'],
+        'middle_initial' => $_POST['middle_initial'] ?? '',
+        'last_name' => $_POST['last_name'],
+        'suffix' => $_POST['suffix'] ?? '',
+        'email' => $email,
+        'username' => $username,
+        'password' => password_hash($password, PASSWORD_DEFAULT),
+        'otp_hash' => $otp_hash,
+        'otp_time' => time()
+    ];
+    
+    // Send OTP email
+    try {
+        $mail = new PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host = LOT_SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = LOT_SMTP_USER;
+        $mail->Password = LOT_SMTP_PASS;
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port = LOT_SMTP_PORT;
+        
+        $mail->setFrom(LOT_SMTP_FROM, LOT_SMTP_FROM_NAME);
+        $mail->addAddress($email);
+        
+        $mail->isHTML(true);
+        $mail->Subject = 'Verify Your Email - Buyoan National High School Registration';
+        
+        // Create email content with warning and options
+        $masked_email = substr($email, 0, 3) . '***@gmail.com';
+        $mail->Body = '
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+            <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #2c3e50; margin: 0;">🔐 Email Verification</h1>
+                    <p style="color: #7f8c8d; margin: 10px 0 0;">Buyoan National High School</p>
+                </div>
+                
+                <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin-bottom: 25px;">
+                    <p style="color: #856404; margin: 0; font-weight: bold;">⚠️ Security Notice</p>
+                    <p style="color: #856404; margin: 5px 0 0;">Someone is using your email to register on our website. If this is not you, you can safely ignore this message.</p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <p style="color: #2c3e50; font-size: 18px; margin: 0 0 10px;">Your verification code is:</p>
+                    <div style="background-color: #3498db; color: white; font-size: 32px; font-weight: bold; padding: 15px 30px; border-radius: 8px; letter-spacing: 5px; display: inline-block;">
+                        ' . $otp . '
+                    </div>
+                    <p style="color: #7f8c8d; font-size: 14px; margin: 15px 0 0;">This code will expire in 5 minutes</p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <p style="color: #7f8c8d; font-size: 14px; margin: 15px 0 0;">Visit our website for more information:</p>
+                    <a href="https://bunhs-web-based-information-system.up.railway.app" style="background-color: #27ae60; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 0 10px;">🌐 Visit BUNHS Website</a>
+                </div>
+                
+                <div style="border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #7f8c8d; font-size: 12px; margin: 0;">
+                        This email was sent to ' . $masked_email . '. If you did not request this registration, please ignore this message.
+                    </p>
+                </div>
+            </div>
+        </div>';
+        
+        $mail->AltBody = "Your verification code is: $otp\n\nThis code will expire in 5 minutes.\n\nIf you did not request this registration, please ignore this message.";
+        
+        $mail->send();
+        
+        send([
+            'success' => true, 
+            'message' => 'Verification code sent to your email.',
+            'masked_email' => $masked_email
+        ]);
+        
+    } catch (Exception $e) {
+        error_log("OTP email failed: " . $mail->ErrorInfo);
+        send(['success' => false, 'message' => 'Failed to send verification email. Please try again.']);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ACTION: verify_signup_otp
+// ══════════════════════════════════════════════════════════════════════════════
+if ($action === 'verify_signup_otp') {
+    if (empty($sess_csrf) || empty($csrf) || !hash_equals($sess_csrf, $csrf)) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        send(['success' => false, 'message' => 'Security validation failed. Please refresh and try again.']);
+    }
+    
+    if (!isset($_SESSION['signup_data'])) {
+        send(['success' => false, 'message' => 'Session expired. Please start over.']);
+    }
+    
+    $otp = $_POST['otp'] ?? '';
+    error_log("[OTP VERIFY] Received OTP: '{$otp}'");
+    
+    if (empty($otp) || !ctype_digit($otp) || strlen($otp) !== 6) {
+        error_log("[OTP VERIFY] Invalid OTP format: '{$otp}'");
+        send(['success' => false, 'message' => 'Invalid verification code.']);
+    }
+    
+    $signup_data = $_SESSION['signup_data'];
+    error_log("[OTP VERIFY] Stored OTP hash: '{$signup_data['otp_hash']}'");
+    error_log("[OTP VERIFY] Received OTP: '{$otp}'");
+    
+    // Check OTP expiration (5 minutes)
+    if (time() - $signup_data['otp_time'] > 300) {
+        error_log("[OTP VERIFY] OTP expired");
+        unset($_SESSION['signup_data']);
+        send(['success' => false, 'message' => 'Verification code expired. Please request a new one.']);
+    }
+    
+    // Verify OTP
+    $verify_result = password_verify($otp, $signup_data['otp_hash']);
+    error_log("[OTP VERIFY] Password verify result: " . ($verify_result ? 'SUCCESS' : 'FAILED'));
+    
+    if (!$verify_result) {
+        send(['success' => false, 'message' => 'Invalid verification code.']);
+    }
+    
+    // Insert user into database
+    try {
+        $stmt = $conn->prepare("
+            INSERT INTO sub_admin (first_name, middle_initial, last_name, suffix, email, username, password, status, created_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_approval', NOW())
+        ");
+        
+        $stmt->bind_param(
+            "sssssss", 
+            $signup_data['first_name'],
+            $signup_data['middle_initial'],
+            $signup_data['last_name'],
+            $signup_data['suffix'],
+            $signup_data['email'],
+            $signup_data['username'],
+            $signup_data['password']
+        );
+        
+        if ($stmt->execute()) {
+            // Clear session data
+            unset($_SESSION['signup_data']);
+            
+            // Send approval notification email
+            try {
+                $mail = new PHPMailer(true);
+                $mail->isSMTP();
+                $mail->Host = LOT_SMTP_HOST;
+                $mail->SMTPAuth = true;
+                $mail->Username = LOT_SMTP_USER;
+                $mail->Password = LOT_SMTP_PASS;
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                $mail->Port = LOT_SMTP_PORT;
+                
+                $mail->setFrom(LOT_SMTP_FROM, LOT_SMTP_FROM_NAME);
+                $mail->addAddress($signup_data['email']);
+                
+                $mail->isHTML(true);
+                $mail->Subject = 'Account Created - Pending Approval';
+                
+                $mail->Body = '
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                    <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <h1 style="color: #27ae60; margin: 0;">✅ Registration Successful</h1>
+                            <p style="color: #7f8c8d; margin: 10px 0 0;">Buyoan National High School</p>
+                        </div>
+                        
+                        <div style="background-color: #d1f2eb; border: 1px solid #27ae60; padding: 15px; border-radius: 5px; margin-bottom: 25px;">
+                            <p style="color: #27ae60; margin: 0; font-weight: bold;">📋 Account Status: Pending Approval</p>
+                            <p style="color: #27ae60; margin: 5px 0 0;">Your account has been created and is pending approval from the school administrator.</p>
+                        </div>
+                        
+                        <div style="margin: 20px 0;">
+                            <p style="color: #2c3e50; margin: 0;">Dear ' . htmlspecialchars($signup_data['first_name'] . ' ' . $signup_data['last_name']) . ',</p>
+                            <p style="color: #2c3e50; margin: 10px 0;">Thank you for registering with Buyoan National High School. Your account has been successfully created and is now pending approval from the school administrator.</p>
+                            <p style="color: #2c3e50; margin: 10px 0;">You will receive another email once your account has been approved and you can log in to the system.</p>
+                        </div>
+                        
+                        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                            <p style="color: #2c3e50; margin: 0; font-weight: bold;">Account Details:</p>
+                            <p style="color: #7f8c8d; margin: 5px 0;">Username: ' . htmlspecialchars($signup_data['username']) . '</p>
+                            <p style="color: #7f8c8d; margin: 5px 0;">Email: ' . htmlspecialchars($signup_data['email']) . '</p>
+                        </div>
+                        
+                        <div style="text-align: center; margin: 30px 0;">
+                            <p style="color: #7f8c8d; font-size: 14px;">If you have any questions, please contact the school administration.</p>
+                        </div>
+                    </div>
+                </div>';
+                
+                $mail->AltBody = "Your account has been created successfully and is pending approval from the school administrator.\n\nUsername: " . $signup_data['username'] . "\nEmail: " . $signup_data['email'];
+                
+                $mail->send();
+            } catch (Exception $e) {
+                error_log("Approval notification email failed: " . $mail->ErrorInfo);
+                // Continue even if email fails
+            }
+            
+            send(['success' => true, 'message' => 'Account created successfully! Your account is pending approval.']);
+        } else {
+            send(['success' => false, 'message' => 'Failed to create account. Please try again.']);
+        }
+    } catch (Exception $e) {
+        error_log("Database insertion failed: " . $e->getMessage());
+        send(['success' => false, 'message' => 'Database error. Please try again.']);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ACTION: resend_signup_otp
+// ══════════════════════════════════════════════════════════════════════════════
+if ($action === 'resend_signup_otp') {
+    $email = $_POST['email'] ?? '';
+    
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        send(['success' => false, 'message' => 'Valid email address required.']);
+    }
+    
+    // Generate new OTP
+    $otp = sprintf("%06d", random_int(0, 999999));
+    $otp_hash = password_hash($otp, PASSWORD_DEFAULT);
+    
+    // Update session data if exists
+    if (isset($_SESSION['signup_data'])) {
+        $_SESSION['signup_data']['otp_hash'] = $otp_hash;
+        $_SESSION['signup_data']['otp_time'] = time();
+    }
+    
+    // Send new OTP email
+    try {
+        $mail = new PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host = LOT_SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = LOT_SMTP_USER;
+        $mail->Password = LOT_SMTP_PASS;
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port = LOT_SMTP_PORT;
+        
+        $mail->setFrom(LOT_SMTP_FROM, LOT_SMTP_FROM_NAME);
+        $mail->addAddress($email);
+        
+        $mail->isHTML(true);
+        $mail->Subject = 'New Verification Code - Buyoan National High School';
+        
+        $masked_email = substr($email, 0, 3) . '***@gmail.com';
+        $mail->Body = '
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+            <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #3498db; margin: 0;">🔄 New Verification Code</h1>
+                    <p style="color: #7f8c8d; margin: 10px 0 0;">Buyoan National High School</p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <p style="color: #2c3e50; font-size: 18px; margin: 0 0 10px;">Your new verification code is:</p>
+                    <div style="background-color: #3498db; color: white; font-size: 32px; font-weight: bold; padding: 15px 30px; border-radius: 8px; letter-spacing: 5px; display: inline-block;">
+                        ' . $otp . '
+                    </div>
+                    <p style="color: #7f8c8d; font-size: 14px; margin: 15px 0 0;">This code will expire in 5 minutes</p>
+                </div>
+                
+                <div style="border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #7f8c8d; font-size: 12px; margin: 0;">
+                        This email was sent to ' . $masked_email . '. If you did not request this, please ignore this message.
+                    </p>
+                </div>
+            </div>
+        </div>';
+        
+        $mail->AltBody = "Your new verification code is: $otp\n\nThis code will expire in 5 minutes.";
+        
+        $mail->send();
+        
+        send(['success' => true, 'message' => 'New verification code sent to your email.']);
+        
+    } catch (Exception $e) {
+        error_log("Resend OTP email failed: " . $mail->ErrorInfo);
+        send(['success' => false, 'message' => 'Failed to send verification email. Please try again.']);
+    }
+}
+
 send(['success' => false, 'message' => 'Unknown action.']);
