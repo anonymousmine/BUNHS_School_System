@@ -8,7 +8,14 @@
 // ── Railway Environment Detection ───────────────────────────────────────
 $is_railway = isset($_SERVER['RAILWAY_ENVIRONMENT']) || 
                isset($_SERVER['RAILWAY_SERVICE_NAME']) ||
-               (isset($_SERVER['HTTP_X_FORWARDED_FOR']) && !empty($_SERVER['HTTP_X_FORWARDED_FOR']));
+               (isset($_SERVER['HTTP_X_FORWARDED_FOR']) && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) ||
+               (getenv('RAILWAY_ENVIRONMENT') !== false) ||
+               (getenv('RAILWAY_SERVICE_NAME') !== false) ||
+               (strpos($_SERVER['HTTP_HOST'] ?? '', 'railway.app') !== false);
+
+error_log("[ENV DETECTION] Is Railway: " . ($is_railway ? 'YES' : 'NO'));
+error_log("[ENV DETECTION] HTTP_HOST: " . ($_SERVER['HTTP_HOST'] ?? 'not set'));
+error_log("[ENV DETECTION] RAILWAY_ENVIRONMENT: " . (getenv('RAILWAY_ENVIRONMENT') ?? 'not set'));
 
 if ($is_railway) {
     // Railway environment - use Railway MySQL service variables
