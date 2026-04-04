@@ -5,9 +5,23 @@
  * Enhanced with multiple fallback strategies and detailed logging
  */
 
-// Include local database configuration for XAMPP testing
-if (file_exists(__DIR__ . '/local_db_config.php')) {
+// ── Environment Detection and Configuration Loading ───────────────────────────────
+// Check if we're on Railway (cloud environment)
+$is_railway = isset($_SERVER['RAILWAY_ENVIRONMENT']) || 
+               isset($_SERVER['RAILWAY_SERVICE_NAME']) ||
+               (isset($_SERVER['HTTP_X_FORWARDED_FOR']) && !empty($_SERVER['HTTP_X_FORWARDED_FOR']));
+
+if ($is_railway && file_exists(__DIR__ . '/railway_db_config.php')) {
+    // Railway deployment - use Railway-specific config
+    include_once __DIR__ . '/railway_db_config.php';
+    error_log("[DB] Using Railway configuration");
+} elseif (file_exists(__DIR__ . '/local_db_config.php')) {
+    // Local development - use local config
     include_once __DIR__ . '/local_db_config.php';
+    error_log("[DB] Using local configuration");
+} else {
+    // Fallback to environment variables
+    error_log("[DB] Using environment variables fallback");
 }
 
 // Prevent multiple inclusions

@@ -25,5 +25,4 @@ $_SERVER['DB_NAME'] = 'bunhs_db_important';
 $_SERVER['DB_PORT'] = '3306';
 $_SERVER['LOCAL_DB_SETUP'] = 'true';
 
-echo "<!-- Local DB Config Loaded -->";
 ?>

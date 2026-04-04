@@ -1,0 +1,28 @@
+# Railway deployment ignore file
+# These files should NOT be deployed to Railway
+
+# Local development files
+local_db_config.php
+
+# Development and testing files
+*_backup*.php
+*_temp*.php
+test_*.php
+quick_*.php
+fix_*.php
+debug_*.php
+
+# Logs
+logs/
+*.log
+
+# Cache
+cache/
+
+# Temporary files
+temp/
+tmp/
+
+# Development documentation
+README_dev.md
+*_dev.sql
