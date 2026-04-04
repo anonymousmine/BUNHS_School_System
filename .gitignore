@@ -71,3 +71,5 @@ coverage/
 
 # Local configuration
 config/local.php
+local_db_config.php
+railway_db_config.php
