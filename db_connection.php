@@ -6,23 +6,10 @@
  */
 
 // ── Environment Detection and Configuration Loading ───────────────────────────────
-// Check if we're on Railway (cloud environment)
-$is_railway = isset($_SERVER['RAILWAY_ENVIRONMENT']) || 
-               isset($_SERVER['RAILWAY_SERVICE_NAME']) ||
-               (isset($_SERVER['HTTP_X_FORWARDED_FOR']) && !empty($_SERVER['HTTP_X_FORWARDED_FOR']));
+// Use the unified database configuration for both Railway and local
+require_once __DIR__ . '/config/database.php';
 
-if ($is_railway && file_exists(__DIR__ . '/railway_db_config.php')) {
-    // Railway deployment - use Railway-specific config
-    include_once __DIR__ . '/railway_db_config.php';
-    error_log("[DB] Using Railway configuration");
-} elseif (file_exists(__DIR__ . '/local_db_config.php')) {
-    // Local development - use local config
-    include_once __DIR__ . '/local_db_config.php';
-    error_log("[DB] Using local configuration");
-} else {
-    // Fallback to environment variables
-    error_log("[DB] Using environment variables fallback");
-}
+error_log("[DB] Using unified database configuration");
 
 // Prevent multiple inclusions
 if (!defined('DB_CONNECTION_LOADED')) {
