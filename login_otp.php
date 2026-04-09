@@ -659,7 +659,7 @@ if ($action === 'verify_signup_otp') {
     try {
         $stmt = $conn->prepare("
             INSERT INTO sub_admin (first_name, middle_initial, last_name, suffix, email, username, password, status, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_approval', NOW())
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NOW())
         ");
         
         $stmt->bind_param(

@@ -317,9 +317,14 @@ function delete_news($conn, $id)
 
 function insert_event($conn)
 {
+    error_log("[EVENT] Insert event function called");
+    error_log("[EVENT] POST data: " . json_encode($_POST));
+    error_log("[EVENT] FILES data: " . json_encode(array_keys($_FILES)));
+    
     // Server-side validation
     $validation_errors = validateEventInput($_POST);
     if (!empty($validation_errors)) {
+        error_log("[EVENT] Validation errors: " . implode(', ', $validation_errors));
         echo json_encode(['status' => 'error', 'message' => implode(', ', $validation_errors)]);
         return false;
     }
@@ -339,10 +344,13 @@ function insert_event($conn)
     $source           = !empty($_POST['event_source']) ? sanitizeInput($_POST['event_source'], 'string') : null;
     $is_official      = isset($_POST['is_official']) ? 1 : 0;
 
+    error_log("[EVENT] Processed data - Title: $title, Date: $event_date, Category: $category");
+
     if ($event_days < 1) $event_days = 1;
 
     // Validate time logic
     if ($event_start_time && $event_end_time && $event_start_time >= $event_end_time) {
+        error_log("[EVENT] Time validation failed - Start: $event_start_time, End: $event_end_time");
         echo json_encode(['status' => 'error', 'message' => 'End time must be after start time.']);
         return false;
     }
@@ -350,8 +358,10 @@ function insert_event($conn)
     // Handle image upload with security validation
     $image = '';
     if (isset($_FILES['event_image']) && $_FILES['event_image']['error'] != UPLOAD_ERR_NO_FILE) {
+        error_log("[EVENT] Processing image upload");
         $file_errors = validateFileUpload($_FILES['event_image']);
         if (!empty($file_errors)) {
+            error_log("[EVENT] File upload errors: " . implode(', ', $file_errors));
             echo json_encode(['status' => 'error', 'message' => implode(', ', $file_errors)]);
             return false;
         }
@@ -364,17 +374,22 @@ function insert_event($conn)
         
         if (move_uploaded_file($_FILES['event_image']['tmp_name'], $target_file)) {
             $image = $filename;
+            error_log("[EVENT] Image uploaded successfully: $filename");
         } else {
+            error_log("[EVENT] Failed to move uploaded file");
             echo json_encode(['status' => 'error', 'message' => 'Failed to save uploaded file.']);
             return false;
         }
     }
 
+    error_log("[EVENT] Preparing database insert");
     $stmt = $conn->prepare("INSERT INTO events (title, description, event_date, category, event_start_time, event_end_time, event_days, team_based, location, image, organizer_name, organizer_position, organizer_contact, source, is_official, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
     $stmt->bind_param("ssssssiisssssii", $title, $description, $event_date, $category, $event_start_time, $event_end_time, $event_days, $team_based, $location, $image, $organizer_name, $organizer_pos, $organizer_contact, $source, $is_official);
     $success = $stmt->execute();
     $new_id  = $conn->insert_id;
     $stmt->close();
+
+    error_log("[EVENT] Database insert result: " . ($success ? 'SUCCESS' : 'FAILED') . ", New ID: $new_id");
 
     if ($success && $new_id) {
         // Save highlights
@@ -753,8 +768,7 @@ function insert_deped_calendar_events($conn)
             $success_count++;
         }
         $stmt->close();
-    }
-    
+    } 
     return $success_count;
 }
 
@@ -762,60 +776,90 @@ function insert_deped_calendar_events($conn)
 //  AJAX REQUEST HANDLER
 // ============================================================
 if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
+    // Clean any output buffer to prevent HTML mixing with JSON
+    if (ob_get_length()) ob_clean();
+    
+    // Set JSON header
     header('Content-Type: application/json');
+    
+    // Debug: Log AJAX request
+    error_log("[AJAX] Request received: " . json_encode($_POST));
 
     if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         // Validate CSRF token for all POST requests
         if (!validateEventCSRFToken($_POST['csrf_token'] ?? '')) {
+            error_log("[AJAX] CSRF validation failed");
             echo json_encode(['status' => 'error', 'message' => 'Security token expired. Please refresh the page.']);
             exit;
         }
 
         $action = sanitizeInput($_POST['action'], 'string');
+        error_log("[AJAX] Processing action: $action");
 
         // ---------- existing actions ----------
         if ($action == 'add_event') {
             $success = insert_event($conn);
-            echo json_encode($success ? ['status' => 'success', 'message' => 'Event created!'] : ['status' => 'error', 'message' => 'Error creating event.']);
+            $response = $success ? ['status' => 'success', 'message' => 'Event created!'] : ['status' => 'error', 'message' => 'Error creating event.'];
+            error_log("[AJAX] Response: " . json_encode($response));
+            echo json_encode($response);
             exit;
         }
         if ($action == 'update_event' && isset($_POST['event_id'])) {
             $event_id = intval($_POST['event_id']);
             $success = update_event_details($conn, $event_id);
-            echo json_encode($success ? ['status' => 'success', 'message' => 'Event updated successfully!'] : ['status' => 'error', 'message' => 'Error updating event.']);
+            $response = $success ? ['status' => 'success', 'message' => 'Event updated successfully!'] : ['status' => 'error', 'message' => 'Error updating event.'];
+            error_log("[AJAX] Response: " . json_encode($response));
+            echo json_encode($response);
             exit;
         }
         if ($action == 'delete_event' && isset($_POST['id'])) {
             $success = delete_event($conn, $_POST['id']);
-            echo json_encode($success ? ['status' => 'success', 'message' => 'Deleted.'] : ['status' => 'error', 'message' => 'Error.']);
+            $response = $success ? ['status' => 'success', 'message' => 'Deleted.'] : ['status' => 'error', 'message' => 'Error.'];
+            error_log("[AJAX] Response: " . json_encode($response));
+            echo json_encode($response);
             exit;
         }
         if ($action == 'get_events' && isset($_POST['year'], $_POST['month'])) {
             $events = get_events_by_month($conn, $_POST['year'], $_POST['month']);
-            echo json_encode(['status' => 'success', 'events' => $events]);
+            $response = ['status' => 'success', 'events' => $events];
+            error_log("[AJAX] Events retrieved: " . count($events) . " for {$_POST['year']}-{$_POST['month']}");
+            echo json_encode($response);
             exit;
         }
         if ($action == 'get_all_events') {
-            echo json_encode(['status' => 'success', 'events' => get_all_events($conn)]);
+            $events = get_all_events($conn);
+            $response = ['status' => 'success', 'events' => $events];
+            error_log("[AJAX] All events retrieved: " . count($events));
+            echo json_encode($response);
             exit;
         }
         if ($action == 'get_upcoming_events') {
             $limit = isset($_POST['limit']) ? intval($_POST['limit']) : 10;
-            echo json_encode(['status' => 'success', 'events' => get_upcoming_events($conn, $limit)]);
+            $events = get_upcoming_events($conn, $limit);
+            $response = ['status' => 'success', 'events' => $events];
+            error_log("[AJAX] Upcoming events retrieved: " . count($events));
+            echo json_encode($response);
             exit;
         }
         if ($action == 'get_featured_events') {
-            echo json_encode(['status' => 'success', 'events' => get_featured_events($conn)]);
+            $events = get_featured_events($conn);
+            $response = ['status' => 'success', 'events' => $events];
+            error_log("[AJAX] Featured events retrieved: " . count($events));
+            echo json_encode($response);
             exit;
         }
         if ($action == 'delete' && isset($_POST['id'])) {
             $success = delete_news($conn, $_POST['id']);
-            echo json_encode($success ? ['status' => 'success', 'message' => 'Deleted.'] : ['status' => 'error', 'message' => 'Error.']);
+            $response = $success ? ['status' => 'success', 'message' => 'Deleted.'] : ['status' => 'error', 'message' => 'Error.'];
+            error_log("[AJAX] News delete response: " . json_encode($response));
+            echo json_encode($response);
             exit;
         }
         if ($action == 'get_event' && isset($_POST['event_id'])) {
             $ev = get_event_by_id($conn, intval($_POST['event_id']));
-            echo json_encode($ev ? ['status' => 'success', 'event' => $ev] : ['status' => 'error', 'message' => 'Not found.']);
+            $response = $ev ? ['status' => 'success', 'event' => $ev] : ['status' => 'error', 'message' => 'Not found.'];
+            error_log("[AJAX] Event retrieved: " . ($ev ? 'SUCCESS' : 'NOT FOUND'));
+            echo json_encode($response);
             exit;
         }
 
@@ -937,8 +981,8 @@ $all_applications = get_all_applications($conn);
     <link rel="stylesheet" href="/BUNHS_School_System/admin_account/admin_assets/cs/admin_style.css?v=20260326">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <link href="/BUNHS_School_System/assets/vendor/bootstrap/css/bootstrap.min.css?v=20260326" rel="stylesheet">
-    <link href="/BUNHS_School_System/assets/vendor/bootstrap-icons/bootstrap-icons.css?v=20260326" rel="stylesheet">
     <link href="/BUNHS_School_System/assets/css/main.css?v=20260326" rel="stylesheet">
     <style>
         /* ============================================================
@@ -2879,34 +2923,54 @@ $all_applications = get_all_applications($conn);
         // Override main.js functions that might cause errors
         const preventMainJSErrors = function() {
             // Prevent toggleScrolled errors
-            const originalToggleScrolled = window.toggleScrolled;
-            if (typeof originalToggleScrolled === 'function') {
+            if (typeof window.toggleScrolled === 'function') {
+                const originalToggleScrolled = window.toggleScrolled;
                 window.toggleScrolled = function() {
                     try {
-                        const element = document.querySelector('header, .topbar, .navbar');
-                        if (element && element.classList) {
-                            return originalToggleScrolled.apply(this, arguments);
+                        const selectBody = document.querySelector('body');
+                        const selectHeader = document.querySelector('#header');
+                        if (!selectBody || !selectHeader) {
+                            console.warn('🐞 DEBUG: toggleScrolled elements not found, skipping');
+                            return;
                         }
+                        if (!selectHeader.classList || !selectHeader.classList.contains) {
+                            console.warn('🐞 DEBUG: header element missing classList, skipping');
+                            return;
+                        }
+                        if (!selectHeader.classList.contains('scroll-up-sticky') && 
+                            !selectHeader.classList.contains('sticky-top') && 
+                            !selectHeader.classList.contains('fixed-top')) {
+                            return;
+                        }
+                        return originalToggleScrolled.apply(this, arguments);
                     } catch (e) {
-                        console.warn('toggleScrolled error prevented:', e);
+                        console.warn('🐞 DEBUG: toggleScrolled error prevented:', e);
                     }
                 };
             }
             
-            // Prevent addEventListener errors
-            const elementsThatMightNotExist = [
-                '.hamburger-btn',
-                '.search input',
-                '.user-dropdown',
-                '.notification-btn'
-            ];
+            // Prevent mobile nav toggle errors
+            const mobileNavToggleBtn = document.querySelector('.mobile-nav-toggle');
+            if (mobileNavToggleBtn && typeof mobileNavToggleBtn.addEventListener === 'function') {
+                // Element exists and has addEventListener - safe to use
+                console.log('🐞 DEBUG: mobile-nav-toggle found and safe');
+            } else {
+                console.warn('🐞 DEBUG: mobile-nav-toggle not found or missing addEventListener');
+            }
             
-            elementsThatMightNotExist.forEach(selector => {
-                const element = document.querySelector(selector);
-                if (element && element.addEventListener) {
-                    // Element exists and has addEventListener - safe to use
+            // Prevent other main.js errors by safely overriding common functions
+            const safeAddEventListener = (element, event, handler) => {
+                if (element && typeof element.addEventListener === 'function') {
+                    element.addEventListener(event, handler);
+                } else {
+                    console.warn('🐞 DEBUG: Element not found for event listener:', element);
                 }
-            });
+            };
+            
+            // Store safe version globally
+            window.safeAddEventListener = safeAddEventListener;
+            
+            console.log('🐞 DEBUG: Main.js error prevention enabled');
         };
 
         // ============================================================
@@ -3220,23 +3284,46 @@ $all_applications = get_all_applications($conn);
 
         function loadEventsForMonth(year, month) {
             console.log('🐞 DEBUG: Loading events for', year, month);
+            
+            // Clear previous events data
+            eventsData = {};
+            
             ajaxPost({
                 action: 'get_events',
                 year,
                 month
             }).then(data => {
                 console.log('🐞 DEBUG: Events response:', data);
-                if (data.status === 'success') {
-                    eventsData = {};
+                
+                if (data.status === 'success' && Array.isArray(data.events)) {
+                    // Process events data
                     data.events.forEach(ev => {
                         const k = ev.event_date;
                         if (!eventsData[k]) eventsData[k] = [];
                         eventsData[k].push(ev);
                     });
+                    
                     console.log('🐞 DEBUG: Processed eventsData:', eventsData);
+                    console.log('🐞 DEBUG: Total events loaded:', data.events.length);
+                    
+                    // Re-render calendar with new data
+                    renderCalendar(currentYear, currentMonth);
+                    
+                    // Show success message if events found
+                    if (data.events.length > 0) {
+                        console.log('🐞 DEBUG: Successfully loaded', data.events.length, 'events');
+                    }
+                } else {
+                    console.warn('🐞 DEBUG: No events or invalid response:', data);
+                    // Still render calendar even with no events
                     renderCalendar(currentYear, currentMonth);
                 }
-            }).catch(e => console.error('🐞 DEBUG: Error loading events:', e));
+            }).catch(error => {
+                console.error('🐞 DEBUG: Error loading events:', error);
+                showToast('Error loading calendar events', 'error');
+                // Still attempt to render calendar
+                renderCalendar(currentYear, currentMonth);
+            });
         }
 
         function formatEventDateRange(dateStr, days) {
@@ -3294,13 +3381,22 @@ $all_applications = get_all_applications($conn);
                 limit: 10
             }).then(data => {
                 const c = document.getElementById('eventsListContainer');
+                if (!c) {
+                    console.warn('🐞 DEBUG: eventsListContainer element not found');
+                    return;
+                }
+                
                 if (data.status === 'success' && data.events.length > 0) {
                     c.innerHTML = data.events.map(createEventHTML).join('');
                 } else {
                     c.innerHTML = '<div class="text-center py-5"><p class="text-muted">No upcoming events. Click on a date in the calendar to add one!</p></div>';
                 }
-            }).catch(() => {
-                document.getElementById('eventsListContainer').innerHTML = '<div class="text-center py-5"><p class="text-muted">Error loading events.</p></div>';
+            }).catch(error => {
+                console.error('🐞 DEBUG: Error loading upcoming events:', error);
+                const c = document.getElementById('eventsListContainer');
+                if (c) {
+                    c.innerHTML = '<div class="text-center py-5"><p class="text-muted">Error loading events.</p></div>';
+                }
             });
         }
 
@@ -4464,126 +4560,73 @@ $all_applications = get_all_applications($conn);
             }).catch(() => showToast('Error reloading events table.', 'error'));
         }
 
-        function deleteEvent(eventId, eventTitle) {
-            if (!confirm(`Are you sure you want to delete "${eventTitle}"? This action cannot be undone.`)) {
-                return;
-            }
-            
-            // Show loading on the delete button
-            const deleteBtn = document.querySelector(`#event-row-${eventId} .btn-outline-danger`);
-            if (deleteBtn) {
-                deleteBtn.disabled = true;
-                deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Deleting...';
-            }
-            
-            ajaxPost({
-                action: 'delete_event',
-                id: eventId
-            }).then(data => {
-                if (data.status === 'success') {
-                    showToast('Event deleted successfully.', 'success');
-                    // Remove row from table
-                    const row = document.getElementById(`event-row-${eventId}`);
-                    if (row) row.remove();
-                    // Refresh other components
-                    loadUpcomingEvents();
-                    loadEventsForMonth(currentYear, currentMonth + 1);
-                } else {
-                    showToast('Error deleting event: ' + (data.message || 'Unknown error'), 'error');
-                    // Restore button state on error
-                    if (deleteBtn) {
-                        deleteBtn.disabled = false;
-                        deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
-                    }
-                }
-            }).catch(() => {
-                showToast('Error deleting event.', 'error');
-                // Restore button state on error
-                if (deleteBtn) {
-                    deleteBtn.disabled = false;
-                    deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
-                }
-            });
-        }
-
-        // Search and filter functionality
-        document.getElementById('eventSearchInput')?.addEventListener('input', function() {
-            filterEventsTable();
-        });
-
-        document.getElementById('eventCategoryFilter')?.addEventListener('change', function() {
-            filterEventsTable();
-        });
-
-        document.getElementById('eventStatusFilter')?.addEventListener('change', function() {
-            filterEventsTable();
-        });
-
-        function filterEventsTable() {
-            const searchTerm = document.getElementById('eventSearchInput')?.value.toLowerCase() || '';
-            const categoryFilter = document.getElementById('eventCategoryFilter')?.value || '';
-            const statusFilter = document.getElementById('eventStatusFilter')?.value || '';
-            
-            const rows = document.querySelectorAll('#eventsManagementBody tr');
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            rows.forEach(row => {
-                if (row.cells.length === 1) return; // Skip "no events" row
-                
-                const title = row.cells[1].textContent.toLowerCase();
-                const category = row.cells[2].textContent.trim();
-                const dateText = row.cells[0].textContent.trim();
-                const statusBadge = row.cells[4].querySelector('.status-badge');
-                const status = statusBadge ? statusBadge.textContent.trim().toLowerCase() : '';
-                
-                // Extract date from the date cell
-                const dateMatch = dateText.match(/(\w{3})\s(\d{1,2})/);
-                let eventDate = null;
-                if (dateMatch) {
-                    const month = new Date(Date.parse(dateMatch[1] + " 1, 2020")).getMonth();
-                    const day = parseInt(dateMatch[2]);
-                    const year = parseInt(dateText.match(/\d{4}/)?.[0] || new Date().getFullYear());
-                    eventDate = new Date(year, month, day);
-                }
-                
-                let matchesSearch = !searchTerm || title.includes(searchTerm);
-                let matchesCategory = !categoryFilter || category === categoryFilter;
-                let matchesStatus = true;
-                
-                if (statusFilter === 'upcoming') {
-                    matchesStatus = eventDate && eventDate >= today;
-                } else if (statusFilter === 'past') {
-                    matchesStatus = eventDate && eventDate < today;
-                } else if (statusFilter === 'official') {
-                    matchesStatus = status.includes('official');
-                }
-                
-                row.style.display = matchesSearch && matchesCategory && matchesStatus ? '' : 'none';
-            });
-        }
-
         // ============================================================
-        //  INIT
+        //  INIT - Enhanced with comprehensive null checks
         // ============================================================
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('🐞 DEBUG: DOM loaded, initializing system...');
+            
             // First prevent main.js errors
-            preventMainJSErrors();
+            if (typeof preventMainJSErrors === 'function') {
+                preventMainJSErrors();
+            }
             
             // Then load navigation
-            loadNavigation();
+            if (typeof loadNavigation === 'function') {
+                loadNavigation();
+            }
             
-            // Finally initialize calendar
-            initCalendar();
+            // Initialize calendar with error handling
+            try {
+                if (typeof initCalendar === 'function') {
+                    initCalendar();
+                }
+            } catch (error) {
+                console.error('🐞 DEBUG: Calendar initialization failed:', error);
+                showToast('Calendar initialization failed', 'error');
+            }
             
-            // Initialize event filtering
+            // Initialize event filtering with null checks
             const eventSearchInput = document.getElementById('eventSearchInput');
             const eventCategoryFilter = document.getElementById('eventCategoryFilter');
             const eventStatusFilter = document.getElementById('eventStatusFilter');
             
-            if (eventSearchInput) eventSearchInput.addEventListener('input', filterEventsTable);
-            if (eventCategoryFilter) eventCategoryFilter.addEventListener('change', filterEventsTable);
-            if (eventStatusFilter) eventStatusFilter.addEventListener('change', filterEventsTable);
+            if (eventSearchInput && typeof filterEventsTable === 'function') {
+                eventSearchInput.addEventListener('input', filterEventsTable);
+                console.log('🐞 DEBUG: Event search filter initialized');
+            }
+            
+            if (eventCategoryFilter && typeof filterEventsTable === 'function') {
+                eventCategoryFilter.addEventListener('change', filterEventsTable);
+                console.log('🐞 DEBUG: Event category filter initialized');
+            }
+            
+            if (eventStatusFilter && typeof filterEventsTable === 'function') {
+                eventStatusFilter.addEventListener('change', filterEventsTable);
+                console.log('🐞 DEBUG: Event status filter initialized');
+            }
+            
+            // Initialize form validators if elements exist
+            const eventForm = document.getElementById('eventForm');
+            if (eventForm && typeof FormValidator !== 'undefined') {
+                try {
+                    // Form validation is already initialized inline
+                    console.log('🐞 DEBUG: Event form validation ready');
+                } catch (error) {
+                    console.error('🐞 DEBUG: Form validation initialization failed:', error);
+                }
+            }
+            
+            const editEventForm = document.getElementById('editEventForm');
+            if (editEventForm && typeof FormValidator !== 'undefined') {
+                try {
+                    console.log('🐞 DEBUG: Edit event form validation ready');
+                } catch (error) {
+                    console.error('🐞 DEBUG: Edit form validation initialization failed:', error);
+                }
+            }
+            
+            console.log('🐞 DEBUG: System initialization completed');
         });
 
     </script>

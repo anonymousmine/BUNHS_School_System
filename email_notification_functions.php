@@ -165,23 +165,78 @@ function log_notification($conn, $email, $notification_type, $item_id, $status, 
     }
 }
 
+// Send email using PHPMailer for event notifications
+function sendEventEmail($email, $subject, $body) {
+    try {
+        require_once 'vendor/autoload.php';
+        
+        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+        
+        $mail->isSMTP();
+        $mail->Host = 'smtp.gmail.com';
+        $mail->SMTPAuth = true;
+        $mail->Username = 'bunhs.deped@gmail.com';
+        $mail->Password = 'svhiovmxalojxzxg';
+        $mail->SMTPSecure = 'tls';
+        $mail->Port = 587;
+        
+        $mail->setFrom('bunhs.deped@gmail.com', 'Buyoan National High School');
+        $mail->addAddress($email);
+        
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        $mail->Body = $body;
+        
+        return $mail->send();
+    } catch (Exception $e) {
+        error_log("[EMAIL] PHPMailer Error: " . $e->getMessage());
+        return false;
+    }
+}
+
 // Send notifications to all subscribers for new event
 function notify_subscribers_new_event($conn, $event_id) {
-    // Get event details
-    $stmt = $conn->prepare("SELECT title, description, event_date, category, location FROM events WHERE id = ?");
+    error_log("[EMAIL] Starting notification for event ID: $event_id");
+    
+    // Get event details with more comprehensive query
+    $stmt = $conn->prepare("SELECT title, description, event_date, category, location, event_start_time, event_end_time, organizer_name, organizer_position FROM events WHERE id = ?");
     $stmt->bind_param("i", $event_id);
     $stmt->execute();
     $result = $stmt->get_result();
     $event = $result->fetch_assoc();
     $stmt->close();
 
-    if (!$event) return false;
+    if (!$event) {
+        error_log("[EMAIL] Event not found for ID: $event_id");
+        return false;
+    }
+
+    error_log("[EMAIL] Event data retrieved: " . json_encode($event));
 
     $subscribers = get_active_subscribers($conn);
     $success_count = 0;
 
     foreach ($subscribers as $subscriber) {
         $subject = "New Event: " . $event['title'];
+        
+        // Enhanced HTML template with all event details
+        $time_info = '';
+        if ($event['event_start_time']) {
+            $time_info = '<p style="color:#555;margin:5px 0;font-size:13px;"><strong>Time:</strong> ' . $event['event_start_time'];
+            if ($event['event_end_time']) {
+                $time_info .= ' - ' . $event['event_end_time'];
+            }
+            $time_info .= '</p>';
+        }
+
+        $organizer_info = '';
+        if ($event['organizer_name']) {
+            $organizer_info = '<p style="color:#555;margin:5px 0;font-size:13px;"><strong>Organizer:</strong> ' . htmlspecialchars($event['organizer_name'], ENT_QUOTES);
+            if ($event['organizer_position']) {
+                $organizer_info .= ' (' . htmlspecialchars($event['organizer_position'], ENT_QUOTES) . ')';
+            }
+            $organizer_info .= '</p>';
+        }
         
         // Professional HTML template matching OTP style
         $body = "
@@ -197,7 +252,9 @@ function notify_subscribers_new_event($conn, $event_id) {
             <div style='background:#f4faf7;border:2px solid #2d6a4f;border-radius:10px;padding:20px;margin-bottom:20px;'>
               <h3 style='color:#1a3a2a;margin:0 0 10px;font-size:18px;'>" . htmlspecialchars($event['title'], ENT_QUOTES) . "</h3>
               <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Date:</strong> " . date('F j, Y', strtotime($event['event_date'])) . "</p>
-              <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Category:</strong> " . htmlspecialchars($event['category'], ENT_QUOTES) . "</p>";
+              <p style='color:#555;margin:5px 0;font-size:13px;'><strong>Category:</strong> " . htmlspecialchars($event['category'], ENT_QUOTES) . "</p>
+              $time_info
+              $organizer_info";
         
         if (!empty($event['location'])) {
             $body .= "<p style='color:#555;margin:5px 0;font-size:13px;'><strong>Location:</strong> " . htmlspecialchars($event['location'], ENT_QUOTES) . "</p>";
@@ -208,22 +265,35 @@ function notify_subscribers_new_event($conn, $event_id) {
             
             <div style='background:#f8f5f0;padding:16px;border-radius:8px;margin:20px 0;'>
               <p style='color:#666;font-size:13px;margin:0;'><strong>Event Details:</strong></p>
-              <p style='color:#555;font-size:13px;margin:8px 0 0;line-height:1.5;'>" . nl2br(htmlspecialchars($event['description'], ENT_QUOTES)) . "</p>
+              <p style='color:#555;font-size:13px;margin:8px 0 0;line-height:1.5;'>" . nl2br(htmlspecialchars($event['description'] ?? 'No description provided', ENT_QUOTES)) . "</p>
+            </div>
+            
+            <div style='text-align:center;margin:30px 0 20px;'>
+              <a href='http://localhost/BUNHS_School_System/events.php' style='display:inline-block;background:#1a3a2a;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:500;font-size:14px;'>View Event Calendar</a>
             </div>
             
             <p style='color:#888;font-size:12px;margin:20px 0 0;'>This event is open to all students, parents, and staff members.</p>
+            <p style='color:#888;font-size:12px;margin:5px 0 0;'>If you no longer wish to receive these notifications, you can unsubscribe at any time.</p>
           </div>
-          <div style='background:#f8f5f0;padding:16px 32px;border-radius:0 0 12px 12px;text-align:center;'>
-            <p style='color:#aaa;font-size:11px;margin:0;'>Buyoan National High School &bull; Official Event Notification</p>
-            <p style='color:#aaa;font-size:10px;margin:4px 0 0;'>You received this because you subscribed to event notifications.</p>
+          
+          <div style='background:#1a3a2a;padding:20px;text-align:center;border-radius:0 0 12px 12px;'>
+            <p style='color:rgba(255,255,255,.6);margin:0;font-size:11px;'>Buyoan National High School &copy; 2026</p>
+            <p style='color:rgba(255,255,255,.4);margin:5px 0 0;font-size:10px;'>DepEd Region IV-A CALABARZON</p>
           </div>
         </div>";
-
-        if (send_email_notification($conn, $subscriber['email'], $subject, $body, 'event', $event_id)) {
+        
+        // Send email using PHPMailer
+        $email_sent = sendEventEmail($subscriber['email'], $subject, $body);
+        
+        if ($email_sent) {
             $success_count++;
+            error_log("[EMAIL] Email sent successfully to: " . $subscriber['email']);
+        } else {
+            error_log("[EMAIL] Failed to send email to: " . $subscriber['email']);
         }
     }
-
+    
+    error_log("[EMAIL] Notification completed. Sent to $success_count out of " . count($subscribers) . " subscribers");
     return $success_count;
 }
 

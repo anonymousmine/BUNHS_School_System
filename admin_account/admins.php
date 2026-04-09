@@ -48,9 +48,12 @@ function validateAdminCSRFToken($token) {
 function sendNotification($email, $phone, $subject, $message, $type = 'email') {
     $success = false;
     
+    error_log("[NOTIFICATION] Sending notification - Email: $email, Phone: $phone, Type: $type");
+    
     // Send email notification
     if (!empty($email) && ($type === 'email' || $type === 'both')) {
         $success = sendEmailNotification($email, $subject, $message);
+        error_log("[NOTIFICATION] Email notification result: " . ($success ? 'SUCCESS' : 'FAILED'));
     }
     
     // Send SMS notification (if phone number provided and SMS service is available)
@@ -59,11 +62,15 @@ function sendNotification($email, $phone, $subject, $message, $type = 'email') {
         if ($smsSuccess) $success = true;
     }
     
+    error_log("[NOTIFICATION] Overall notification result: " . ($success ? 'SUCCESS' : 'FAILED'));
     return $success;
 }
 
 function sendEmailNotification($email, $subject, $message) {
     try {
+        error_log("[EMAIL] Sending email to: $email");
+        error_log("[EMAIL] Subject: $subject");
+        
         // Use PHPMailer for email sending
         require_once '../vendor/autoload.php';
         
@@ -84,10 +91,15 @@ function sendEmailNotification($email, $subject, $message) {
         $mail->Subject = $subject;
         $mail->Body = $message;
         
-        $mail->send();
-        return true;
+        if ($mail->send()) {
+            error_log("[EMAIL] Email sent successfully to: $email");
+            return true;
+        } else {
+            error_log("[EMAIL] Email send failed to: $email");
+            return false;
+        }
     } catch (Exception $e) {
-        error_log("Email sending failed: " . $e->getMessage());
+        error_log("[EMAIL] Email sending failed: " . $e->getMessage());
         return false;
     }
 }
@@ -462,6 +474,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $user_data = $user_stmt->get_result()->fetch_assoc();
             $user_stmt->close();
             
+            error_log("[APPROVE] Approving sub-admin ID: $raw_id");
+            error_log("[APPROVE] User data: " . ($user_data ? "Email: {$user_data['email']}, Name: {$user_data['first_name']} {$user_data['last_name']}" : "NOT FOUND"));
+            
             $stmt = $conn->prepare("UPDATE sub_admin SET status='approved', approved_at=NOW() WHERE id=?");
             $stmt->bind_param('i', $raw_id);
             if ($stmt->execute()) {
@@ -470,16 +485,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 // Send approval notification
                 if ($user_data) {
                     $notification = getNotificationMessage('approved', $user_data['first_name'], $user_data['last_name']);
-                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                    error_log("[APPROVE] Sending approval notification...");
+                    $notification_sent = sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                    error_log("[APPROVE] Notification sent: " . ($notification_sent ? 'SUCCESS' : 'FAILED'));
+                } else {
+                    error_log("[APPROVE] No user data found for notification");
                 }
                 
                 $_SESSION['success'] = "Sub-admin approved successfully.";
             } else {
                 $_SESSION['error'] = "Approval failed: " . $conn->error;
+                error_log("[APPROVE] Database update failed: " . $conn->error);
             }
             $stmt->close();
         } elseif ($action === 'reject') {
             $reason = trim($_POST['reject_reason'] ?? '');
+            
+            error_log("[REJECT] Rejecting sub-admin ID: $raw_id");
+            error_log("[REJECT] Reason: $reason");
             
             // Get user details for notification
             $user_stmt = $conn->prepare("SELECT first_name, last_name, email, phone FROM sub_admin WHERE id = ?");
@@ -487,6 +510,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $user_stmt->execute();
             $user_data = $user_stmt->get_result()->fetch_assoc();
             $user_stmt->close();
+            
+            error_log("[REJECT] User data: " . ($user_data ? "Email: {$user_data['email']}, Name: {$user_data['first_name']} {$user_data['last_name']}" : "NOT FOUND"));
             
             $stmt = $conn->prepare("UPDATE sub_admin SET status='rejected', reject_reason=?, rejected_at=NOW() WHERE id=?");
             $stmt->bind_param('si', $reason, $raw_id);
@@ -496,12 +521,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 // Send rejection notification
                 if ($user_data) {
                     $notification = getNotificationMessage('rejected', $user_data['first_name'], $user_data['last_name'], $reason);
-                    sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                    error_log("[REJECT] Sending rejection notification...");
+                    $notification_sent = sendNotification($user_data['email'], $user_data['phone'], $notification['subject'], $notification['message']);
+                    error_log("[REJECT] Notification sent: " . ($notification_sent ? 'SUCCESS' : 'FAILED'));
+                } else {
+                    error_log("[REJECT] No user data found for notification");
                 }
                 
                 $_SESSION['success'] = "Sub-admin has been rejected.";
             } else {
                 $_SESSION['error'] = "Rejection failed: " . $conn->error;
+                error_log("[REJECT] Database update failed: " . $conn->error);
             }
             $stmt->close();
         } elseif ($action === 'delete') {
@@ -702,6 +732,14 @@ $count_rejected  = $conn->query("SELECT COUNT(*) c FROM sub_admin WHERE status='
 $count_suspended = $conn->query("SELECT COUNT(*) c FROM sub_admin WHERE status='suspended'")->fetch_assoc()['c'] ?? 0;
 $count_active    = $conn->query("SELECT COUNT(*) c FROM sub_admin WHERE status='approved' AND last_active >= DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetch_assoc()['c'] ?? 0;
 
+// Debug: Check all sub_admin records
+$all_records = $conn->query("SELECT id, first_name, last_name, email, username, status, created_at FROM sub_admin ORDER BY id DESC LIMIT 10");
+error_log("[ADMINS] All sub_admin records (last 10):");
+while ($record = $all_records->fetch_assoc()) {
+    error_log("[ADMINS] ID: {$record['id']}, Name: {$record['first_name']} {$record['last_name']}, Email: {$record['email']}, Status: {$record['status']}, Created: {$record['created_at']}");
+}
+error_log("[ADMINS] Stats - Pending: $count_pending, Approved: $count_approved, Rejected: $count_rejected, Suspended: $count_suspended");
+
 /* ── Build dynamic WHERE for approved/suspended tabs ── */
 function buildWhereClause($conn, $filter_role, $filter_status, $filter_last_active, $filter_date_from, $filter_date_to, $search_q, $base_statuses)
 {
@@ -755,6 +793,8 @@ $pending_subadmins = [];
 [$w, $t, $p] = buildWhereClause($conn, $filter_role, '', $filter_last_active, $filter_date_from, $filter_date_to, $search_q, ['pending']);
 $pagination_pending = getPaginationData($current_page, $count_pending, $per_page);
 $sql = "SELECT * FROM sub_admin $w ORDER BY id DESC LIMIT {$pagination_pending['per_page']} OFFSET {$pagination_pending['offset']}";
+error_log("[ADMINS] Pending query: $sql");
+error_log("[ADMINS] Count pending: $count_pending");
 $stmt = $conn->prepare($sql);
 if (!empty($p)) {
     $stmt->bind_param($t, ...$p);
@@ -763,6 +803,7 @@ $stmt->execute();
 $r = $stmt->get_result();
 while ($row = $r->fetch_assoc()) $pending_subadmins[] = $row;
 $stmt->close();
+error_log("[ADMINS] Pending subadmins found: " . count($pending_subadmins));
 
 /* ── Fetch approved + suspended (with pagination) ── */
 $approved_subadmins = [];

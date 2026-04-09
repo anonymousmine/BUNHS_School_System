@@ -30,6 +30,8 @@
             <ul>
                 <li><a href="about.php">About Us</a></li>
                 <li><a href="faculty-staff.php">Faculty &amp; Staff</a></li>
+                <li><a href="students-life.php">Student Life</a></li>
+                <li><a href="admissions.php">Admissions</a></li>
             </ul>
         </li>
         

@@ -1,11 +1,23 @@
+<?php
+// Start session and check admin authentication
+require_once '../session_config.php';
+$is_logged_in = (isset($_SESSION['user_id']) && isset($_SESSION['user_type']) && in_array($_SESSION['user_type'], ['admin', 'sub-admin']))
+    || (isset($_SESSION['admin_id']));
+if (!$is_logged_in) {
+    header('Location: ../index.php');
+    exit();
+}
+
+include '../db_connection.php';
+?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>School Admin Dashboard</title>
-    <link rel="stylesheet" href="admin_assets/cs/admin_style.css">
+    <title>Help & Support - School Admin Dashboard</title>
+    <link rel="stylesheet" href="admin_assets/css/admin_style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 

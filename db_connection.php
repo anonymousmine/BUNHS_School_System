@@ -5,11 +5,10 @@
  * Enhanced with multiple fallback strategies and detailed logging
  */
 
-// ── Environment Detection and Configuration Loading ───────────────────────────────
-// Use the simple database configuration for reliable Railway detection
-require_once __DIR__ . '/config/simple_database.php';
-
-error_log("[DB] Using simple database configuration");
+// Include local database configuration for XAMPP testing
+if (file_exists(__DIR__ . '/local_db_config.php')) {
+    include_once __DIR__ . '/local_db_config.php';
+}
 
 // Prevent multiple inclusions
 if (!defined('DB_CONNECTION_LOADED')) {
@@ -19,7 +18,7 @@ if (!defined('DB_CONNECTION_LOADED')) {
 if (!function_exists('check_mysqli_loaded')) {
 function check_mysqli_loaded()
 {
-    if (!function_exists('mysqli_connect')) {
+    if (!extension_loaded('mysqli') && !function_exists('mysqli_connect')) {
         error_log('FATAL: mysqli extension not loaded. Check php -m | grep mysqli');
         http_response_code(500);
         die('Database Error: MySQLi extension required. Contact administrator.');
